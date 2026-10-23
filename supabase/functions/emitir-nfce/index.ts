@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
     if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
     if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf))
     if (acao === "consultar")         return json(await consultar(sb, body?.nota_id, body?.ref))
+    if (acao === "cancelar")          return json(await cancelar(sb, req, body?.nota_id, body?.justificativa))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
@@ -306,6 +307,45 @@ async function consultar(sb: any, notaId?: string, refIn?: string) {
   const patch = mapearRetornoFocus(data, ambiente)
   if (nota?.id) await sb.from("nfce_notas").update(patch).eq("id", nota.id)
   return { ok: patch.status === "autorizada", status: patch.status, retorno: data }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// CANCELAR — a SEFAZ aceita por um prazo curto (em geral 30 min na NFC-e;
+// depois disso o cancelamento é por evento e pode ser recusado).
+// A nota só cancela se for da loja de quem está logado.
+// ─────────────────────────────────────────────────────────────────────
+async function cancelar(sb: any, req: Request, notaId?: string, justificativa?: string) {
+  if (!notaId) return { ok: false, error: "nota_id obrigatório" }
+  const just = String(justificativa ?? "").trim()
+  if (just.length < 15) return { ok: false, error: "Escreva o motivo do cancelamento (mínimo 15 letras)" }
+
+  const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")
+  const { data: u } = await sb.auth.getUser(jwt)
+  if (!u?.user) return { ok: false, error: "sessão inválida" }
+  const { data: prof } = await sb.from("profiles").select("empresa_id, perfil").eq("id", u.user.id).maybeSingle()
+
+  const { data: nota } = await sb.from("nfce_notas").select("*").eq("id", notaId).maybeSingle()
+  if (!nota) return { ok: false, error: "nota não encontrada" }
+  if (prof?.perfil !== "super_admin" && prof?.empresa_id !== nota.empresa_id) return { ok: false, error: "sem permissão" }
+  if (nota.status !== "autorizada") return { ok: false, error: "só dá pra cancelar nota autorizada" }
+
+  const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", nota.empresa_id).maybeSingle()
+  const ambiente = nota.ambiente === "producao" ? "producao" : "homologacao"
+  const token = await tokenDaLoja(soDigitos(emp?.cnpj), ambiente)
+  if (!token) return { ok: false, error: "Não consegui o token do Focus desta loja" }
+
+  const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce/${encodeURIComponent(nota.ref)}`, {
+    method: "DELETE",
+    headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ justificativa: just }),
+  })
+  const data = await res.json().catch(() => ({}))
+  const okFocus = res.ok && /cancel/i.test(String(data?.status ?? ""))
+  if (!okFocus) {
+    return { ok: false, error: data?.mensagem_sefaz ?? data?.mensagem ?? `Focus ${res.status}` }
+  }
+  await sb.from("nfce_notas").update({ status: "cancelada", motivo_rejeicao: `Cancelada: ${just}` }).eq("id", notaId)
+  return { ok: true, mensagem: "Nota cancelada na SEFAZ." }
 }
 
 // Traduz o retorno do Focus pro nosso registro nfce_notas

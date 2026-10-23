@@ -84,6 +84,7 @@ const links = [
       { to: '/loja-pagamento', label: 'Pagamento', roles: ['admin'] },
       { to: '/loja-integracoes', label: 'Integrações', roles: ['admin'] },
       { to: '/loja-fiscal', label: 'Nota Fiscal', roles: ['admin'] },
+      { to: '/notas-fiscais', label: 'Notas emitidas', roles: ['admin'] },
       { to: '/loja-conta', label: 'Conta', roles: ['admin'] },
       { to: '/mensalidade', label: 'Minha mensalidade', roles: ['admin'] },
     ],
