@@ -115,7 +115,18 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
   const [aviso, setAviso] = useState(null)       // { tipo: 'ok' | 'erro', texto }
 
   const [tipoFiltro, setTipoFiltro] = useState(() => lerEstado('cpr_tipo', 'todas'))
-  const [situacaoFiltro, setSituacaoFiltro] = useState(() => lerEstado('cpr_sit', 'abertas'))
+  // A TELA ABRE MOSTRANDO TUDO (23/10/2026)
+  //
+  // Nascia em "Em aberto" e escondia o que já tinha sido pago. Três vezes no
+  // mesmo dia o Wilde registrou uma despesa, abriu aqui e não achou — a
+  // terceira na frente de um cliente. O subtítulo promete "o que vence, o que
+  // JÁ FOI PAGO e o que ainda vai entrar — num lugar só"; abrir escondendo
+  // metade disso é a tela desmentindo a própria chamada.
+  //
+  // Quem quiser só o que deve tem o botão "Em aberto" ao lado, e a escolha
+  // fica guardada. O `cpr_sit_v2` é de propósito: quem já tinha "abertas"
+  // salvo continuaria preso no filtro antigo sem nunca ter escolhido isso.
+  const [situacaoFiltro, setSituacaoFiltro] = useState(() => lerEstado('cpr_sit_v2', 'todas'))
   const [periodo, setPeriodo] = useState(() => lerEstado('cpr_periodo', '30d'))
   const [categoriaFiltro, setCategoriaFiltro] = useState('')
   const [busca, setBusca] = useState('')
@@ -278,7 +289,7 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
   }, [contas, tipoFiltro])
 
   const mudarTipo = (v) => { setTipoFiltro(v); guardarEstado('cpr_tipo', v); setCategoriaFiltro('') }
-  const mudarSituacao = (v) => { setSituacaoFiltro(v); guardarEstado('cpr_sit', v) }
+  const mudarSituacao = (v) => { setSituacaoFiltro(v); guardarEstado('cpr_sit_v2', v) }
   const mudarPeriodo = (v) => { setPeriodo(v); guardarEstado('cpr_periodo', v) }
   const irPara = (tipo, sit) => { mudarTipo(tipo); mudarSituacao(sit); mudarPeriodo('tudo') }
 
@@ -448,7 +459,9 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
                 <div className="card cpr-vazio cpr-vazio-pequeno">
                   <div className="cpr-vazio-icone">🔎</div>
                   <p>Nenhuma conta com esses filtros.</p>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => { mudarTipo('todas'); mudarSituacao('abertas'); mudarPeriodo('tudo'); setBusca(''); setCategoriaFiltro('') }}>Limpar filtros</button>
+                  {/* Limpar tem que LIMPAR: voltava pra "Em aberto", que é um
+                      filtro, e a pessoa seguia sem ver o que tinha pago. */}
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => { mudarTipo('todas'); mudarSituacao('todas'); mudarPeriodo('tudo'); setBusca(''); setCategoriaFiltro('') }}>Limpar filtros</button>
                 </div>
               ) : grupos.map((g) => (
                 <section key={g.chave} className="cpr-grupo">
