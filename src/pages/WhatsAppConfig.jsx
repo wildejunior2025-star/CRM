@@ -65,6 +65,7 @@ const NOTIF_DEFAULTS = {
   notif_fiado_pago: false,
   notif_estoque: false,
   notif_entrada_estoque: false,
+  notif_caixa: false,
   admin_phone:   '',
   msg_pedido:    DEFAULT_MSG_PEDIDO,
   msg_fiado:     DEFAULT_MSG_FIADO,
@@ -184,6 +185,7 @@ export default function WhatsAppConfig() {
         notif_fiado_pago: data.notif_fiado_pago ?? false,
         notif_estoque: data.notif_estoque ?? false,
         notif_entrada_estoque: data.notif_entrada_estoque ?? false,
+        notif_caixa: data.notif_caixa ?? false,
         admin_phone:   data.admin_phone   ?? '',
         msg_pedido:    data.msg_pedido    ?? DEFAULT_MSG_PEDIDO,
         msg_fiado:     data.msg_fiado     ?? DEFAULT_MSG_FIADO,
@@ -1413,6 +1415,27 @@ export default function WhatsAppConfig() {
                 <div className="wa-checkbox-text">
                   <span>Alerta de estoque baixo no WhatsApp</span>
                   <small>Envia mensagem no seu número quando produto precisar de reposição.</small>
+                </div>
+              </label>
+
+              {/* O caixa é o outro lugar onde some dinheiro sem ninguém ver.
+                  Em 20/10 o Braseiro fechou com R$ 322 na gaveta contra
+                  R$ 289,48 esperados e isso só apareceu na conferência do dia
+                  seguinte, feita na mão. */}
+              <label className="wa-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.notif_caixa}
+                  onChange={(e) => setField('notif_caixa', e.target.checked)}
+                />
+                <div className="wa-checkbox-text">
+                  <span>Avisar quando ABRIR e FECHAR o caixa</span>
+                  <small>
+                    Na abertura: quem abriu e com quanto. No fechamento: quem fechou,
+                    quanto contou, quanto o sistema esperava e a <strong>diferença</strong> —
+                    sobrou, faltou ou bateu. Dinheiro e PIX têm a conta do esperado;
+                    do cartão vai só o contado, porque a taxa da maquininha muda por loja.
+                  </small>
                 </div>
               </label>
 
