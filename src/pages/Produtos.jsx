@@ -6,7 +6,7 @@ import { useConfirmar } from '../hooks/useConfirmar'
 import { useAuth } from '../hooks/useAuth'
 import { useIfoodAtivo } from '../hooks/useIfoodAtivo'
 import PrecoEditavel from '../components/PrecoEditavel'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import '../components/Page.css'
 
 const PAGE_SIZE = 50
@@ -573,7 +573,11 @@ export default function Produtos() {
       i === gi ? { ...g, opcoes: g.opcoes.map((o, j) => (j === oi ? { ...o, ...patch } : o)) } : g))
   }
 
-  const [showCategModal, setShowCategModal] = useState(false)
+  // Categorias é uma página inteira (/produtos?categorias=1), não um pop-up: assim
+  // o botão voltar do navegador fecha ela e dá pra abrir direto pelo link.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const showCategModal = searchParams.has('categorias')
+  const setShowCategModal = (abrir) => setSearchParams(abrir ? { categorias: '1' } : {})
   // Exclusão de categoria que ainda tem produtos: { id, nome, qtd, destino }
   const [catExcluir, setCatExcluir] = useState(null)
   const [excluindoCat, setExcluindoCat] = useState(false)
@@ -1491,6 +1495,256 @@ export default function Produtos() {
   const usaCasco = produtos.some((p) => p.controla_casco)
   // Nome, Categoria, Custo, Venda, Disponível e ações são fixas.
   const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? (MOSTRAR_UN_CAIXA ? 2 : 1) : 0) + (usaCasco ? 1 : 0)
+
+  // Categorias: página inteira (antes era um pop-up em tabela com 9 colunas, que
+  // obrigava a rolar pro lado e escondia opção). Um cartão por categoria, cada
+  // configuração com o próprio nome.
+  const rotuloCampo = { fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 6, display: 'block' }
+  const dicaCampo = { fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.35 }
+  const campoNum = { width: 56, padding: '5px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }
+  const telaCategorias = (
+    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+      <div className="page-header">
+        <h1>Categorias</h1>
+        <button className="btn btn-secondary" onClick={() => setShowCategModal(false)}>← Voltar aos produtos</button>
+      </div>
+
+      <form onSubmit={handleSaveCategoria} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <input
+          placeholder="Nome da nova categoria"
+          value={novaCategoria}
+          onChange={(e) => setNovaCategoria(e.target.value)}
+          style={{ flex: '1 1 240px' }}
+          required
+        />
+        <button type="submit" className="btn btn-primary" disabled={savingCateg}>
+          {savingCateg ? 'Salvando...' : 'Adicionar categoria'}
+        </button>
+      </form>
+
+      {categError && <p className="error-text">{categError}</p>}
+
+      <details style={{ marginBottom: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px' }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>ℹ️ Como funciona cada opção</summary>
+        <div className="cat-ajuda" style={{ marginTop: 10 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            🕒 <strong>Horário</strong> — a hora que cada categoria fica disponível para venda. Deixe <strong>em branco</strong> = sempre disponível.
+            Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            🖨️ <strong>Onde imprime</strong> — <strong>🍳 Cozinha</strong>: sai na térmica da cozinha (o que é preparado
+            lá dentro: quentinhas, espetinhos, porções). <strong>🧾 Salão</strong>: sai na impressora da frente, junto
+            com a conta. <strong>🚫 Não imprime</strong>: não sai papel nenhum — pro que o próprio garçom pega e dá baixa
+            no celular (bebida na geladeira, por exemplo). O item entra na conta do mesmo jeito.
+            Quem tem <strong>uma impressora só</strong> pode deixar tudo no Salão: ela imprime tudo, menos o que estiver
+            como Não imprime.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            📅 <strong>Dias</strong> — deixe <strong>tudo desmarcado</strong> pra a categoria aparecer todo dia (é o normal).
+            Marque só um dia pra promoção de dia fixo: a <strong>Quarta do Picolé</strong> some sozinha nos outros dias
+            e volta sozinha na quarta, sem ninguém ter que pausar item por item.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            💸 <strong>Sem taxa</strong> — marque as categorias que <strong>não entram na taxa de serviço</strong> da mesa
+            (couvert artístico, ingresso, reserva). O item continua na conta e no faturamento normalmente; só fica de fora
+            do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            🍻 <strong>Só no salão</strong> — marque a categoria que <strong>não deve aparecer na Loja Online, no app nem no robô</strong>
+            (Happy Hour, por exemplo). Os itens continuam vendendo normalmente no balcão, no salão e na mesa.
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            🏷️ <strong>A partir de ... por R$ ...</strong> — desconto por quantidade <strong>da categoria inteira</strong>. Ex.: espetos,
+            a partir de 3 por R$ 3,33: um de carne + um de frango + um de queijo já saem a R$ 3,33 cada. Estoque e custo
+            seguem por produto. Preenchido, vale no lugar da faixa de cada produto; vazio, cada produto segue a sua.
+          </p>
+        </div>
+      </details>
+
+      {categorias.length === 0 ? (
+        <div className="empty-state">Nenhuma categoria cadastrada.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {categorias.map((c, i) => {
+            const f = Array.isArray(c.faixas_preco) ? c.faixas_preco[0] : null
+            const salvarFaixa = (e) => {
+              const linha = e.currentTarget.closest('[data-faixa]')
+              salvarFaixaCategoria(c.id, linha.querySelector('[data-q]').value, linha.querySelector('[data-p]').value)
+            }
+            return (
+              <div
+                key={c.id}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => onSoltarCategoria(i)}
+                style={{
+                  background: dragIdx === i ? 'var(--primary-bg)' : 'var(--surface)',
+                  border: '1px solid var(--border)', borderRadius: 12, padding: 16,
+                }}
+              >
+                {/* Topo: arrastar, subir/descer, nome, duplicar/excluir */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+                  <span
+                    draggable
+                    onDragStart={() => setDragIdx(i)}
+                    onDragEnd={() => setDragIdx(null)}
+                    title="Arraste para reordenar"
+                    style={{ cursor: 'grab', color: 'var(--text-muted)', fontSize: 20, userSelect: 'none', padding: '0 4px' }}
+                  >⠿</span>
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    <button className="btn btn-secondary btn-sm" title="Subir" disabled={i === 0} onClick={() => moverCategoria(i, -1)} style={{ padding: '2px 8px' }}>↑</button>{' '}
+                    <button className="btn btn-secondary btn-sm" title="Descer" disabled={i === categorias.length - 1} onClick={() => moverCategoria(i, 1)} style={{ padding: '2px 8px' }}>↓</button>
+                  </span>
+                  <div style={{ flex: '1 1 200px', fontSize: 16, fontWeight: 700 }}>
+                    {editandoCatId === c.id ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          autoFocus
+                          value={editandoCatNome}
+                          onChange={(e) => setEditandoCatNome(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') salvarRenomear(c); else if (e.key === 'Escape') cancelarRenomear() }}
+                          style={{ flex: 1, minWidth: 120, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
+                        />
+                        <button className="btn btn-primary btn-sm" disabled={salvandoRenome} onClick={() => salvarRenomear(c)} style={{ padding: '4px 9px' }}>
+                          {salvandoRenome ? '...' : 'Salvar'}
+                        </button>
+                        <button className="btn btn-secondary btn-sm" disabled={salvandoRenome} onClick={cancelarRenomear} style={{ padding: '4px 9px' }}>
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => iniciarRenomear(c)}
+                        title="Renomear categoria"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', font: 'inherit', padding: 0, textAlign: 'left' }}
+                      >
+                        {c.nome}
+                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>✎</span>
+                      </button>
+                    )}
+                  </div>
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleDuplicarCategoria(c)}
+                      disabled={duplicandoCatId === c.id}
+                      title="Criar uma cópia desta categoria com todos os produtos"
+                    >
+                      {duplicandoCatId === c.id ? '...' : '⧉ Duplicar'}
+                    </button>{' '}
+                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCategoria(c.id, c.nome)}>
+                      Excluir
+                    </button>
+                  </span>
+                </div>
+
+                {/* Configurações: cada uma com nome, quebrando linha em vez de rolar */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16 }}>
+                  <div>
+                    <label style={rotuloCampo}>🖨️ Onde imprime</label>
+                    <select
+                      value={['cozinha', 'nenhum', 'churrasqueira'].includes(c.setor) ? c.setor : 'salao'}
+                      onChange={(e) => salvarSetorCategoria(c.id, e.target.value)}
+                      className="cat-setor"
+                      style={{ width: '100%' }}
+                    >
+                      <option value="salao">🧾 Salão</option>
+                      <option value="cozinha">🍳 Cozinha</option>
+                      <option value="churrasqueira">🔥 Churrasqueira</option>
+                      <option value="nenhum">🚫 Não imprime</option>
+                    </select>
+                    <div style={dicaCampo}>Em qual impressora sai o pedido desta categoria.</div>
+                  </div>
+
+                  <div>
+                    <label style={rotuloCampo}>🕒 Horário disponível</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="time"
+                        value={(c.hora_inicio || '').slice(0, 5)}
+                        onChange={(e) => salvarHorarioCategoria(c.id, 'hora_inicio', e.target.value)}
+                        title="Disponível a partir de"
+                        className="cat-hora"
+                      />
+                      <span style={{ color: 'var(--text-muted)' }}>às</span>
+                      <input
+                        type="time"
+                        value={(c.hora_fim || '').slice(0, 5)}
+                        onChange={(e) => salvarHorarioCategoria(c.id, 'hora_fim', e.target.value)}
+                        title="Disponível até"
+                        className="cat-hora"
+                      />
+                    </div>
+                    <div style={dicaCampo}>Em branco = sempre disponível. Ex.: quentinhas 10:00 às 14:00.</div>
+                  </div>
+
+                  <div>
+                    <label style={rotuloCampo}>📅 Dias da semana</label>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {DIAS_SEMANA.map((d, idx) => {
+                        const marcados = c.dias_semana ?? []
+                        const on = marcados.includes(idx)
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => alternarDiaCategoria(c.id, idx)}
+                            title={`${DIAS_NOME[idx]}${on ? '' : ' (desligado)'}`}
+                            style={{
+                              width: 32, height: 32, borderRadius: 7, cursor: 'pointer', fontSize: 12,
+                              fontWeight: 700, lineHeight: 1, padding: 0,
+                              border: `1.5px solid ${on ? 'var(--primary)' : 'var(--border)'}`,
+                              background: on ? 'var(--primary)' : 'transparent',
+                              color: on ? '#fff' : 'var(--text-muted)',
+                            }}
+                          >{d}</button>
+                        )
+                      })}
+                    </div>
+                    <div style={dicaCampo}>Nada marcado = aparece todo dia. Marque só pra promoção de dia fixo.</div>
+                  </div>
+
+                  <div>
+                    <label style={rotuloCampo}>🏷️ Desconto por quantidade</label>
+                    <div data-faixa style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-muted)' }}>A partir de</span>
+                      <input data-q key={`q${c.id}${f?.qtd_min ?? ''}`} defaultValue={f?.qtd_min ?? ''} onBlur={salvarFaixa} inputMode="numeric" placeholder="3" style={campoNum} />
+                      <span style={{ color: 'var(--text-muted)' }}>un. por R$</span>
+                      <input data-p key={`p${c.id}${f?.preco ?? ''}`} defaultValue={f ? String(f.preco).replace('.', ',') : ''} onBlur={salvarFaixa} inputMode="decimal" placeholder="3,33" style={campoNum} />
+                    </div>
+                    <div style={dicaCampo}>Vale pra categoria inteira (pode misturar itens). Vazio = sem desconto.</div>
+                  </div>
+
+                  <div>
+                    <label style={rotuloCampo}>⚙️ Opções</label>
+                    <label
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, marginBottom: 8 }}
+                      title="Marcado: os itens desta categoria NÃO entram na conta da taxa de serviço (couvert, ingresso)"
+                    >
+                      <input type="checkbox" checked={!!c.isento_taxa} onChange={(e) => salvarIsentoTaxa(c.id, e.target.checked)} />
+                      <span>💸 Sem taxa de serviço <span style={{ color: 'var(--text-muted)' }}>(couvert, ingresso)</span></span>
+                    </label>
+                    <label
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13 }}
+                      title="Marcado: os itens desta categoria NÃO aparecem na Loja Online, no app nem no robô do WhatsApp. Continuam vendendo no balcão, no salão e na mesa."
+                    >
+                      <input type="checkbox" checked={!!c.oculta_online} onChange={(e) => salvarOcultaOnline(c.id, e.target.checked)} />
+                      <span>🍻 Só no salão <span style={{ color: 'var(--text-muted)' }}>(não aparece online)</span></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
+  if (showCategModal) {
+    return <div>{avisoConfirmar}{telaCategorias}</div>
+  }
+
 
   return (
     <div>
@@ -2601,274 +2855,6 @@ export default function Produtos() {
               <button className="btn btn-primary" style={{ marginLeft: 'auto' }} disabled={excluindoCat}
                 onClick={() => confirmarExclusaoCategoria(false)}>
                 {excluindoCat ? 'Movendo…' : 'Mover e excluir a categoria'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showCategModal && (
-        <div className="modal-overlay" onClick={() => setShowCategModal(false)}>
-          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Categorias</h2>
-
-            <form onSubmit={handleSaveCategoria} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-              <input
-                placeholder="Nome da nova categoria"
-                value={novaCategoria}
-                onChange={(e) => setNovaCategoria(e.target.value)}
-                style={{ flex: 1 }}
-                required
-              />
-              <button type="submit" className="btn btn-primary" disabled={savingCateg}>
-                {savingCateg ? 'Salvando...' : 'Adicionar'}
-              </button>
-            </form>
-
-            {categError && <p className="error-text">{categError}</p>}
-
-            <div className="cat-ajuda">
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              🕒 Defina o horário que cada categoria fica disponível para venda. Deixe <strong>em branco</strong> = sempre disponível.
-              Ex.: Quentinhas <strong>10:00 às 14:00</strong>, Janta <strong>17:00 às 22:00</strong>.
-            </p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              🖨️ <strong>Onde imprime</strong> — <strong>🍳 Cozinha</strong>: sai na térmica da cozinha (o que é preparado
-              lá dentro: quentinhas, espetinhos, porções). <strong>🧾 Salão</strong>: sai na impressora da frente, junto
-              com a conta. <strong>🚫 Não imprime</strong>: não sai papel nenhum — pro que o próprio garçom pega e dá baixa
-              no celular (bebida na geladeira, por exemplo). O item entra na conta do mesmo jeito.
-              Quem tem <strong>uma impressora só</strong> pode deixar tudo no Salão: ela imprime tudo, menos o que estiver
-              como Não imprime.
-            </p>
-
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              📅 <strong>Dias</strong> — deixe <strong>tudo desmarcado</strong> pra a categoria aparecer todo dia (é o normal).
-              Marque só um dia pra promoção de dia fixo: a <strong>Quarta do Picolé</strong> some sozinha nos outros dias
-              e volta sozinha na quarta, sem ninguém ter que pausar item por item.
-            </p>
-
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              💸 <strong>Sem taxa</strong> — marque as categorias que <strong>não entram na taxa de serviço</strong> da mesa
-              (couvert artístico, ingresso, reserva). O item continua na conta e no faturamento normalmente; só fica de fora
-              do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
-            </p>
-
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              🍻 <strong>Só no salão</strong> — marque a categoria que <strong>não deve aparecer na Loja Online, no app nem no robô</strong>
-              (Happy Hour, por exemplo). Os itens continuam vendendo normalmente no balcão, no salão e na mesa.
-            </p>
-
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              🏷️ <strong>A partir de ... por R$ ...</strong> — desconto por quantidade <strong>da categoria inteira</strong>. Ex.: espetos,
-              a partir de 3 por R$ 3,33: um de carne + um de frango + um de queijo já saem a R$ 3,33 cada. Estoque e custo
-              seguem por produto. Preenchido, vale no lugar da faixa de cada produto; vazio, cada produto segue a sua.
-            </p>
-            </div>
-
-            <div className="data-table tabela-categorias">
-              {categorias.length === 0 ? (
-                <div className="empty-state">Nenhuma categoria cadastrada.</div>
-              ) : (
-                <table>
-                  <tbody>
-                    {categorias.map((c, i) => (
-                      <tr
-                        key={c.id}
-                        draggable
-                        onDragStart={() => setDragIdx(i)}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={() => onSoltarCategoria(i)}
-                        onDragEnd={() => setDragIdx(null)}
-                        style={{
-                          cursor: 'grab',
-                          background: dragIdx === i ? 'var(--primary-bg)' : undefined,
-                          borderTop: dragIdx != null && dragIdx !== i ? '2px dashed transparent' : undefined,
-                        }}
-                      >
-                        <td style={{ width: 24, textAlign: 'center', color: 'var(--text-muted)', cursor: 'grab', userSelect: 'none' }} title="Arraste para reordenar">
-                          ⠿
-                        </td>
-                        <td style={{ width: 74 }}>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            title="Subir"
-                            disabled={i === 0}
-                            onClick={() => moverCategoria(i, -1)}
-                            style={{ padding: '2px 7px' }}
-                          >
-                            ↑
-                          </button>{' '}
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            title="Descer"
-                            disabled={i === categorias.length - 1}
-                            onClick={() => moverCategoria(i, 1)}
-                            style={{ padding: '2px 7px' }}
-                          >
-                            ↓
-                          </button>
-                        </td>
-                        <td onDragStart={(e) => e.preventDefault()}>
-                          {editandoCatId === c.id ? (
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <input
-                                autoFocus
-                                value={editandoCatNome}
-                                onChange={(e) => setEditandoCatNome(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') salvarRenomear(c); else if (e.key === 'Escape') cancelarRenomear() }}
-                                draggable={false}
-                                style={{ flex: 1, minWidth: 120, padding: '5px 8px', borderRadius: 6, border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
-                              />
-                              <button className="btn btn-primary btn-sm" disabled={salvandoRenome} onClick={() => salvarRenomear(c)} style={{ padding: '4px 9px' }}>
-                                {salvandoRenome ? '...' : 'Salvar'}
-                              </button>
-                              <button className="btn btn-secondary btn-sm" disabled={salvandoRenome} onClick={cancelarRenomear} style={{ padding: '4px 9px' }}>
-                                Cancelar
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => iniciarRenomear(c)}
-                              title="Renomear categoria"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', font: 'inherit', padding: 0, textAlign: 'left' }}
-                            >
-                              {c.nome}
-                              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>✎</span>
-                            </button>
-                          )}
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          <select
-                            value={['cozinha', 'nenhum', 'churrasqueira'].includes(c.setor) ? c.setor : 'salao'}
-                            onChange={(e) => salvarSetorCategoria(c.id, e.target.value)}
-                            title="Em que impressora sai o pedido desta categoria"
-                            className="cat-setor"
-                          >
-                            <option value="salao">🧾 Salão</option>
-                            <option value="cozinha">🍳 Cozinha</option>
-                            <option value="churrasqueira">🔥 Churrasqueira</option>
-                            <option value="nenhum">🚫 Não imprime</option>
-                          </select>
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          <label
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5 }}
-                            title="Marcado: os itens desta categoria NÃO entram na conta da taxa de serviço (couvert, ingresso)"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!c.isento_taxa}
-                              onChange={(e) => salvarIsentoTaxa(c.id, e.target.checked)}
-                              draggable={false}
-                            />
-                            <span style={{ color: c.isento_taxa ? 'var(--text)' : 'var(--text-muted)' }}>
-                              Sem taxa
-                            </span>
-                          </label>
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          <label
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 12.5 }}
-                            title="Marcado: os itens desta categoria NÃO aparecem na Loja Online, no app nem no robô do WhatsApp. Continuam vendendo no balcão, no salão e na mesa."
-                          >
-                            <input
-                              type="checkbox"
-                              checked={!!c.oculta_online}
-                              onChange={(e) => salvarOcultaOnline(c.id, e.target.checked)}
-                              draggable={false}
-                            />
-                            <span style={{ color: c.oculta_online ? 'var(--text)' : 'var(--text-muted)' }}>
-                              Só no salão
-                            </span>
-                          </label>
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          {(() => {
-                            const f = Array.isArray(c.faixas_preco) ? c.faixas_preco[0] : null
-                            const campo = { width: 52, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 12.5 }
-                            const salvar = (e) => {
-                              const linha = e.currentTarget.closest('[data-faixa]')
-                              salvarFaixaCategoria(c.id, linha.querySelector('[data-q]').value, linha.querySelector('[data-p]').value)
-                            }
-                            return (
-                              <div data-faixa style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12.5 }}
-                                title="Desconto por quantidade da categoria. A quantidade é a SOMA de tudo que o cliente leva dela (pode misturar os itens). Deixe vazio pra não ter.">
-                                <span style={{ color: 'var(--text-muted)' }}>A partir de</span>
-                                <input data-q key={`q${c.id}${f?.qtd_min ?? ''}`} defaultValue={f?.qtd_min ?? ''} onBlur={salvar} inputMode="numeric" placeholder="3" draggable={false} style={campo} />
-                                <span style={{ color: 'var(--text-muted)' }}>un. por R$</span>
-                                <input data-p key={`p${c.id}${f?.preco ?? ''}`} defaultValue={f ? String(f.preco).replace('.', ',') : ''} onBlur={salvar} inputMode="decimal" placeholder="3,33" draggable={false} style={campo} />
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          <div style={{ display: 'flex', gap: 3 }} title="Em que dias esta categoria aparece. Nada marcado = todo dia.">
-                            {DIAS_SEMANA.map((d, idx) => {
-                              const marcados = c.dias_semana ?? []
-                              const on = marcados.includes(idx)
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  draggable={false}
-                                  onClick={() => alternarDiaCategoria(c.id, idx)}
-                                  title={`${DIAS_NOME[idx]}${on ? '' : ' (desligado)'}`}
-                                  style={{
-                                    width: 26, height: 26, borderRadius: 6, cursor: 'pointer', fontSize: 11,
-                                    fontWeight: 700, lineHeight: 1, padding: 0,
-                                    border: `1.5px solid ${on ? 'var(--primary)' : 'var(--border)'}`,
-                                    background: on ? 'var(--primary)' : 'transparent',
-                                    color: on ? '#fff' : 'var(--text-muted)',
-                                  }}
-                                >{d}</button>
-                              )
-                            })}
-                          </div>
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }} onDragStart={(e) => e.preventDefault()}>
-                          <input
-                            type="time"
-                            value={(c.hora_inicio || '').slice(0, 5)}
-                            onChange={(e) => salvarHorarioCategoria(c.id, 'hora_inicio', e.target.value)}
-                            title="Disponível a partir de"
-                            className="cat-hora"
-                          />
-                          <span style={{ margin: '0 5px', color: 'var(--text-muted)' }}>às</span>
-                          <input
-                            type="time"
-                            value={(c.hora_fim || '').slice(0, 5)}
-                            onChange={(e) => salvarHorarioCategoria(c.id, 'hora_fim', e.target.value)}
-                            title="Disponível até"
-                            className="cat-hora"
-                          />
-                        </td>
-                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleDuplicarCategoria(c)}
-                            disabled={duplicandoCatId === c.id}
-                            title="Criar uma cópia desta categoria com todos os produtos"
-                          >
-                            {duplicandoCatId === c.id ? '...' : '⧉ Duplicar'}
-                          </button>{' '}
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDeleteCategoria(c.id, c.nome)}
-                          >
-                            Excluir
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setShowCategModal(false)}>
-                Fechar
               </button>
             </div>
           </div>
