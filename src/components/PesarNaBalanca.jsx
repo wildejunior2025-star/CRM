@@ -250,6 +250,8 @@ export default function PesarNaBalanca({
   const mesasFiltradas = filtroMesa.trim()
     ? mesas.filter(m => String(m.numero).includes(filtroMesa.trim()))
     : mesas
+  // Digitou o número inteiro de uma mesa: dá pra lançar sem procurar na grade.
+  const mesaExata = filtroMesa.trim() ? mesas.find(m => String(m.numero) === filtroMesa.trim()) : null
 
   return (
     <Moldura onFechar={onFechar}>
@@ -306,7 +308,7 @@ export default function PesarNaBalanca({
       )}
 
       {/* 1. Qual prato. Os dois grupos juntos, como na tela que ele ja usava. */}
-      {produtos.length !== 1 && (
+      {produtos.length !== 1 && !peso && (
         <div style={{ marginBottom: 16 }}>
           {produtos.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
@@ -398,11 +400,11 @@ export default function PesarNaBalanca({
       {/* 3. Peso congelado + escolher a mesa */}
       {peso && (
         <div>
-          <div style={{ textAlign: 'center', padding: '12px 0 16px' }}>
+          <div style={{ textAlign: 'center', padding: '6px 0 12px' }}>
             {peso.kg != null && (
-              <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1 }}>{kg(peso.kg)} kg</div>
+              <div style={{ fontSize: 'clamp(28px, 9vw, 40px)', fontWeight: 800, lineHeight: 1.1 }}>{kg(peso.kg)} kg</div>
             )}
-            <div style={{ fontSize: peso.kg != null ? 30 : 40, fontWeight: 800, color: '#16a34a' }}>{brl(peso.total)}</div>
+            <div style={{ fontSize: peso.kg != null ? 'clamp(24px, 7vw, 30px)' : 'clamp(28px, 9vw, 40px)', fontWeight: 800, color: '#16a34a' }}>{brl(peso.total)}</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
               {produto?.nome}{peso.kg != null ? ` · ${brl(produto?.preco_venda)}/kg` : ' · preço fechado'}
             </div>
@@ -415,10 +417,31 @@ export default function PesarNaBalanca({
           <p style={{ margin: '0 0 8px', fontSize: 15, fontWeight: 700 }}>Para qual mesa?</p>
           <input
             ref={buscaMesa} value={filtroMesa} onChange={e => setFiltroMesa(e.target.value)}
-            inputMode="numeric" placeholder="Digite o número da mesa"
+            inputMode="numeric" enterKeyHint="go" placeholder="Digite o número da mesa"
+            onFocus={e => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' }), 250) }}
+            onKeyDown={e => {
+              if (e.key !== 'Enter') return
+              e.preventDefault()
+              if (mesaExata) lancar(mesaExata); else buscaMesa.current?.blur()
+            }}
             style={{ width: '100%', padding: '12px 14px', borderRadius: 10, fontSize: 18, marginBottom: 10,
               border: '1px solid var(--border)', background: 'var(--input-bg, transparent)', color: 'var(--text)' }}
           />
+          {/* O teclado numérico do iPhone não tem tecla de confirmar e cobre a lista de
+              mesas lá embaixo. Então o botão de lançar e o de fechar o teclado ficam
+              logo aqui, colados no campo, onde o dedo já está. */}
+          {mesaExata && (
+            <button type="button" disabled={lancando} onClick={() => lancar(mesaExata)}
+              style={{ ...botao('#16a34a'), width: '100%', fontSize: 18, padding: '15px 14px', marginBottom: 8,
+                opacity: lancando ? 0.6 : 1 }}>
+              {lancando ? 'Lançando…' : `✅ Lançar na mesa ${mesaExata.numero}`}
+            </button>
+          )}
+          <button type="button" onClick={() => buscaMesa.current?.blur()}
+            style={{ ...botao('transparent'), border: '1px solid var(--border)', color: 'var(--text-muted)',
+              width: '100%', fontSize: 14, padding: '9px 14px', marginBottom: 10 }}>
+            ⌨️ Fechar o teclado e ver as mesas
+          </button>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 8,
             maxHeight: 280, overflowY: 'auto' }}>
             {mesasFiltradas.map(m => {
@@ -458,7 +481,7 @@ function Moldura({ children, onFechar }) {
     >
       <div onClick={e => e.stopPropagation()}
         style={{ background: 'var(--card, #fff)', color: 'var(--text)', borderRadius: 14, padding: 20,
-          width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto' }}>
+          width: '100%', maxWidth: 560, maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ margin: 0, fontSize: 18 }}>⚖️ Lançar produto no peso</h3>
           <button type="button" onClick={onFechar}
