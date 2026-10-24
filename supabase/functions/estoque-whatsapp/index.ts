@@ -564,7 +564,20 @@ async function lancar(empresaId: string, pend: any): Promise<string> {
 async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<NotaLida>, origem: string): Promise<string> {
   const hoje = hojeBRT()
   const emissao = /^\d{4}-\d{2}-\d{2}$/.test(String(nota.data)) ? String(nota.data) : hoje
-  const quitada = nota.pago !== false            // null (não deu pra ler) conta como paga
+
+  // PAPEL ESCRITO À MÃO NÃO DIZ SE FOI PAGO (24/10/2026)
+  //
+  // Antes: `pago !== false`, ou seja, null virava PAGA. Num cupom fiscal isso
+  // está certo (ele imprime "VALOR PAGO"); num bloquinho de feira está errado
+  // metade das vezes — e uma compra a prazo registrada como paga some do "a
+  // pagar" e o dono leva o calote do esquecimento.
+  //
+  // Quando o papel não diz, o robô PERGUNTA. Mesma regra do gasto escrito
+  // solto: só registra completo.
+  if (typeof nota.pago !== "boolean" || (nota.pago === false && !nota.vencimento)) {
+    return await rascunhoDaNota(empresaId, jid, nota, emissao)
+  }
+  const quitada = nota.pago
   const vence = quitada ? emissao
     : (/^\d{4}-\d{2}-\d{2}$/.test(String(nota.vencimento)) ? String(nota.vencimento) : emissao)
 
@@ -621,6 +634,53 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
       `📊 Categoria: Fornecedores${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
       `Quando pagar, me diga *"paguei ${nota.fornecedor.split(/\s+/)[0]}"* que eu dou baixa.\n` +
       `Se foi engano, responda *DESFAZER*.`
+}
+
+// A FOTO QUE NÃO DIZ TUDO VIRA PERGUNTA, NÃO CHUTE (24/10/2026)
+//
+// Guarda o que o papel já deu (fornecedor, valor, data) e pede só o que falta.
+// O dono não precisa decorar formato nenhum: manda a foto e responde.
+async function rascunhoDaNota(empresaId: string, jid: string, nota: NonNullable<NotaLida>, emissao: string): Promise<string> {
+  const temFornecedor = !!String(nota.fornecedor ?? "").trim()
+  const numero = nota.numero ? ` (NF ${nota.numero})` : ""
+
+  await sb.from("assistente_acoes").update({ status: "cancelada" })
+    .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const { error } = await sb.from("assistente_acoes").insert({
+    empresa_id: empresaId, grupo_jid: jid, tipo: "conta_criar",
+    params: {
+      rascunho: true, tipo: "pagar",
+      descricao: temFornecedor ? `Compra — ${nota.fornecedor}${numero}` : `Compra${numero}`,
+      pessoa: temFornecedor ? nota.fornecedor : null,
+      categoria: "Fornecedores",
+      valor: nota.valor_total,
+      falta_fornecedor: !temFornecedor,
+      emissao,
+    },
+    resumo: `Rascunho da nota: ${nota.fornecedor ?? "(sem fornecedor)"} — ${brl(nota.valor_total)}`,
+  })
+  if (error) {
+    console.error("[estoque-wpp] rascunho da nota:", error.message)
+    return "Li o papel, mas não consegui preparar o lançamento agora. Tenta de novo em instantes."
+  }
+
+  const cabeca = `📄 *Li o papel* — *${brl(nota.valor_total)}*` +
+    (temFornecedor ? `\n🏪 ${nota.fornecedor}` : "") +
+    (nota.data ? `\n📆 Data no papel: ${ddmmBR(emissao)}` : "")
+
+  // Uma pergunta por vez: quem é o fornecedor vem antes, porque sem ele a
+  // conta nasce sem dono e o lojista não acha depois no Portal.
+  if (!temFornecedor) {
+    return `${cabeca}\n\n` +
+      `Não achei de *quem* é essa compra no papel.\n` +
+      `Me diz o nome do fornecedor (ex.: *Mar Vermelho*), ou *NÃO* pra cancelar.`
+  }
+  return `${cabeca}\n\n` +
+    `Falta saber se já pagou. Me responde uma dessas:\n` +
+    `• *paguei hoje*\n` +
+    `• *paguei dia 20* (ou "ontem")\n` +
+    `• *a pagar dia 30* — se for pra pagar depois\n\n` +
+    `Ou *NÃO* pra cancelar.`
 }
 
 // SIM OU NÃO SEM NADA ESPERANDO (23/10/2026)
@@ -1405,6 +1465,31 @@ async function tratar(req: Request): Promise<Response> {
     // o que faltava. Completar aqui evita obrigar a pessoa a escrever a frase
     // inteira de novo, que é o que faz ela desistir e deixar de lançar.
     if (pendAcao?.tipo === "conta_criar" && pendAcao?.params?.rascunho) {
+      // Primeiro degrau: o papel não trazia o fornecedor. A resposta é o nome
+      // dele — não é data nem "paguei", então não pode cair no completar.
+      if (pendAcao.params.falta_fornecedor) {
+        if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(t)) {
+          await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
+          await enviar(instance, jid, "Cancelado. Não registrei nada.")
+          return ok()
+        }
+        const nome = (texto || "").trim().slice(0, 120)
+        if (nome.replace(/[^a-zA-ZÀ-ÿ]/g, "").length < 2) {
+          await enviar(instance, jid, "Não entendi o nome. Escreve só o nome do fornecedor, ex.: *Mar Vermelho*. Ou *NÃO* pra cancelar.")
+          return ok()
+        }
+        const p2 = {
+          ...pendAcao.params, falta_fornecedor: false, pessoa: nome,
+          descricao: `Compra — ${nome}`,
+        }
+        await sb.from("assistente_acoes").update({ params: p2 }).eq("id", pendAcao.id)
+        await enviar(instance, jid,
+          `🏪 Anotei: *${nome}* — *${brl(Number(p2.valor))}*\n\n` +
+          `Agora: já pagou?\n` +
+          `• *paguei hoje*\n• *paguei dia 20* (ou "ontem")\n• *a pagar dia 30*\n\n` +
+          `Ou *NÃO* pra cancelar.`)
+        return ok()
+      }
       const r = completarRascunho(t, pendAcao.params, hojeBRT())
       if (r.cancelar) {
         await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)

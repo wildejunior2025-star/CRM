@@ -96,6 +96,16 @@ serve(async (req) => {
       "- Ignore linhas que não são produto (impostos, frete, subtotais, dados do fornecedor).",
       // A compra tambem e dinheiro saindo: quem le a nota ja tem o fornecedor e o
       // total na frente, entao le de uma vez so em vez de uma segunda chamada.
+      // PAPEL ESCRITO A MAO (24/10/2026). Metade da compra de loja pequena vem
+      // no bloquinho do fornecedor ou no caderno: sem CNPJ, sem "valor total"
+      // impresso, as vezes sem nome nenhum. Nao achar os campos de nota fiscal
+      // nao pode virar "nao entendi" — o papel tem o que importa.
+      "- PAPEL ESCRITO A MAO (bloco de pedido, caderno, recibo) vale do mesmo jeito:",
+      "  o TOTAL e o numero do fim da conta, ou a soma escrita embaixo; se nao houver total escrito,",
+      "  some as linhas voce. O FORNECEDOR pode estar so no cabecalho ou num carimbo — se nao estiver",
+      "  escrito em lugar nenhum, devolva fornecedor null, NAO invente e NAO use o nome da loja que comprou.",
+      "  Em papel a mao, 'pago' quase nunca esta escrito: so marque true se estiver escrito PAGO/QUITADO",
+      "  (ou houver comprovante junto), e false se disser A PRAZO/FIADO/A PAGAR. Na duvida: null.",
       "- 'nota' = os dados do DOCUMENTO (nao dos itens):",
       "  'fornecedor' = razao social de QUEM VENDEU (o emitente, no topo da nota), nunca a loja que comprou.",
       "  'documento' = CNPJ do emitente. 'valor_total' = o total do documento ('VALOR TOTAL' / 'VALOR A PAGAR'),",
