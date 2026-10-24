@@ -386,6 +386,7 @@ export async function imprimirTesteCelular(empresa = {}) {
 const formaLabel = (f) => ({
   dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito',
   cartao: 'Cartao', dividido: 'Dividido', fiado: 'Fiado',
+  pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket',
 }[String(f || '').toLowerCase()] || (f || ''))
 
 // Comanda da COZINHA: só o que preparar, SEM preço (o preço sai depois, na

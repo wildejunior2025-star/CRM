@@ -1457,6 +1457,11 @@ export default function PortalLoja() {
                     { value: 'credito',     label: 'Crédito' },
                     { value: 'debito',      label: 'Débito' },
                     { value: 'cartao',      label: 'Cartão' },
+                    // Vales (mig 0388): só aparecem na loja que ligou.
+                    { value: 'pluxee',      label: 'Pluxee' },
+                    { value: 'alelo',       label: 'Alelo' },
+                    { value: 'vr',          label: 'VR' },
+                    { value: 'ticket',      label: 'Ticket' },
                   ].filter(f => formasLoja.includes(f.value)).map(f => {
                     const pct = repassePct(empresa, f.value)
                     return (

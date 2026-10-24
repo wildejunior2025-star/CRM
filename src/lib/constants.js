@@ -10,6 +10,18 @@
 // um (decisão do Wilde, 10/08/2026) — só assim dá pra saber quanto cai na conta.
 // "Cartão" continua na lista: é o que está gravado no histórico e serve pra loja
 // que não quer separar.
+// Cartões de benefício (vale-refeição / vale-alimentação, mig 0385). Cada bandeira
+// é uma forma própria, porque cada uma é uma maquineta, um repasse e uma conciliação
+// diferentes. `optIn`: NASCEM DESLIGADAS — só aparecem na loja que ligar em Minha
+// Loja → Pagamento (a Agv liga; o resto do mundo nem vê).
+export const FORMAS_VALE = [
+  { value: 'pluxee', label: 'Pluxee', optIn: true },
+  { value: 'alelo',  label: 'Alelo',  optIn: true },
+  { value: 'vr',     label: 'VR',     optIn: true },
+  { value: 'ticket', label: 'Ticket', optIn: true },
+]
+export const ehVale = (forma) => FORMAS_VALE.some(f => f.value === forma)
+
 export const FORMAS_PAGAMENTO = [
   { value: 'dinheiro',    label: 'Dinheiro' },
   { value: 'pix',         label: 'PIX' },
@@ -17,6 +29,7 @@ export const FORMAS_PAGAMENTO = [
   { value: 'credito',     label: 'Cartão de crédito' },
   { value: 'debito',      label: 'Cartão de débito' },
   { value: 'cartao',      label: 'Cartão (sem separar)' },
+  ...FORMAS_VALE,
 ]
 
 // Formas de cartão e em qual coluna de empresas mora a taxa de cada uma.
@@ -38,13 +51,18 @@ export function repassePct(empresa, forma) {
   return Number.isFinite(v) && v > 0 ? v : 0
 }
 export const ehCartao = (forma) => ['credito', 'debito', 'cartao'].includes(forma)
-export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.map(f => f.value)
+// Padrão de loja que nunca configurou: tudo, MENOS o que é opt-in (vales).
+export const FORMAS_PAGAMENTO_PADRAO = FORMAS_PAGAMENTO.filter(f => !f.optIn).map(f => f.value)
+const TODAS_AS_FORMAS = FORMAS_PAGAMENTO.map(f => f.value)
 
-/** As formas ligadas na loja (com o padrão de todas quando nunca foi configurado). */
+/** As formas ligadas na loja (com o padrão quando nunca foi configurado). */
 export function formasAtivas(empresa) {
-  const salvas = (empresa?.formas_pagamento ?? []).filter(v => FORMAS_PAGAMENTO_PADRAO.includes(v))
+  const salvas = (empresa?.formas_pagamento ?? []).filter(v => TODAS_AS_FORMAS.includes(v))
   return salvas.length ? salvas : FORMAS_PAGAMENTO_PADRAO
 }
+
+/** Só os vales ligados na loja (pra telas que listam as formas na mão). */
+export const valesAtivos = (empresa) => FORMAS_VALE.filter(f => formasAtivas(empresa).includes(f.value))
 
 // CONDIÇÃO de pagamento do CLIENTE (à vista, fiado, prazo) — é outra coisa:
 // define como aquele cliente compra, não a máquina/meio usado no caixa.
@@ -76,6 +94,10 @@ export const ICONE_PAGAMENTO = {
   dinheiro:           { bg: '#16a34a', text: '#fff', label: '💵' },
   pix:                { bg: '#00b4d8', text: '#fff', label: 'PIX' },
   pix_entrega:        { bg: '#0891b2', text: '#fff', label: 'PIX' },
+  pluxee:             { bg: '#0f766e', text: '#fff', label: 'PLX' },
+  alelo:              { bg: '#15803d', text: '#fff', label: 'ALE' },
+  vr:                 { bg: '#be123c', text: '#fff', label: 'VR' },
+  ticket:             { bg: '#b91c1c', text: '#fff', label: 'TKT' },
   visa_debito:        { bg: '#1a1f71', text: '#fff', label: 'VISA' },
   mastercard_debito:  { bg: '#eb001b', text: '#fff', label: 'MC' },
   elo_debito:         { bg: '#000', text: '#ffd700', label: 'elo' },

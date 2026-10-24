@@ -338,6 +338,9 @@ function pagamentoInfo(p) {
     const nome = forma === 'debito' ? 'Débito' : forma === 'credito' ? 'Crédito' : 'Cartão'
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: nome + (ehIfood ? ' (via iFood)' : ' (maquininha)'), cor: '#f59e0b' }
   }
+  if (['pluxee', 'alelo', 'vr', 'ticket'].includes(forma)) {
+    return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: ({ pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[forma] + ' (maquininha)', cor: '#f59e0b' }
+  }
   if (forma === 'vale') {
     return { pago: false, titulo: 'COBRAR NA ENTREGA', detalhe: 'Vale' + sufIfood, cor: '#f59e0b' }
   }

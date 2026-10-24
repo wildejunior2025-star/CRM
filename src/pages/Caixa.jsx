@@ -58,10 +58,16 @@ const FORMAS_PAG = [
   { id: 'cartao',        rotulo: '💳 Cartão',        casa: f => f === 'credito' || f === 'debito' || f === 'cartao' },
   { id: 'transferencia', rotulo: '🏦 Transferência', casa: f => f === 'transferencia' },
   { id: 'cashback',      rotulo: '🎁 Cashback',      casa: f => f === 'cashback' },
+  // Cartões de benefício (mig 0388): linha própria, fora do cartão e da taxa dele.
+  { id: 'vale',          rotulo: '🍽️ Vale',          casa: f => ['pluxee', 'alelo', 'vr', 'ticket'].includes(f) },
 ]
 const rotuloPagamento = (f) => {
   if (f === 'credito') return '💳 Crédito'
   if (f === 'debito') return '💳 Débito'
+  if (f === 'pluxee') return '🍽️ Pluxee'
+  if (f === 'alelo') return '🍽️ Alelo'
+  if (f === 'vr') return '🍽️ VR'
+  if (f === 'ticket') return '🍽️ Ticket'
   return FORMAS_PAG.find(x => x.casa(f))?.rotulo ?? f
 }
 
@@ -155,6 +161,8 @@ export default function Caixa() {
   const dinheiroDe   = (r) => Number(r?.recebimentos_dinheiro || 0) + Number(r?.delivery_dinheiro || 0)
   const pixDe        = (r) => Number(r?.recebimentos_pix || 0) + Number(r?.delivery_pix || 0)
   const cartaoDe     = (r) => Number(r?.recebimentos_cartao || 0) + Number(r?.delivery_cartao || 0)
+  // Pluxee, Alelo, VR e Ticket (mig 0388): mesa/balcão + delivery. Fora do cartão de propósito.
+  const valeDe       = (r) => Number(r?.recebimentos_vale || 0) + Number(r?.delivery_vale || 0)
   const creditoDe    = (r) => Number(r?.recebimentos_credito || 0) + Number(r?.delivery_credito || 0)
   const debitoDe     = (r) => Number(r?.recebimentos_debito || 0) + Number(r?.delivery_debito || 0)
   const cartaoGenDe  = (r) => Number(r?.recebimentos_cartao_generico || 0) + Number(r?.delivery_cartao_generico || 0)
@@ -809,6 +817,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     ? dinheiroDe(r) +
       pixDe(r) +
       cartaoDe(r) +
+      valeDe(r) +
       Number(r.recebimentos_transferencia || 0) +
       // iFood pago no app + PIX pago no Mercado Pago: a loja vendeu, mas o
       // dinheiro esta la fora. Entra no faturamento e em nenhum esperado.
@@ -842,6 +851,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     const dinheiro = somaCom(dinheiroDe)
     const pix = somaCom(pixDe)
     const cartao = somaCom(cartaoDe)
+    const vale = somaCom(valeDe)
     const transferencia = soma('recebimentos_transferencia')
     const fiado = soma('vendas_fiado')
     const cashback = soma('recebimentos_cashback')
@@ -849,14 +859,14 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     const online = soma('delivery_online')
     const outros = soma('delivery_outros')
     return {
-      dinheiro, pix, cartao, transferencia, fiado, cashback, ifood, online, outros,
+      dinheiro, pix, cartao, vale, transferencia, fiado, cashback, ifood, online, outros,
       credito: somaCom(creditoDe),
       debito: somaCom(debitoDe),
       fiadoRecebido: soma('recebimentos_fiado'),
       sangrias: soma('total_sangrias'),
       suprimentos: soma('total_suprimentos'),
       cartaoLiquido: rs.reduce((t, r) => t + cartaoLiquidoDe(r), 0),
-      total: dinheiro + pix + cartao + transferencia + cashback + fiado + ifood + online + outros,
+      total: dinheiro + pix + cartao + vale + transferencia + cashback + fiado + ifood + online + outros,
     }
   })()
 
@@ -1049,6 +1059,19 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                     Crédito que os clientes gastaram. Está no faturamento, mas
                     <strong> não entra em nenhum esperado</strong> — vira despesa
                     no Despesas &amp; Lucro.
+                  </div>
+                </div>
+              )}
+              {/* Vales (mig 0388): Pluxee, Alelo, VR e Ticket. Linha própria — não é
+                  dinheiro de gaveta nem entra no cartão (a taxa deles é outra). Some
+                  quando é zero, pra não poluir a tela de quem não aceita. */}
+              {valeDe(resumo) > 0 && (
+                <div className="card dashboard-card" {...cardClicavel({ titulo: 'Vales (Pluxee, Alelo, VR, Ticket)', formas: ['pluxee', 'alelo', 'vr', 'ticket'], baldes: ['vale'] }, { borderLeft: '3px solid #0f766e' })}>
+                  <div className="label">🍽️ Vales (Pluxee, Alelo, VR, Ticket)</div>
+                  <div className="value">R$ {valeDe(resumo).toFixed(2)}</div>
+                  {linhaOrigem(resumo.recebimentos_vale, resumo.delivery_vale)}
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5, lineHeight: 1.4 }}>
+                    Já está no faturamento. Cai na conta da operadora do vale, não na gaveta.
                   </div>
                 </div>
               )}
@@ -1338,7 +1361,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                   ? Number(c.valor_abertura_pix || 0) + pixDe(r) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
                   : 0
                 const fatTot = r && r !== 'loading'
-                  ? dinheiroDe(r) + pixDe(r) + cartaoDe(r) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0) + foraDaLojaDe(r) + Number(r.delivery_outros || 0)
+                  ? dinheiroDe(r) + pixDe(r) + cartaoDe(r) + valeDe(r) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0) + foraDaLojaDe(r) + Number(r.delivery_outros || 0)
                   : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
                 const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null
@@ -1389,6 +1412,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                                 ['💳 Recebido em cartão', cartaoDe(r)],
                                 (creditoDe(r) > 0 ? ['↳ crédito', creditoDe(r)] : null),
                                 (debitoDe(r) > 0 ? ['↳ débito', debitoDe(r)] : null),
+                                (valeDe(r) > 0 ? ['🍽️ Recebido em vales', valeDe(r)] : null),
                                 // O que sobra do cartão depois da maquineta (com as taxas de hoje).
                                 (cartaoDe(r) > 0 && (taxas.credito > 0 || taxas.debito > 0 || taxas.cartao > 0)
                                   ? ['↳ cai na conta (já com as taxas)', cartaoLiquidoDe(r)]
@@ -1586,6 +1610,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                   ['💳 Cartão', totaisSemana.cartao, true],
                   ['↳ crédito', totaisSemana.credito, totaisSemana.credito > 0],
                   ['↳ débito', totaisSemana.debito, totaisSemana.debito > 0],
+                  ['🍽️ Vales (Pluxee/Alelo/VR/Ticket)', totaisSemana.vale, totaisSemana.vale > 0],
                   ['🔁 Transferência', totaisSemana.transferencia, totaisSemana.transferencia > 0],
                   ['🧾 Vendas no fiado', totaisSemana.fiado, totaisSemana.fiado > 0],
                   ['🎟️ Cashback usado', totaisSemana.cashback, totaisSemana.cashback > 0],

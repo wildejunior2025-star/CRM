@@ -287,6 +287,9 @@ const PAGAMENTO_FOCUS: Record<string, string> = {
   // Pra SEFAZ os dois PIX são a mesma coisa (17 = pagamento instantâneo):
   // muda só QUANDO o cliente paga, não o meio.
   pix: "17", pix_entrega: "17", online: "17", vale: "10", outro: "99",
+  // Cartões de benefício (mig 0388): 11 = vale-refeição. Restaurante recebe pelo
+  // lado refeição; se algum dia a loja vender mercado, o certo passa a ser 10.
+  pluxee: "11", alelo: "11", vr: "11", ticket: "11",
 }
 
 async function emitir(sb: any, pedidoId: string, cpf?: string) {

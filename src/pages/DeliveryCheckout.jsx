@@ -6,7 +6,7 @@ import { getEnderecoAtivo } from '../utils/enderecoPortal'
 import { registrarPedido } from '../lib/meusPedidos'
 import { iniciarCheckout } from '../lib/tracking'
 import { marcarEtapa, anotarContato } from '../lib/funil'
-import { formasAtivas, repassePct } from '../lib/constants'
+import { formasAtivas, repassePct, FORMAS_VALE } from '../lib/constants'
 import { precoPorQuantidade } from '../lib/precoQuantidade'
 import { itensForaDoHorario } from '../lib/horarioCategoria'
 import { carregarExcecoes, abertaAgora } from '../lib/feriados'
@@ -95,7 +95,7 @@ function fmt(n) {
   return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-const NOME_PAG = { pix: 'PIX', pix_entrega: 'PIX na entrega', dinheiro: 'Dinheiro', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão' }
+const NOME_PAG = { pix: 'PIX', pix_entrega: 'PIX na entrega', dinheiro: 'Dinheiro', credito: 'Crédito', debito: 'Débito', cartao: 'Cartão', pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' }
 
 function fmtTelefone(val) {
   const digits = val.replace(/\D/g, '').slice(0, 11)
@@ -2751,6 +2751,17 @@ export default function DeliveryCheckout() {
                       </button>
                     )
                   })}
+                  {/* Vale-refeição / alimentação (mig 0388): só aparece se a loja ligou. Passa
+                      na maquininha na entrega, como o cartão. */}
+                  {FORMAS_VALE.filter(v => formasLoja.includes(v.value)).map(v => (
+                    <button key={v.value} type="button"
+                      className={`dco-pay-btn${form.pagamento === v.value ? ' dco-pay-btn--active' : ''}`}
+                      onClick={() => set('pagamento', v.value)}>
+                      <IconCard />
+                      <span>{v.label}</span>
+                      {form.pagamento === v.value && <span className="dco-pay-check"><IconCheck /></span>}
+                    </button>
+                  ))}
                 </div>
                 {/* Duas formas: quanto vai na escolhida acima, e o resto em qual. */}
                 {formasLoja.length >= 2 && (

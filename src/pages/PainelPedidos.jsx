@@ -6273,6 +6273,11 @@ const FORMAS_PGTO = [
   ['credito',     '💳 Crédito'],
   ['debito',      '💳 Débito'],
   ['cartao',      '💳 Cartão'],
+  // Vales (só aparecem em loja que ligou em Minha Loja → Pagamento, mig 0385).
+  ['pluxee',      '🍽️ Pluxee'],
+  ['alelo',       '🍽️ Alelo'],
+  ['vr',          '🍽️ VR'],
+  ['ticket',      '🍽️ Ticket'],
 ]
 
 function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar, salvando, cadastroVersao = 0, pinChat = null, enderecoRobo = null }) {
@@ -8236,7 +8241,7 @@ export default function PainelPedidos() {
 
     // O cliente precisa ver o número do pedido — é por ele que ele cobra depois.
     const linhas = linhasDaSacola(sacolaChat)
-    const nomePgto = f => ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão' })[f] ?? f
+    const nomePgto = f => ({ dinheiro: 'dinheiro', pix_entrega: 'PIX', credito: 'cartão de crédito', debito: 'cartão de débito', cartao: 'cartão', pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[f] ?? f
     const labelPgto = d.partes
       ? d.partes.map(p => `${nomePgto(p.forma)} (R$ ${Number(p.valor).toFixed(2).replace('.', ',')})`).join(' + ')
       : nomePgto(d.pagamento)
@@ -11612,6 +11617,8 @@ export default function PainelPedidos() {
                   return { pago: false, label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
                 }
                 if (f === 'vale') return { pago: false, label: 'Vale' + (ehIfood ? ' (via iFood)' : '') }
+                // Cartão de benefício (Pluxee, Alelo, VR, Ticket): passa na maquininha na porta.
+                if (['pluxee', 'alelo', 'vr', 'ticket'].includes(f)) return { pago: false, label: ({ pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[f] + ' (maquininha)' }
                 if (f === 'pix') return (p.pix_status === 'pago' || p.mp_payment_status === 'approved') ? { pago: true, label: 'PIX pago' } : { pago: false, label: 'PIX na entrega' }
                 // PIX na entrega NÃO é pedido pago: o cliente só transfere quando
                 // o motoqueiro chega, e é o motoqueiro que tem que ver o
@@ -11630,7 +11637,7 @@ export default function PainelPedidos() {
                 if (pagCliente(p).pago) return 'pago'
                 const f = p.forma_pagamento
                 if (f === 'dinheiro') return 'dinheiro'
-                if (['cartao', 'cartão', 'credito', 'debito'].includes(f)) return 'maquina'
+                if (['cartao', 'cartão', 'credito', 'debito', 'pluxee', 'alelo', 'vr', 'ticket'].includes(f)) return 'maquina'
                 if (['pix', 'pix_entrega'].includes(f)) return 'pix'
                 return 'outros'
               }

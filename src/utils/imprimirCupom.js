@@ -44,6 +44,7 @@ function labelPagamento(pedido) {
   if (p === 'debito') return 'Cartão de débito'
   if (p === 'cartao') return 'Cartão'
   if (p === 'vale') return 'Vale-refeição'
+  if (['pluxee', 'alelo', 'vr', 'ticket'].includes(p)) return ({ pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[p]
   // Fiado: no papel vai só o "F" (pedido do dono) — e, acima de tudo, a ordem
   // de não cobrar, senão o motoqueiro cobra o total de novo.
   if (p === 'fiado') return 'NÃO COBRAR (F)'
@@ -366,7 +367,7 @@ export function montarComandaCozinhaHtml({ numeroMesa, itens = [], obsGeral = ''
 }
 
 // Conta do PRESENCIAL (com preços, taxa e total)
-const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito', cartao: 'Cartao', dividido: 'Dividido' }[String(f || '').toLowerCase()] || (f || ''))
+const formaContaLabel = (f) => ({ dinheiro: 'Dinheiro', pix: 'PIX', credito: 'Credito', debito: 'Debito', cartao: 'Cartao', dividido: 'Dividido', pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' }[String(f || '').toLowerCase()] || (f || ''))
 
 // preConta = a conta que vai pra MESA antes de pagar: o cliente confere o que
 // consumiu e quanto deu, e só depois escolhe como paga. Sai sem forma de

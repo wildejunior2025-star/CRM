@@ -278,6 +278,7 @@ function paymLabel(forma) {
   if (forma === 'cartao') return 'Cartão'
   if (forma === 'credito') return 'Cartão de crédito'
   if (forma === 'debito') return 'Cartão de débito'
+  if (['pluxee', 'alelo', 'vr', 'ticket'].includes(forma)) return ({ pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[forma]
   return forma ?? '—'
 }
 

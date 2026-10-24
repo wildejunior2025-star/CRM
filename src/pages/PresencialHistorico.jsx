@@ -7,6 +7,7 @@ import { rotuloComanda } from '../lib/comanda'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel, aparelhoMovel } from '../utils/imprimirCupom'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
+import { valesAtivos } from '../lib/constants'
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 // "2026-09-02" vira "02/09". Sem new Date() no meio: a data do banco não tem
@@ -1213,7 +1214,7 @@ export default function PresencialHistorico() {
                         <div style={{ marginTop: 10 }}>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Escolha a forma correta:</div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                            {FORMAS_EDIT.map(([id, lbl]) => (
+                            {[...FORMAS_EDIT.slice(0, -1), ...valesAtivos(empresa).map(v => [v.value, v.label]), FORMAS_EDIT[FORMAS_EDIT.length - 1]].map(([id, lbl]) => (
                               <button key={id} type="button" disabled={salvandoForma} onClick={() => trocarForma(c, id)}
                                 style={{ padding: '7px 12px', borderRadius: 8, cursor: salvandoForma ? 'wait' : 'pointer', fontWeight: 700, fontSize: 13,
                                   border: `1.5px solid ${c.forma_pagamento === id ? 'var(--primary)' : 'var(--border)'}`,

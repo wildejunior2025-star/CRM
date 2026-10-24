@@ -10,6 +10,7 @@ import { recadoDeErro } from '../lib/erroRede'
 import { calcularTaxa, itemIsento, MARCA_ISENTO } from '../lib/taxaServico'
 import { useProdutosNoHorario } from '../lib/horarioCategoria'
 import AvisoPix from '../components/AvisoPix'
+import { FORMAS_VALE } from '../lib/constants'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { useVoltarFecha } from '../hooks/useVoltarFecha'
 import { clienteComMesmoNome } from '../lib/clientes'
@@ -209,6 +210,12 @@ export default function PresencialSalao() {
   // Comanda de balcão (mig 0143): comanda numerada que não é de mesa nenhuma —
   // pro cliente que pede em pé no balcão. Número zera todo dia. Ligado por loja.
   const [comandaBalcaoAtiva, setComandaBalcaoAtiva] = useState(false)
+  const [valesLoja, setValesLoja] = useState([])   // [{ id, label }] dos vales que a loja aceita
+  // As formas do fechamento: as de sempre, os vales ligados e o fiado por último.
+  const formasConta = useMemo(() => {
+    const fiado = FORMAS.filter(f => f.id === 'fiado')
+    return [...FORMAS.filter(f => f.id !== 'fiado'), ...valesLoja.map(v => ({ ...v, label: v.label })), ...fiado]
+  }, [valesLoja])
   const [abrindoComanda, setAbrindoComanda] = useState(false)
   // Balanca: a tela de pesar e separada do lancamento da mesa (ver
   // PesarNaBalanca.jsx). O botao so aparece em loja que tem produto marcado
@@ -468,7 +475,7 @@ export default function PresencialSalao() {
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
     const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento').eq('id', empresaId).single(),
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
       supabase.rpc('mp_conectado_loja'),
@@ -496,6 +503,9 @@ export default function PresencialSalao() {
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setSemCozinha(!!emp.data.presencial_sem_cozinha)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
+      // Vales (Pluxee, Alelo, VR, Ticket): só os que a loja ligou em Minha Loja → Pagamento.
+      const ligadas = Array.isArray(emp.data.formas_pagamento) ? emp.data.formas_pagamento : []
+      setValesLoja(FORMAS_VALE.filter(v => ligadas.includes(v.value)).map(v => ({ id: v.value, label: v.label })))
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
     setMpConectado(mp.data === true)
@@ -4451,7 +4461,7 @@ export default function PresencialSalao() {
             {modoPag === 'unico' ? (
               // wrap: com o Fiado são 4 formas e no celular não cabem numa linha só
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {FORMAS.map(f => (
+                {formasConta.map(f => (
                   <button key={f.id} type="button" onClick={() => setForma(f.id)}
                     style={{ flex: '1 1 calc(50% - 4px)', padding: '10px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
                       border: `1.5px solid ${forma === f.id ? 'var(--primary)' : 'var(--border)'}`,
@@ -4521,7 +4531,7 @@ export default function PresencialSalao() {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                       <select value={p.forma} onChange={e => updatePagamento(i, 'forma', e.target.value)}
                         style={{ padding: '8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', fontSize: 13 }}>
-                        {FORMAS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        {formasConta.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
                         {/* Um QR só pra ESTA parte (mig 0195). Fica no mesmo lugar
                             das outras formas porque, pro atendente, é a mesma
                             pergunta: como esta pessoa vai pagar? */}

@@ -22,6 +22,10 @@ export function cobranca(p) {
     const n = f === 'debito' ? 'Débito' : f === 'credito' ? 'Crédito' : 'Cartão'
     return { tipo: 'cartao', label: n + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
   }
+  // Cartão de benefício (mig 0385): passa na maquininha do motoqueiro, como o cartão.
+  if (['pluxee', 'alelo', 'vr', 'ticket'].includes(f)) {
+    return { tipo: 'cartao', label: ({ pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' })[f] + (ehIfood ? ' (via iFood)' : ' (maquininha)') }
+  }
   if (f === 'pix') {
     return (p.pix_status === 'pago' || p.mp_payment_status === 'approved')
       ? { tipo: 'conta', label: 'PIX pago' }
