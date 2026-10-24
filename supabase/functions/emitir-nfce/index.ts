@@ -93,9 +93,9 @@ function toBase64(buf: ArrayBuffer): string {
 // "Erro na validação do Schema XML" (Agv, 24/10/2026). Na nota vale o nome do
 // PRODUTO: a lista do que veio dentro é da cozinha, não do fisco.
 function descricaoDoItem(nome: string): string {
-  const limpo = nome.replace(/s+/g, " ").trim()
+  const limpo = nome.replace(/\s+/g, " ").trim()
   if (limpo.length <= 120) return limpo
-  const base = limpo.replace(/s*(.*$/, "").trim()
+  const base = limpo.replace(/\s*\(.*$/, "").trim()
   return (base.length > 0 && base.length <= 120 ? base : limpo.slice(0, 120)).trim()
 }
 
