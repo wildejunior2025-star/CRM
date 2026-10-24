@@ -10,7 +10,7 @@ const path = require('path')
 const http = require('http')
 const { spawnSync, spawn, exec } = require('child_process')
 const { createClient } = require('@supabase/supabase-js')
-const { montarCupom, montarTexto, montarComandaMesa, LARGURA } = require('./cupom')
+const { montarCupom, montarTexto, montarComandaMesa, montarDanfeNfce, LARGURA } = require('./cupom')
 
 // Node empacotado (pkg) nao tem WebSocket nativo — a lib realtime do Supabase
 // precisa. Injeta o 'ws' como implementacao global.
@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 43
+const APP_VERSION = 44
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -989,6 +989,24 @@ const server = http.createServer(async (req, res) => {
         // Mesmo roteamento do automatico: frente leva o cupom, cozinha leva a
         // comanda grande (quando a loja tem duas impressoras).
         const ok = imprimirCupomPedido(f.pedido)
+        return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
+      }
+      // CUPOM FISCAL (DANFE NFC-e)
+      //
+      // Papel da FRENTE, sempre: e o comprovante que vai pra mao do cliente,
+      // nao serve de nada na cozinha. Mesma regra da conta da mesa.
+      //
+      // Nao passa pelo dedupe de pedido: reimprimir 2a via do cupom fiscal e um
+      // direito do cliente, nao um acidente a ser evitado.
+      if (req.method === 'POST' && req.url === '/api/imprimir-nfce') {
+        const f = await jsonBody(req)
+        if (!f.nota) return sendJson(res, { ok: false, erro: 'sem nota' })
+        const bar = config().printerBar
+        const paraFrente = bar ? bar : undefined
+        const ok = imprimirBytes(
+          montarDanfeNfce({ nota: f.nota, empresa: f.empresa || empresa, itens: f.itens, segundaVia: !!f.segunda_via }),
+          'nfce-' + (f.nota.numero ?? f.nota.id ?? 's-n'), paraFrente)
+        log((f.segunda_via ? '2a via do cupom fiscal' : 'Cupom fiscal') + ' NFC-e no ' + (f.nota.numero ?? '?') + (ok ? '' : ' — FALHOU'))
         return sendJson(res, { ok, erro: ok ? undefined : 'sem impressora' })
       }
       // Imprime um HTML (conta de mesa etc.) como texto na térmica.

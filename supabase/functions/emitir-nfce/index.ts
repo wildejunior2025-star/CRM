@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
   try {
     if (acao === "diagnostico")       return json(await diagnostico(sb, body?.empresa_id))
     if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
-    if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf))
+    if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf, body?.comanda_id))
     if (acao === "consultar")         return json(await consultar(sb, body?.nota_id, body?.ref))
     if (acao === "cancelar")          return json(await cancelar(sb, req, body?.nota_id, body?.justificativa))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
@@ -292,15 +292,50 @@ const PAGAMENTO_FOCUS: Record<string, string> = {
   pluxee: "11", alelo: "11", vr: "11", ticket: "11",
 }
 
-async function emitir(sb: any, pedidoId: string, cpf?: string) {
-  if (!pedidoId) return { ok: false, error: "pedido_id obrigatório" }
+// A VENDA DE MESA TAMBEM E VENDA (24/10/2026)
+//
+// A comanda fechada nao passa por `pedidos_delivery` — mora em `comandas` com
+// os itens em `comanda_itens`. Como o resto daqui pra baixo so sabe mexer com
+// pedido, a comanda e traduzida pro mesmo formato e segue o mesmo caminho: um
+// jeito so de montar nota, nao dois pra manter em dia.
+//
+// O peso vem junto: self-service lanca quantidade fracionada (0,398 kg), e por
+// isso a quantidade NAO e arredondada em lugar nenhum.
+async function pedidoDaComanda(sb: any, comandaId: string) {
+  const { data: c } = await sb.from("comandas").select("*").eq("id", comandaId).maybeSingle()
+  if (!c) return null
+  const { data: itens } = await sb.from("comanda_itens").select("*").eq("comanda_id", comandaId)
+  const lista = (itens ?? []).filter((i: any) => i.status !== "cancelado")
+  return {
+    id: c.id,
+    empresa_id: c.empresa_id,
+    total: c.total,
+    subtotal: c.subtotal,
+    forma_pagamento: c.forma_pagamento,
+    pagamentos: null,
+    cliente_nome: c.nome_cliente ?? null,
+    itens: lista.map((i: any) => ({
+      id: i.produto_id ?? i.id,
+      nome: i.nome,
+      quantidade: Number(i.quantidade) || 1,
+      preco: Number(i.preco_unitario) || 0,
+    })),
+  }
+}
 
-  const { data: ped } = await sb.from("pedidos_delivery").select("*").eq("id", pedidoId).maybeSingle()
-  if (!ped) return { ok: false, error: "pedido não encontrado" }
+async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: string) {
+  if (!pedidoId && !comandaId) return { ok: false, error: "pedido_id ou comanda_id obrigatório" }
 
-  // Já emitida e autorizada? devolve a existente (idempotência)
+  const ped = comandaId
+    ? await pedidoDaComanda(sb, comandaId)
+    : (await sb.from("pedidos_delivery").select("*").eq("id", pedidoId).maybeSingle()).data
+  if (!ped) return { ok: false, error: comandaId ? "comanda não encontrada" : "pedido não encontrado" }
+
+  // Já emitida e autorizada? devolve a existente (idempotência). A comanda usa
+  // a mesma coluna: uma venda, uma nota, venha de onde vier.
+  const chave = comandaId ? "comanda_id" : "pedido_id"
   const { data: jaTem } = await sb.from("nfce_notas")
-    .select("*").eq("pedido_id", pedidoId).eq("status", "autorizada").maybeSingle()
+    .select("*").eq(chave, comandaId ?? pedidoId).eq("status", "autorizada").maybeSingle()
   if (jaTem) return { ok: true, ja_emitida: true, nota: jaTem }
 
   const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", ped.empresa_id).maybeSingle()
@@ -354,7 +389,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
     valor_pagamento: Number(x.valor.toFixed(2)),
   }))
 
-  const ref = `nfce-${pedidoId}`
+  const ref = `nfce-${comandaId ?? pedidoId}`
   const nfce: Record<string, unknown> = {
     cnpj_emitente: cnpj,
     data_emissao: new Date().toISOString(),
@@ -382,7 +417,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
 
   // grava rascunho antes de enviar (rastro mesmo se cair)
   const { data: rascunho } = await sb.from("nfce_notas").insert({
-    empresa_id: ped.empresa_id, pedido_id: pedidoId, status: "processando",
+    empresa_id: ped.empresa_id, pedido_id: comandaId ? null : pedidoId,
+    comanda_id: comandaId ?? null, status: "processando",
     ambiente, ref, valor_total: Number(total.toFixed(2)),
   }).select("id").maybeSingle()
   const notaId = rascunho?.id

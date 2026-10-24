@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { fwcFetch } from '../lib/appFwc'
 import './RaioEntrega.css'
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -39,7 +40,7 @@ export default function NotasFiscais() {
     setCarregando(true)
     const [ini, fim] = janelaDoMes(mes)
     const { data } = await supabase.from('nfce_notas')
-      .select('id, pedido_id, status, ambiente, numero, serie, chave_acesso, xml_url, danfe_url, valor_total, motivo_rejeicao, created_at')
+      .select('id, pedido_id, comanda_id, status, ambiente, numero, serie, chave_acesso, protocolo, qrcode_url, xml_url, danfe_url, valor_total, motivo_rejeicao, created_at')
       .eq('empresa_id', profile.empresa_id)
       .gte('created_at', ini).lt('created_at', fim)
       .order('created_at', { ascending: false })
@@ -79,6 +80,55 @@ export default function NotasFiscais() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
       body: JSON.stringify(corpo),
     }).then(r => r.json())
+  }
+
+  // SEGUNDA VIA DO CUPOM FISCAL
+  //
+  // O cliente tem direito a pedir de novo, e ate hoje a unica saida era abrir o
+  // HTML do emissor e mandar pra impressora comum — que cospe uma folha A4 com
+  // o QR minusculo. Aqui vai pra termica, no mesmo formato da 1a via, com o QR
+  // desenhado pela propria impressora.
+  //
+  // Os itens vem da venda que gerou a nota: pedido de delivery/balcao ou
+  // comanda de mesa, conforme o caso.
+  async function imprimir(n) {
+    setOcupado(n.id); setMsg(null)
+    try {
+      let itens = []
+      let forma = null
+      if (n.comanda_id) {
+        const { data: its } = await supabase.from('comanda_itens')
+          .select('nome, quantidade, preco_unitario, status').eq('comanda_id', n.comanda_id)
+        itens = (its ?? []).filter(i => i.status !== 'cancelado')
+          .map(i => ({ nome: i.nome, quantidade: i.quantidade, preco: i.preco_unitario }))
+        const { data: c } = await supabase.from('comandas').select('forma_pagamento').eq('id', n.comanda_id).maybeSingle()
+        forma = c?.forma_pagamento ?? null
+      } else if (n.pedido_id) {
+        const { data: ped } = await supabase.from('pedidos_delivery')
+          .select('itens, forma_pagamento').eq('id', n.pedido_id).maybeSingle()
+        itens = (ped?.itens ?? []).map(i => ({
+          nome: i.nome ?? i.descricao, quantidade: i.quantidade ?? 1, preco: i.preco_unitario ?? i.preco ?? 0,
+        }))
+        forma = ped?.forma_pagamento ?? null
+      }
+      const { data: emp } = await supabase.from('empresas')
+        .select('nome, razao_social, cnpj, endereco, numero, bairro, cidade, estado').eq('id', profile.empresa_id).maybeSingle()
+
+      const r = await fwcFetch('/api/imprimir-nfce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nota: { ...n, forma_pagamento: forma, emitida_em: fmtDataHora(n.created_at) },
+          empresa: emp, itens, segunda_via: true,
+        }),
+      })
+      const j = await r.json()
+      setMsg(j?.ok
+        ? { ok: true, txt: 'Cupom enviado para a impressora.' }
+        : { ok: false, txt: j?.erro === 'sem impressora' ? 'Nenhuma impressora configurada neste computador.' : (j?.erro || 'Não consegui imprimir.') })
+    } catch (e) {
+      setMsg({ ok: false, txt: 'O app Impressora FWC não respondeu neste computador. Ele precisa estar aberto.' })
+    } finally { setOcupado(null) }
   }
 
   async function consultar(n) {
@@ -221,6 +271,11 @@ export default function NotasFiscais() {
                     </td>
                     <td style={{ padding: '8px', whiteSpace: 'nowrap', textAlign: 'right' }}>
                       {n.danfe_url && <a href={n.danfe_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ padding: '3px 9px', marginRight: 6 }}>Cupom</a>}
+                      {n.status === 'autorizada' && (
+                        <button className="btn btn-secondary btn-sm" disabled={ocupado === n.id} onClick={() => imprimir(n)} style={{ padding: '3px 9px', marginRight: 6 }}>
+                          🖨️ 2ª via
+                        </button>
+                      )}
                       {n.xml_url && <a href={n.xml_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ padding: '3px 9px', marginRight: 6 }}>XML</a>}
                       {n.status === 'processando' && (
                         <button className="btn btn-secondary btn-sm" disabled={ocupado === n.id} onClick={() => consultar(n)} style={{ padding: '3px 9px' }}>

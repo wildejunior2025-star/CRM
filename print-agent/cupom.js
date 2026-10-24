@@ -353,4 +353,108 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
   return Buffer.concat(parts)
 }
 
-module.exports = { montarCupom, montarTexto, montarComandaMesa, LARGURA }
+
+// ── QR Code na propria termica ──────────────────────────────────
+// A impressora desenha o QR sozinha (GS ( k). Mandar como imagem exigiria
+// rasterizar aqui e sairia borrado em 80mm; o nativo sai limpo e e aceito pelo
+// leitor de qualquer celular. Tamanho 6 da um quadrado de ~3,5cm, que e o que
+// cabe na bobina e ainda le com a camera tremendo na mao do cliente.
+function qrCode(dados, tamanho = 6) {
+  const d = Buffer.from(String(dados || ''), 'latin1')
+  const n = d.length + 3
+  return Buffer.concat([
+    Buffer.from([GS, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]), // modelo 2
+    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, tamanho]),    // tamanho do modulo
+    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31]),       // correcao de erro M
+    Buffer.from([GS, 0x28, 0x6B, n & 0xff, (n >> 8) & 0xff, 0x31, 0x50, 0x30]), d, // guarda
+    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]),       // imprime
+  ])
+}
+
+// Chave de acesso legivel: 44 digitos viram 11 grupos de 4. Cliente que vai
+// digitar no site da SEFAZ nao consegue ler 44 numeros grudados.
+function chaveEmGrupos(chave) {
+  return String(chave || '').replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim()
+}
+
+// ── DANFE NFC-e ─────────────────────────────────────────────────
+// Cupom fiscal do consumidor. Nao e o nosso cupom de pedido: aqui o conteudo e
+// definido pelo leiaute da NFC-e, entao a ordem e os rotulos seguem o que a
+// SEFAZ espera, mesmo quando ficariam mais bonitos de outro jeito.
+//
+// Serve tanto pra 1a via (logo depois de emitir) quanto pra 2a (reimpressao do
+// historico) — a unica diferenca e o aviso no rodape.
+function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
+  const e = empresa || {}
+  const n = nota || {}
+  const lista = Array.isArray(itens) ? itens : []
+  const parts = [INIT, ALIGN(1)]
+
+  parts.push(BOLD(1), linha((e.razao_social || e.nome || '').toUpperCase()), BOLD(0))
+  if (e.cnpj) parts.push(linha('CNPJ ' + String(e.cnpj).replace(/\D/g, '')))
+  const end = [e.endereco, e.numero].filter(Boolean).join(', ')
+  if (end) parts.push(linha(end))
+  const cidade = [e.bairro, e.cidade, e.estado].filter(Boolean).join(' - ')
+  if (cidade) parts.push(linha(cidade))
+  parts.push(divisor())
+  parts.push(linha('DANFE NFC-e'))
+  parts.push(linha('Documento Auxiliar da Nota Fiscal de'))
+  parts.push(linha('Consumidor Eletronica'))
+  // 44 caracteres numa bobina de 42: quebrava sozinho e saia torto.
+  parts.push(linha('NAO PERMITE APROVEITAMENTO'))
+  parts.push(linha('DE CREDITO DE ICMS'))
+  parts.push(divisor(), ALIGN(0))
+
+  // Itens: uma linha de identificacao e outra com a conta, porque nome de
+  // produto nao cabe junto de "2 x 24,99 = 49,98" em 42 colunas.
+  parts.push(linha('COD  DESCRICAO'))
+  parts.push(linha('QTD x UNITARIO' + ' '.repeat(14) + 'TOTAL'))
+  parts.push(divisor())
+  lista.forEach((it, i) => {
+    const qtd = Number(it.quantidade ?? 1) || 1
+    const unit = Number(it.preco ?? it.preco_unitario ?? 0) || 0
+    const tot = Number(it.total ?? qtd * unit) || qtd * unit
+    const qtdTxt = Number.isInteger(qtd) ? String(qtd) : qtd.toFixed(3).replace('.', ',')
+    parts.push(linha(String(i + 1).padStart(3, '0') + '  ' + String(it.nome ?? 'Item')))
+    parts.push(kv(qtdTxt + ' x ' + money(unit), money(tot)))
+  })
+  parts.push(divisor())
+
+  // Conta LINHAS, nao soma quantidades: com venda por peso, somar daria
+  // "0,398 itens", que nao quer dizer nada pra quem le o cupom.
+  parts.push(kv('Qtd. total de itens', String(lista.length)))
+  parts.push(BOLD(1), SIZE(0x01), kv('VALOR TOTAL', money(n.valor_total)), SIZE(0), BOLD(0))
+  if (n.forma_pagamento) parts.push(kv('Forma de pagamento', String(n.forma_pagamento)))
+
+  parts.push(divisor(), ALIGN(1))
+  parts.push(linha('Consulte pela Chave de Acesso em'))
+  parts.push(linha(n.ambiente === 'producao'
+    ? 'www.nfce.sefaz.rn.gov.br/portalDFE'
+    : 'hom.nfce.sefaz.rn.gov.br/portalDFE'))
+  // 44 digitos em grupos de 4 dao 54 caracteres: nao cabem em 42. Quebro eu
+  // mesmo no meio, em dois blocos iguais, em vez de deixar a impressora
+  // cortar onde calhar e o cliente perder a conta na hora de digitar.
+  const grupos = chaveEmGrupos(n.chave_acesso).split(' ')
+  parts.push(linha(grupos.slice(0, 6).join(' ')))
+  parts.push(linha(grupos.slice(6).join(' ')))
+  parts.push(divisor())
+  parts.push(linha('CONSUMIDOR ' + (n.cpf_destinatario ? ('CPF ' + n.cpf_destinatario) : 'NAO IDENTIFICADO')))
+  parts.push(divisor())
+  parts.push(linha('NFC-e no ' + (n.numero ?? '-') + '  Serie ' + (n.serie ?? '-')))
+  if (n.emitida_em) parts.push(linha('Emissao: ' + n.emitida_em))
+  if (n.protocolo) parts.push(linha('Protocolo de autorizacao'), linha(String(n.protocolo)))
+  if (n.ambiente !== 'producao') {
+    parts.push(NL, BOLD(1), linha('*** EMITIDA EM AMBIENTE DE HOMOLOGACAO ***'))
+    parts.push(linha('*** SEM VALOR FISCAL ***'), BOLD(0))
+  }
+
+  // O QR e o que o fiscal e o cliente leem. Vai por ultimo e centralizado.
+  if (n.qrcode_url) {
+    parts.push(NL, qrCode(n.qrcode_url), NL)
+  }
+  parts.push(linha(segundaVia ? 'SEGUNDA VIA - CONSUMIDOR' : 'VIA CONSUMIDOR'))
+  parts.push(ALIGN(0), FEED(3), CUT)
+  return Buffer.concat(parts)
+}
+
+module.exports = { montarCupom, montarTexto, montarComandaMesa, montarDanfeNfce, qrCode, LARGURA }
