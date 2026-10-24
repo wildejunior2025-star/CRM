@@ -117,6 +117,15 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
   const cscKey = ambiente === "producao" ? "csc_nfce_producao" : "csc_nfce_homologacao"
   const idTokenKey = ambiente === "producao" ? "id_token_nfce_producao" : "id_token_nfce_homologacao"
 
+  // O CSC TAMBEM E POR AMBIENTE (24/10/2026)
+  // A SEFAZ emite um codigo pra homologacao e outro pra producao — na Agv os
+  // quatro existem lado a lado no portal. Antes a tabela guardava um so, entao
+  // virar a chave pra producao mandaria o codigo de homologacao e TODA nota
+  // seria rejeitada bem na estreia. `fis.csc` fica como reserva, pras lojas
+  // cadastradas antes das colunas por ambiente (mig 0383).
+  const cscDoAmbiente = (ambiente === "producao" ? fis.csc_producao : fis.csc_homologacao) || fis.csc
+  const cscIdDoAmbiente = (ambiente === "producao" ? fis.csc_id_producao : fis.csc_id_homologacao) || fis.csc_id
+
   const payload: Record<string, unknown> = {
     nome: emp.razao_social || emp.nome,
     nome_fantasia: emp.nome,
@@ -134,8 +143,8 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
     habilita_nfce: true,
     arquivo_certificado_base64: certB64,
     senha_certificado: senhaCert,
-    [cscKey]: fis.csc || undefined,
-    [idTokenKey]: fis.csc_id || undefined,
+    [cscKey]: cscDoAmbiente || undefined,
+    [idTokenKey]: cscIdDoAmbiente || undefined,
   }
 
   const base = `${FOCUS_REVENDA}/v2/empresas`
