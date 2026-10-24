@@ -94,6 +94,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
   const [fiscalCfg, setFiscalCfg] = useState({
     ativo: false, inscricao_estadual: '', regime_tributario: 'simples',
     csc: '', csc_id: '', serie: 1, ambiente: 'homologacao', emissor_token: '',
+    // Um CSC por ambiente: a SEFAZ gera codigos diferentes pra teste e pra
+    // valer, e mostrar um campo so fazia a tela mentir sobre qual esta em uso.
+    csc_homologacao: '', csc_id_homologacao: '', csc_producao: '', csc_id_producao: '',
     ncm_padrao: '21069090', cfop_padrao: '5102', csosn_padrao: '102', origem_padrao: '0',
   })
   const [fiscalSalvando, setFiscalSalvando] = useState(false)
@@ -169,8 +172,14 @@ export default function MinhaLoja({ secao = 'loja' }) {
       ativo: fiscalCfg.ativo,
       inscricao_estadual: fiscalCfg.inscricao_estadual.trim() || null,
       regime_tributario: fiscalCfg.regime_tributario,
-      csc: fiscalCfg.csc.trim() || null,
-      csc_id: fiscalCfg.csc_id.trim() || null,
+      csc_homologacao: fiscalCfg.csc_homologacao.trim() || null,
+      csc_id_homologacao: fiscalCfg.csc_id_homologacao.trim() || null,
+      csc_producao: fiscalCfg.csc_producao.trim() || null,
+      csc_id_producao: fiscalCfg.csc_id_producao.trim() || null,
+      // Reserva: continua guardando o do ambiente escolhido nas colunas antigas,
+      // que e o que as lojas cadastradas antes da mig 0383 ainda usam.
+      csc: (fiscalCfg.ambiente === 'producao' ? fiscalCfg.csc_producao : fiscalCfg.csc_homologacao).trim() || null,
+      csc_id: (fiscalCfg.ambiente === 'producao' ? fiscalCfg.csc_id_producao : fiscalCfg.csc_id_homologacao).trim() || null,
       serie: Number(fiscalCfg.serie) || 1,
       ambiente: fiscalCfg.ambiente,
       emissor_token: fiscalCfg.emissor_token.trim() || null,
@@ -418,6 +427,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
           regime_tributario: data.regime_tributario ?? 'simples',
           csc: data.csc ?? '',
           csc_id: data.csc_id ?? '',
+          csc_homologacao: data.csc_homologacao ?? '',
+          csc_id_homologacao: data.csc_id_homologacao ?? '',
+          csc_producao: data.csc_producao ?? '',
+          csc_id_producao: data.csc_id_producao ?? '',
           serie: data.serie ?? 1,
           ambiente: data.ambiente ?? 'homologacao',
           emissor_token: data.emissor_token ?? '',
@@ -1832,14 +1845,6 @@ export default function MinhaLoja({ secao = 'loja' }) {
           </p>
           <div className="form-grid">
             <div className="form-field">
-              <label>ID do CSC</label>
-              <input
-                value={fiscalCfg.csc_id}
-                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_id: e.target.value })}
-                placeholder="Ex: 000001"
-              />
-            </div>
-            <div className="form-field">
               <label>Série da NFC-e</label>
               <input
                 type="number" min={1}
@@ -1847,12 +1852,41 @@ export default function MinhaLoja({ secao = 'loja' }) {
                 onChange={e => setFiscalCfg({ ...fiscalCfg, serie: e.target.value })}
               />
             </div>
-            <div className="form-field full">
-              <label>Código CSC (token)</label>
+            <div className="form-field" />
+
+            {/* Um bloco por ambiente. Mostrar um campo so fazia a tela mentir:
+                ela exibia o codigo de teste mesmo depois de trocar pra Produção,
+                e quem olhasse acharia que era esse que ia pra nota de verdade. */}
+            <div className="form-field">
+              <label>ID do CSC — Produção{fiscalCfg.ambiente === 'producao' ? ' (em uso)' : ''}</label>
               <input
-                value={fiscalCfg.csc}
-                onChange={e => setFiscalCfg({ ...fiscalCfg, csc: e.target.value })}
-                placeholder="Token de segurança do contribuinte"
+                value={fiscalCfg.csc_id_producao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_id_producao: e.target.value })}
+                placeholder="Ex: 1"
+              />
+            </div>
+            <div className="form-field">
+              <label>ID do CSC — Homologação{fiscalCfg.ambiente !== 'producao' ? ' (em uso)' : ''}</label>
+              <input
+                value={fiscalCfg.csc_id_homologacao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_id_homologacao: e.target.value })}
+                placeholder="Ex: 1"
+              />
+            </div>
+            <div className="form-field full">
+              <label>Código CSC — Produção (é o que vai na nota de verdade)</label>
+              <input
+                value={fiscalCfg.csc_producao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_producao: e.target.value })}
+                placeholder="Token de segurança do contribuinte, ambiente de produção"
+              />
+            </div>
+            <div className="form-field full">
+              <label>Código CSC — Homologação (só para teste)</label>
+              <input
+                value={fiscalCfg.csc_homologacao}
+                onChange={e => setFiscalCfg({ ...fiscalCfg, csc_homologacao: e.target.value })}
+                placeholder="Token de segurança do contribuinte, ambiente de teste"
               />
             </div>
             <div className="form-field full">
