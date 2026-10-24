@@ -150,8 +150,12 @@ function IconeZap() {
 }
 
 export default function PresencialSalao() {
-  const { profile, user } = useAuth()
+  const { profile, user, empresa } = useAuth()
   const empresaId = profile?.empresa_id
+  // A loja escolhe se a conta sai no papel sozinha ao fechar (mig 0388). Vale
+  // só pro automático: os botões de imprimir/reenviar continuam valendo, porque
+  // ali é alguém pedindo o papel, não o sistema decidindo.
+  const contaSaiSozinha = empresa?.imprimir_conta_mesa !== false
   // Só o ADM confere o pagamento e libera a mesa. Garçom fecha, mas não libera.
   const ehAdmin = profile?.perfil === 'admin' || profile?.perfil === 'super_admin'
 
@@ -2349,7 +2353,7 @@ export default function PresencialSalao() {
       // `soApp` só num CELULAR: lá a caixa de impressão do navegador não leva a
       // lugar nenhum. Num PC sem o app, cair no navegador é o que faz o papel
       // sair em vez de a conta simplesmente não existir.
-      imprimirConta({ soApp: ehCelular }).catch(() => { /* best-effort */ })
+      if (contaSaiSozinha) imprimirConta({ soApp: ehCelular }).catch(() => { /* best-effort */ })
     } else {
       // GARÇOM, ou ADM sem impressora neste aparelho: NÃO libera a mesa. Marca
       // "aguardando_conferencia" e guarda o pagamento. Pro ADM isso é de
@@ -2363,7 +2367,8 @@ export default function PresencialSalao() {
       // Celular COM térmica Bluetooth imprime aqui igual a um PC — era essa a
       // premissa velha ("celular não tem impressora") que deixava a loja que só
       // usa o celular sem a conta da mesa.
-      const vaiImprimirAqui = (!ehCelular || window.__fwcBtConectada === true)
+      const vaiImprimirAqui = contaSaiSozinha
+        && (!ehCelular || window.__fwcBtConectada === true)
         && papelImpressora() !== 'cozinha'   // a da cozinha não tira conta
       const { data: mudou, error } = await supabase.from('comandas').update({
         status: 'aguardando_conferencia',
@@ -2404,7 +2409,9 @@ export default function PresencialSalao() {
       // Celular sem térmica conectada: NADA sai, e antes ninguém ficava sabendo. O
       // pior caso é o garçom tirar a taxa e refazer o fechamento — o papel que já
       // saiu continua com a taxa e o cliente paga a mais (Saidera, 16/10/2026).
-      else if (papelImpressora() !== 'cozinha') {
+      // Só avisa quem ESPERAVA papel. Loja que desligou a conta automática não
+      // precisa de um susto a cada fechamento dizendo que o papel não saiu.
+      else if (contaSaiSozinha && papelImpressora() !== 'cozinha') {
         window.alert('⚠️ A conta NÃO saiu no papel: este celular está sem a térmica conectada.\n\n'
           + 'Conecte a impressora (aba Impressora) e use "Reenviar conta" na mesa azul. '
           + 'Se já tinha saído uma conta antes, ela está desatualizada — não entregue ao cliente.')
@@ -2497,6 +2504,7 @@ export default function PresencialSalao() {
   // Recebe a comanda de fora porque nesse momento ela já não é a mesa aberta.
   async function imprimirContaDoPix(comanda) {
     if (!comanda) return
+    if (!contaSaiSozinha) return                         // a loja desligou a conta automática
     if (papelImpressora() === 'cozinha') return          // a da cozinha não tira conta
     if (ehCelular && window.__fwcBtConectada !== true) return  // celular sem térmica não tem onde sair
     const mesa = mesas.find(m => m.id === comanda.mesa_id) ?? null

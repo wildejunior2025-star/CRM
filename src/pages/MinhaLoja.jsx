@@ -37,9 +37,10 @@ export default function MinhaLoja({ secao = 'loja' }) {
   // banco: ninguém conseguia ligar nem desligar sem eu mexer no SQL.
   const [caixaPorDia, setCaixaPorDia] = useState(false)
   const [caixaAbreComFechamento, setCaixaAbreComFechamento] = useState(false)
-  // Cupom da venda do balcão (mig 0386). Padrão ligado: é como toda loja
-  // trabalha hoje, e a chave só existe pra quem não quer o papel.
+  // Papel que sai sozinho (migs 0386 / 0388). Padrão ligado nos dois: é como
+  // toda loja trabalha hoje, e as chaves só existem pra quem não quer o papel.
   const [imprimirCupomBalcao, setImprimirCupomBalcao] = useState(true)
+  const [imprimirContaMesa, setImprimirContaMesa] = useState(true)
   // Repasse ao cliente (mig 0223) — separado da taxa da maquineta de propósito:
   // tem loja que só quer o controle do caixa e não cobra nada a mais.
   const [repasses, setRepasses] = useState({ repasse_credito_pct: '', repasse_debito_pct: '', repasse_cartao_pct: '' })
@@ -391,6 +392,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     // !== false: loja que nunca mexeu (coluna nova, ou campo que não veio na
     // consulta) continua imprimindo, que é o jeito de hoje.
     setImprimirCupomBalcao(empresa.imprimir_cupom_balcao !== false)
+    setImprimirContaMesa(empresa.imprimir_conta_mesa !== false)
     setTaxasCartao({
       taxa_credito_pct: String(empresa.taxa_credito_pct ?? 0).replace('.', ','),
       taxa_debito_pct: String(empresa.taxa_debito_pct ?? 0).replace('.', ','),
@@ -566,6 +568,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
         caixa_por_dia: caixaPorDia,
         caixa_abre_com_fechamento: caixaAbreComFechamento,
         imprimir_cupom_balcao: imprimirCupomBalcao,
+        imprimir_conta_mesa: imprimirContaMesa,
         repasse_credito_pct: cobrarDoCliente ? pctNum(repasses.repasse_credito_pct) : 0,
         repasse_debito_pct: cobrarDoCliente ? pctNum(repasses.repasse_debito_pct) : 0,
         repasse_cartao_pct: cobrarDoCliente ? pctNum(repasses.repasse_cartao_pct) : 0,
@@ -1099,16 +1102,33 @@ export default function MinhaLoja({ secao = 'loja' }) {
             toda. O resto (o que CADA PC imprime, auto-imprimir, pausa) continua
             no painel Impressora do gestor, porque é mesmo coisa de aparelho. */}
         <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Cupom da venda no balcão</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Papel que sai sozinho</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
             Vale pra <strong>loja toda</strong>: todo computador, celular e a impressora do app FWC.
+            Desligar não muda nada da venda — ela entra no sistema e no caixa igual.
           </p>
+
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', marginBottom: 14 }}>
+            <input type="checkbox" checked={imprimirContaMesa} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
+              onChange={e => setImprimirContaMesa(e.target.checked)} />
+            <span>
+              <strong style={{ fontSize: 14 }}>Imprimir a conta quando fechar a mesa ou comanda</strong>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
+                <strong>Ligado</strong> (como é hoje): ao fechar a conta sai o papel com os
+                itens, o total e a forma de pagamento.
+                <br />
+                <strong>Desligado</strong>: não sai papel sozinha. Os botões
+                <strong> Imprimir conta</strong> (mesa aberta), <strong>Reenviar conta</strong> (mesa
+                azul) e a <strong>pré-conta</strong> continuam saindo quando alguém pedir.
+              </span>
+            </span>
+          </label>
 
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
             <input type="checkbox" checked={imprimirCupomBalcao} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
               onChange={e => setImprimirCupomBalcao(e.target.checked)} />
             <span>
-              <strong style={{ fontSize: 14 }}>Imprimir o cupom quando concluir a venda</strong>
+              <strong style={{ fontSize: 14 }}>Imprimir o cupom quando concluir a venda no balcão</strong>
               <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
                 <strong>Ligado</strong> (como é hoje): cada venda do balcão sai no papel com
                 os itens, o total e a forma de pagamento.

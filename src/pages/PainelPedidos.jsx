@@ -9431,6 +9431,9 @@ export default function PainelPedidos() {
   // Imprime a CONTA da mesa na loja (chamado quando o garçom fecha e a mesa entra em
   // "aguardando_conferencia"). Total/forma vêm do fechamento_pendente que o garçom lançou.
   function imprimirContaMesa(c) {
+    // A loja desligou a conta automática (mig 0388). O botão de imprimir a
+    // conta no card continua valendo — lá é alguém pedindo o papel.
+    if (empresa?.imprimir_conta_mesa === false) return
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
