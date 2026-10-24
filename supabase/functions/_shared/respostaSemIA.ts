@@ -955,6 +955,115 @@ export async function abrirChamado(supabase: Sb, empresaId: string, phone: strin
   else console.log("[chamado] aberto para", phone)
 }
 
+// ── "E o meu pedido?" ────────────────────────────────────────────────────────
+// Agv Grill, 24/10/2026: o cliente escreveu "Olá! Sobre o meu pedido #1024..."
+// e o robô respondeu com a mensagem de FAZER um pedido ("é só escolher,
+// adiciona na sacola e avançar pra forma de pagamento"). A culpa é do passo 4:
+// a regra do "quero pedir" casa com a palavra `pedido`, e ela está nas DUAS
+// frases. Quem já pediu e está esperando a comida recebeu um convite a comprar
+// de novo — não tem resposta pior nesse momento.
+//
+// Dois níveis de certeza, de propósito:
+//  • CERTEZA ("meu pedido", "#1024", "pedido 1024"): é sobre pedido já feito,
+//    ache a gente o pedido ou não — não achar é mais motivo ainda pra chamar
+//    gente.
+//  • TALVEZ ("cadê?", "já saiu?", "não chegou"): só vale se o número TIVER
+//    pedido recente. "Cadê o cardápio?" é pergunta de cardápio, e quem nunca
+//    pediu nada não está cobrando entrega.
+export function perguntouDePedidoFeito(
+  texto: string,
+): { numero: number | null; certeza: boolean } | null {
+  const t = " " + semAcento(texto).replace(/[^a-z0-9#]+/g, " ").replace(/ +/g, " ") + " "
+
+  // Pedido NOVO nasce aqui e segue o caminho do link, como sempre.
+  if (/\b(fazer|faco|fazendo|realizar|finalizar) (um |o |meu )?pedido\b/.test(t)) return null
+  if (/pedido minimo|valor minimo|pedir minimo/.test(t)) return null
+
+  const achouNum = t.match(/#\s*(\d{1,7})/)
+    ?? t.match(/\bpedido (?:numero |num |n |no )?(\d{1,7})\b/)
+  const numero = achouNum ? Number(achouNum[1]) : null
+
+  const MEU = /\b(meu|meus|nosso|do|o) pedido\b|\bpedido que (eu )?fiz\b|\bpedido feito\b|\bultimo pedido\b|\bminha (comida|marmita|pizza|janta|entrega|encomenda)\b/
+  if (numero !== null || MEU.test(t)) return { numero, certeza: true }
+
+  // Palavra de quem está esperando. Sozinha ela é frágil, então aqui só abre a
+  // porta — quem decide é existir pedido recente no telefone.
+  const ESPERANDO = /\b(cade|ja saiu|saiu ja|nao chegou|nao veio|nao recebi|ta onde|onde ta|onde esta|ta demorando|demorando|atrasado|atrasada|esqueceram|esqueceu|quanto falta|falta muito|ja ta pronto|ta pronto|status)\b/
+  // Cardápio, preço e horário usam as mesmas palavras ("cadê o cardápio?") e
+  // têm resposta própria mais embaixo. Isso não é cobrança de pedido.
+  const OUTRO_ASSUNTO = /\b(cardapio|menu|link|site|preco|precos|valor|promocao|horario|abre|fecha|taxa|frete)\b/
+  if (ESPERANDO.test(t) && !OUTRO_ASSUNTO.test(t)) return { numero: null, certeza: false }
+  return null
+}
+
+export function faseDoPedido(status: string, retirada: boolean, entregador: string): string {
+  switch (status) {
+    case "aguardando": return "chegou aqui e está esperando a loja confirmar"
+    case "confirmado": return "está confirmado e em preparo"
+    case "pronto": return retirada ? "está pronto, pode vir buscar" : "está pronto e já vai sair pra entrega"
+    case "saiu_entrega": return entregador ? `saiu pra entrega com ${entregador}` : "saiu pra entrega"
+    case "entregue": return retirada ? "está marcado aqui como retirado" : "está marcado aqui como entregue"
+    case "cancelado": return "aparece aqui como cancelado"
+    default: return "está em andamento aqui"
+  }
+}
+
+/**
+ * Responde sobre o pedido que ele JÁ fez. Devolve null quando não é o caso —
+ * aí o fluxo segue normal (o "cadê?" de quem nunca pediu nada é outra coisa).
+ *
+ * O status sai do banco, nunca de chute. E o que é RECLAMAÇÃO (atrasou,
+ * esqueceram, chegou errado) ou está fora do esperado (entregue que o cliente
+ * diz que não chegou, cancelado, pedido que o robô não acha) não se resolve com
+ * texto automático: vira chamado, que é gente.
+ */
+async function respostaDoPedido(
+  supabase: Sb,
+  empresaId: string,
+  phone: string,
+  mensagem: string,
+  pergunta: { numero: number | null; certeza: boolean },
+): Promise<string | null> {
+  let p: Record<string, unknown> | null = null
+  try {
+    const { data, error } = await supabase.rpc("pedido_do_cliente", {
+      p_empresa: empresaId, p_phone: phone, p_numero: pergunta.numero,
+    })
+    if (error) console.error("[pedido] consulta falhou:", JSON.stringify(error).slice(0, 200))
+    else p = Array.isArray(data) ? (data[0] ?? null) : (data ?? null)
+  } catch (e) {
+    console.error("[pedido] consulta quebrou:", e)
+  }
+
+  // Pedido de OUTRO número não aparece aqui, de propósito (a função casa pelo
+  // telefone de quem está falando): ninguém vai saber pelo robô o que a vizinha
+  // pediu. Sem achar, quem responde é a loja.
+  if (!p) {
+    if (!pergunta.certeza) return null
+    await abrirChamado(supabase, empresaId, phone, mensagem)
+    return "Não achei um pedido recente aqui no seu número. 😕" + NL +
+      "Já chamei alguém da loja pra ver isso com você. 🙌"
+  }
+
+  const t = " " + semAcento(mensagem).replace(/[^a-z0-9 ]/g, " ") + " "
+  const reclamacao = /\b(atrasad|demorand|esquecer|esqueceram|esqueceu|frio|fria|errad|faltou|faltando|cancelar|cancela|reclamar|absurd|horas|nao chegou|nao veio|nao recebi)/.test(t)
+  const status = String(p.status ?? "")
+  const retirada = String(p.tipo_entrega ?? "") === "retirada"
+  const num = p.numero_pedido ? ` #${p.numero_pedido}` : ""
+  const fase = faseDoPedido(status, retirada, String(p.entregador ?? "").split(/\s+/)[0] ?? "")
+  const chamaGente = reclamacao || status === "entregue" || status === "cancelado"
+
+  if (chamaGente) {
+    await abrirChamado(supabase, empresaId, phone, mensagem)
+    return `Seu pedido${num} ${fase}.` + NL + NL +
+      "Já avisei alguém aqui da loja pra falar com você agora. 🙌"
+  }
+  const fim = status === "saiu_entrega"
+    ? "Já tá chegando! 🛵"
+    : "Qualquer coisa é só falar que eu chamo alguém da loja. 🙌"
+  return `Seu pedido${num} ${fase}. ✅` + NL + fim
+}
+
 // ── Primeira fala: o texto é da loja ─────────────────────────────────────────
 // Cada loja fala do seu jeito. O padrão da casa é este; quem quiser muda no
 // Portal (WhatsApp → Conexão / Config) sem mexer em código.
@@ -1121,6 +1230,17 @@ export async function responderSemIA({
           "assim que abrir te respondem por aqui mesmo. 🙌",
         )
       }
+      // Pedido feito pouco antes de fechar: o cliente continua esperando a
+      // comida depois que a porta fecha, e "tamos fechados" não responde "cadê
+      // meu pedido?". O status é o mesmo do banco, abertos ou fechados.
+      const pedidoFechada = perguntouDePedidoFeito(mensagem)
+      if (pedidoFechada) {
+        const fala = await respostaDoPedido(supabase, empresaId, phone, mensagem, pedidoFechada)
+        if (fala) {
+          if (!(await reservarAviso(supabase, empresaId, phone, "pedido", 2))) return false
+          return await responder(fala)
+        }
+      }
       // Duas checagens porque são dois problemas diferentes: o histórico pega
       // o aviso que já saiu, a reserva pega o aviso que está saindo AGORA na
       // outra execução — cliente que manda "Bom dia" e "Ok" seguidos acorda
@@ -1243,6 +1363,20 @@ export async function responderSemIA({
       if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
       await abrirChamado(supabase, empresaId, phone, mensagem)
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
+    }
+
+    // 2c) PERGUNTOU DO PEDIDO QUE JÁ FEZ ("meu pedido #1024", "cadê?"). Vem
+    //     antes de tudo o que fala de pedido NOVO: a palavra "pedido" está nas
+    //     duas perguntas, e o passo 4 respondia as duas com o link de comprar.
+    //     A trava de 2 min é só contra mensagem dobrada — meia hora depois ele
+    //     pode (e vai) perguntar de novo, e aí tem resposta.
+    const sobrePedido = perguntouDePedidoFeito(mensagem)
+    if (sobrePedido) {
+      const fala = await respostaDoPedido(supabase, empresaId, phone, mensagem, sobrePedido)
+      if (fala) {
+        if (!(await reservarAviso(supabase, empresaId, phone, "pedido", 2))) return false
+        return await responder(fala)
+      }
     }
 
     // 3) O recado do dia (mig 0314): "tem promoção hoje?", "tem happy hour?".
