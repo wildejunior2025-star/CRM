@@ -584,7 +584,7 @@ function NotaFiscalDoPedido({ pedido }) {
     if (!empresa?.id || !pedido?.id) return
     const [fis, nf] = await Promise.all([
       supabase.from('empresa_fiscal').select('ativo, focus_registrada, ambiente').eq('empresa_id', empresa.id).maybeSingle(),
-      supabase.from('nfce_notas').select('id, status, numero, serie, ambiente, danfe_url, motivo_rejeicao')
+      supabase.from('nfce_notas').select('*')
         .eq('pedido_id', pedido.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ])
     setPronta(!!(fis.data?.ativo && fis.data?.focus_registrada))
@@ -610,7 +610,8 @@ function NotaFiscalDoPedido({ pedido }) {
       const resp = await r.json()
       if (resp?.ok || resp?.ja_emitida) {
         setMsg({ ok: true, txt: resp?.ja_emitida ? 'Este pedido já tem nota.' : 'Nota autorizada!' })
-        if (resp?.nota?.danfe_url) window.open(resp.nota.danfe_url, '_blank')
+        // Cupom fiscal direto na térmica; se o app da impressora não estiver aberto, avisa.
+        if (resp?.nota && !resp?.ja_emitida) await imprimir(resp.nota, false)
       } else if (resp?.status === 'processando') {
         setMsg({ ok: true, txt: 'Enviada. Aguardando a SEFAZ autorizar — veja de novo em instantes.' })
       } else {
@@ -621,6 +622,32 @@ function NotaFiscalDoPedido({ pedido }) {
     } finally {
       setEmitindo(false)
       carregar()
+    }
+  }
+
+  // Manda o cupom fiscal pra térmica deste computador (app Impressora FWC).
+  async function imprimir(n, segundaVia) {
+    setMsg(null)
+    try {
+      const itens = (Array.isArray(pedido.itens) ? pedido.itens : []).map(i => ({
+        nome: i.nome ?? i.descricao, quantidade: i.quantidade ?? i.qtd ?? 1, preco: i.preco_unitario ?? i.preco ?? 0,
+      }))
+      const { data: emp } = await supabase.from('empresas')
+        .select('nome, razao_social, cnpj, endereco, numero, bairro, cidade, estado').eq('id', empresa.id).maybeSingle()
+      const r = await fwcFetch('/api/imprimir-nfce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nota: { ...n, forma_pagamento: pedido.forma_pagamento ?? null, emitida_em: new Date(n.created_at).toLocaleString('pt-BR') },
+          empresa: emp, itens, segunda_via: !!segundaVia,
+        }),
+      })
+      const j = await r.json()
+      setMsg(j?.ok
+        ? { ok: true, txt: 'Cupom enviado para a impressora.' }
+        : { ok: false, txt: j?.erro === 'sem impressora' ? 'Nenhuma impressora configurada neste computador.' : (j?.erro || 'Não consegui imprimir.') })
+    } catch {
+      setMsg({ ok: false, txt: 'O app Impressora FWC não respondeu neste computador. Ele precisa estar aberto.' })
     }
   }
 
@@ -637,6 +664,7 @@ function NotaFiscalDoPedido({ pedido }) {
           {nota.danfe_url && (
             <a href={nota.danfe_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">🧾 Abrir cupom</a>
           )}
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => imprimir(nota, true)}>🖨️ Imprimir</button>
         </div>
       ) : (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
