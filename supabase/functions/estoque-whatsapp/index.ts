@@ -49,7 +49,26 @@ type NotaLida = {
   vencimento?: string | null  // quando é a prazo (boleto, duplicata, fatura)
   pago: boolean | null        // null = o documento não deixou claro
   forma: string | null
+  // A nota quebrada por categoria de gasto (mig 0389), já conferida contra o
+  // total por quem leu o papel. null/vazio = não deu pra separar.
+  rateio?: { categoria: string; valor: number }[] | null
 } | null
+
+// "Alimentos R$ 92,29 · Limpeza e higiene R$ 18,07" — do jeito que o dono lê no
+// zap. Sem rateio, a linha de sempre.
+function linhasDoRateio(nota: NonNullable<NotaLida>): string {
+  const r = Array.isArray(nota.rateio) ? nota.rateio : []
+  if (!r.length) return "📊 Categoria: Fornecedores"
+  return "📊 Categorias:\n" + r.map((l) => `   ▪️ ${l.categoria}: *${brl(l.valor)}*`).join("\n")
+}
+
+// A categoria da CONTA (a etiqueta que filtra no Portal) é a maior do rateio:
+// numa compra de R$ 110 com R$ 92 de alimento, "Fornecedores" não diz nada e
+// "Alimentos" diz quase tudo. Empate ou sem rateio: Fornecedores, como antes.
+function categoriaDaConta(nota: NonNullable<NotaLida>): string {
+  const r = Array.isArray(nota.rateio) ? nota.rateio : []
+  return r.length ? r[0].categoria : "Fornecedores"
+}
 
 // ESTOQUE PELO ROBÔ: EM PAUSA (23/10/2026)
 //
@@ -340,7 +359,10 @@ async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType
   // olhando a nota já tem isso na frente, e uma segunda chamada à IA só pra
   // perguntar "de quem é essa nota?" seria pagar duas vezes pelo mesmo papel.
   return {
-    itens, naoAchados, nota: (d.nota ?? null) as NotaLida,
+    // O rateio vem solto na resposta (ele fala do documento inteiro, não de um
+    // item): entra junto da nota, que é quem vira despesa.
+    itens, naoAchados,
+    nota: (d.nota ? { ...d.nota, rateio: Array.isArray(d.rateio) ? d.rateio : null } : null) as NotaLida,
     aviso: d.aviso as string | null,
     custoUsd: usd({ entrada: d.uso?.entrada ?? 0, saida: d.uso?.saida ?? 0 }),
   }
@@ -362,9 +384,13 @@ function linhaDespesa(nota: any, temItens: boolean): string | null {
   //
   // Comprovante sem itens: a despesa é a mensagem inteira, não um "e também".
   const abre = temItens ? "💸 E no financeiro, *vou lançar*" : "💸 Entendi este comprovante. *Vou lançar*"
+  // A quebra por categoria aparece ANTES do SIM: é onde o dono percebe que a
+  // nota do açougue trouxe R$ 18 de limpeza junto — e pode corrigir antes.
+  const r = Array.isArray(nota.rateio) ? nota.rateio : []
+  const cats = r.length ? "\n" + r.map((l: any) => `   ▪️ ${l.categoria}: *${brl(Number(l.valor))}*`).join("\n") : ""
   return nota.pago === false
-    ? `${abre} uma conta *A PAGAR*: *${nota.fornecedor}* — ${brl(nota.valor_total)}, vence ${quando}.`
-    : `${abre} uma despesa (já paga por você): *${nota.fornecedor}* — ${brl(nota.valor_total)} em ${quando}${comoPagou}.`
+    ? `${abre} uma conta *A PAGAR*: *${nota.fornecedor}* — ${brl(nota.valor_total)}, vence ${quando}.${cats}`
+    : `${abre} uma despesa (já paga por você): *${nota.fornecedor}* — ${brl(nota.valor_total)} em ${quando}${comoPagou}.${cats}`
 }
 function resumo(itens: Item[], naoAchados: NaoAchado[], corrige = false, info: Map<string, { saldo: number; custo: number }> = new Map(), nota: any = null): string {
   let total = 0, temPreco = false, prejuizo = 0
@@ -597,7 +623,8 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
   const { data: c, error } = await sb.from("contas_financeiras").insert({
     empresa_id: empresaId, tipo: "pagar",
     descricao: `Compra — ${nota.fornecedor}${numero}`,
-    pessoa: nota.fornecedor, categoria: "Fornecedores",
+    pessoa: nota.fornecedor, categoria: categoriaDaConta(nota),
+    rateio: (nota.rateio?.length ? nota.rateio : null),
     valor: nota.valor_total, vencimento: vence, recorrencia: "nenhuma", origem: "whatsapp",
   }).select("id").single()
   if (error) {
@@ -625,13 +652,13 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
       `🏪 Fornecedor: *${nota.fornecedor}*\n` +
       `💸 Valor: *${brl(nota.valor_total)}*\n` +
       `📆 Pago em: ${ddmmBR(emissao)}${forma}\n` +
-      `📊 Categoria: Fornecedores${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
+      `${linhasDoRateio(nota)}${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
       `Se foi engano, responda *DESFAZER*.`
     : `🟠 *Conta a pagar registrada*\n\n` +
       `🏪 Fornecedor: *${nota.fornecedor}*\n` +
       `💸 Valor: *${brl(nota.valor_total)}*\n` +
       `📆 Vence em: *${ddmmBR(vence)}*\n` +
-      `📊 Categoria: Fornecedores${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
+      `${linhasDoRateio(nota)}${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
       `Quando pagar, me diga *"paguei ${nota.fornecedor.split(/\s+/)[0]}"* que eu dou baixa.\n` +
       `Se foi engano, responda *DESFAZER*.`
 }
@@ -652,7 +679,8 @@ async function rascunhoDaNota(empresaId: string, jid: string, nota: NonNullable<
       rascunho: true, tipo: "pagar",
       descricao: temFornecedor ? `Compra — ${nota.fornecedor}${numero}` : `Compra${numero}`,
       pessoa: temFornecedor ? nota.fornecedor : null,
-      categoria: "Fornecedores",
+      categoria: categoriaDaConta(nota),
+      rateio: nota.rateio?.length ? nota.rateio : null,
       valor: nota.valor_total,
       falta_fornecedor: !temFornecedor,
       emissao,
@@ -752,6 +780,9 @@ async function executarAcao(empresaId: string, a: any): Promise<string> {
   } else if (a.tipo === "conta_criar") {
     const { data: c, error } = await sb.from("contas_financeiras").insert({
       empresa_id: empresaId, tipo: p.tipo, descricao: p.descricao, pessoa: p.pessoa ?? null, categoria: p.categoria ?? null,
+      // Rateio do rascunho da nota (mig 0389): o papel já foi lido, a quebra
+      // por categoria é a mesma — ela só esperava o SIM.
+      rateio: Array.isArray(p.rateio) && p.rateio.length ? p.rateio : null,
       valor: p.valor, vencimento: p.vencimento, recorrencia: p.recorrencia ?? "nenhuma", origem: "whatsapp",
     }).select("id").single()
     if (error) throw error

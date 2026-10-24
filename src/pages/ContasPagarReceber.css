@@ -282,3 +282,36 @@ p.cpr-previa { margin: 12px 0 0; }
 .cpr-combo-lista li.criar { color: var(--primary); font-weight: 700; border-top: 1px solid var(--border); border-radius: 0 0 8px 8px; margin-top: 2px; }
 .cpr-combo-lista li.criar:only-child { border-top: 0; margin-top: 0; }
 .cpr-combo input { width: 100%; box-sizing: border-box; }
+
+
+/* ── Nota quebrada por categoria, dentro da linha da conta (mig 0389) ────── */
+.cpr-rateio { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.cpr-rateio-item {
+  font-size: 11.5px; color: var(--text-muted); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+.cpr-rateio-item strong { color: var(--text); font-weight: 700; }
+
+/* ── "Em que o dinheiro foi": total por categoria do que está filtrado ───── */
+.cpr-cats { margin-bottom: 16px; }
+.cpr-cats-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.cpr-cats-topo h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.cpr-cats-total { font-size: 15px; font-weight: 800; color: var(--danger); }
+.cpr-cats-ajuda { margin: 4px 0 10px; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.cpr-cats-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.cpr-cat-linha {
+  width: 100%; display: grid; grid-template-columns: minmax(90px, 1.3fr) 2fr auto 38px;
+  align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 8px;
+  background: transparent; cursor: pointer; text-align: left; font: inherit; color: var(--text);
+}
+.cpr-cat-linha:hover { background: var(--bg); }
+.cpr-cat-linha.ativa { background: var(--primary-bg, rgba(124, 58, 237, .12)); }
+.cpr-cat-nome { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.cpr-cat-barra { height: 8px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.cpr-cat-barra i { display: block; height: 100%; border-radius: 999px; background: var(--danger); opacity: .75; }
+.cpr-cat-valor { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.cpr-cat-pct { font-size: 12px; color: var(--text-muted); text-align: right; }
+@media (max-width: 640px) {
+  .cpr-cat-linha { grid-template-columns: minmax(80px, 1fr) auto 36px; }
+  .cpr-cat-barra { display: none; }
+}

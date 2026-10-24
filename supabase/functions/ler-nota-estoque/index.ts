@@ -63,7 +63,8 @@ serve(async (req) => {
       "{",
       '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null } ],',
       '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
-      '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null }',
+      '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null },',
+      '  "rateio": [ { "categoria": string, "valor": number } ]',
       "}",
       "",
       "Regras:",
@@ -121,6 +122,21 @@ serve(async (req) => {
       "  'numero' = o numero da nota fiscal (o 'No.' da NF-e), se aparecer.",
       "- 'descricao' = o texto da linha COMO ESTÁ NA NOTA, abreviação e tudo (ex.: 'B MAIZN ESTRL 307G').",
       "  É o que a loja vê pra conferir se você casou com o item certo. Vale pra TODO item de 'itens'.",
+      // EM QUE O DINHEIRO FOI (24/10/2026). "Fornecedores: R$ 110,36" serve pra
+      // pagar e não serve pra decidir nada. Separado por categoria o dono vê que
+      // gastou 18 reais de limpeza numa compra de alimento — e é isso que faz
+      // ele entender o próprio custo.
+      "- 'rateio' = a nota dividida POR CATEGORIA DE GASTO, somando EXATAMENTE o 'valor_total'.",
+      "  Classifique CADA linha da nota em UMA destas categorias (escreva igualzinho):",
+      "    Alimentos | Bebidas | Limpeza e higiene | Descartáveis | Gás |",
+      "    Equipamentos e utensílios | Manutenção | Serviços | Outros",
+      "  Some as linhas da mesma categoria numa entrada só. Desconto e acréscimo do rodapé:",
+      "  abata/acrescente na categoria do item a que pertencem; se não der pra saber de qual",
+      "  item é, divida proporcional ao peso de cada categoria. O total tem que FECHAR com",
+      "  'valor_total' — é o número que vira despesa.",
+      "  Nota de um assunto só (ex.: só carne) devolve UMA categoria com o total inteiro.",
+      "  Não conseguiu separar (papel ilegível, sem itens discriminados): devolva [] — melhor",
+      "  sem rateio do que rateio inventado.",
       "",
       "CATÁLOGO DA LOJA (indice<TAB>[TIPO] nome):",
       catalogoTxt || "(vazio)",
@@ -267,7 +283,45 @@ serve(async (req) => {
       }
       : null
 
-    return json({ ok: true, itens, nao_encontrados, nota, aviso, uso: { entrada: Number(data?.usage?.input_tokens || 0), saida: Number(data?.usage?.output_tokens || 0) } })
+    // RATEIO POR CATEGORIA — conferido na mão, não no olho do modelo.
+    //
+    // Somar é onde modelo erra, e rateio que não fecha com o total vira
+    // despesa torta no financeiro. Então: junta as categorias repetidas, vê o
+    // que falta pro total e joga a sobra na MAIOR categoria (é onde o desconto
+    // de rodapé quase sempre mora). Se a diferença for grande demais pra ser
+    // arredondamento, joga o rateio fora — a despesa sai inteira, como antes.
+    let rateio: { categoria: string; valor: number }[] | null = null
+    if (nota) {
+      // As MESMAS que o Portal sugere em Contas a pagar (CATEGORIAS.pagar):
+      // categoria inventada aqui viraria uma etiqueta que a loja nunca escolhe
+      // na mão, e o relatório por categoria nasceria dividido em duas listas.
+      const PERMITIDAS = [
+        "Alimentos", "Bebidas", "Limpeza e higiene", "Descartáveis",
+        "Gás", "Equipamentos e utensílios", "Manutenção", "Serviços", "Outros",
+      ]
+      const soma = new Map<string, number>()
+      for (const r of (Array.isArray(parsed.rateio) ? parsed.rateio : [])) {
+        const v = Number(r?.valor)
+        if (!Number.isFinite(v) || v <= 0) continue
+        const nome = PERMITIDAS.find((c) => c.toLowerCase() === String(r?.categoria ?? "").trim().toLowerCase()) ?? "Outros"
+        soma.set(nome, Math.round(((soma.get(nome) ?? 0) + v) * 100) / 100)
+      }
+      const linhas = [...soma.entries()].map(([categoria, valor]) => ({ categoria, valor }))
+        .sort((a, b) => b.valor - a.valor)
+      if (linhas.length) {
+        const total = nota.valor_total
+        const dif = Math.round((total - linhas.reduce((s, l) => s + l.valor, 0)) * 100) / 100
+        const tolerancia = Math.max(2, total * 0.02)
+        if (Math.abs(dif) <= tolerancia) {
+          linhas[0].valor = Math.round((linhas[0].valor + dif) * 100) / 100
+          rateio = linhas.filter((l) => l.valor > 0)
+        } else {
+          console.log(`[nota] rateio fora do total (dif ${dif} de ${total}) — ignorei`)
+        }
+      }
+    }
+
+    return json({ ok: true, itens, nao_encontrados, nota, rateio, aviso, uso: { entrada: Number(data?.usage?.input_tokens || 0), saida: Number(data?.usage?.output_tokens || 0) } })
   } catch (e) {
     console.error("ler-nota-estoque:", e)
     return json({ ok: false, error: String((e as Error)?.message ?? e) }, 500)

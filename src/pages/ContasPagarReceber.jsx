@@ -50,8 +50,13 @@ function somaMeses(s, n, diaRef) {
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 const nomeMes = (s) => { const m = MESES[Number(s.slice(5, 7)) - 1]; return `${m[0].toUpperCase()}${m.slice(1)} ${s.slice(0, 4)}` }
 
+// As seis primeiras são as que o robô do WhatsApp usa pra separar a nota por
+// categoria (ler-nota-estoque). Elas vêm na frente de propósito: são as que mais
+// aparecem no dia a dia de quem compra mercadoria, e elas PRECISAM existir aqui
+// — senão a loja veria no filtro uma etiqueta que nunca poderia escolher na mão.
 const CATEGORIAS = {
-  pagar: ['Fornecedores', 'Aluguel', 'Energia', 'Água', 'Gás', 'Internet e telefone', 'Salários e encargos', 'Impostos e taxas',
+  pagar: ['Alimentos', 'Bebidas', 'Limpeza e higiene', 'Descartáveis', 'Equipamentos e utensílios', 'Serviços',
+    'Fornecedores', 'Aluguel', 'Energia', 'Água', 'Gás', 'Internet e telefone', 'Salários e encargos', 'Impostos e taxas',
     'Manutenção', 'Marketing', 'Maquininha e taxas', 'Empréstimos', 'Outros'],
   receber: ['Venda a prazo', 'Repasse iFood', 'Repasse cartão', 'Empréstimo a receber', 'Aluguel recebido', 'Outros'],
 }
@@ -291,7 +296,11 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
       // Atrasada aparece sempre que o período termina no futuro: some só se o filtro for "pagas" ou mês fechado.
       const ref = sit === 'paga' ? (c.pago_em || c.vencimento) : c.vencimento
       if (situacaoFiltro !== 'vencidas' && (ref < ini || ref > fim)) return false
-      if (categoriaFiltro && c.categoria !== categoriaFiltro) return false
+      // A categoria pode estar na etiqueta OU dentro do rateio da nota: filtrar
+      // só pela etiqueta escondia justamente a compra que tinha R$ 18 daquela
+      // categoria no meio.
+      if (categoriaFiltro && c.categoria !== categoriaFiltro
+        && !(Array.isArray(c.rateio) && c.rateio.some((r) => r?.categoria === categoriaFiltro))) return false
       if (q && !`${c.descricao} ${c.pessoa || ''} ${c.categoria || ''} ${c.observacao || ''}`.toLowerCase().includes(q)) return false
       return true
     })
@@ -324,6 +333,27 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
     }
     return lista
   }, [filtradas, hoje, situacaoFiltro])
+
+  // ── Em que o dinheiro foi ──────────────────────────────────────────────────
+  // A pergunta que a tela não respondia: ela mostrava QUANDO sai e PRA QUEM, e
+  // nunca EM QUÊ. Soma o que está na lista filtrada, respeitando o rateio da
+  // nota (uma compra de R$ 110 conta R$ 92 em Alimentos e R$ 18 em Limpeza, não
+  // R$ 110 num lugar só).
+  const porCategoria = useMemo(() => {
+    const mapa = new Map()
+    const soma = (cat, v) => { if (v > 0) mapa.set(cat, (mapa.get(cat) ?? 0) + v) }
+    for (const c of filtradas) {
+      if (c.tipo !== 'pagar') continue
+      const total = Number(c.valor) || 0
+      const r = Array.isArray(c.rateio) ? c.rateio.filter((x) => Number(x?.valor) > 0) : []
+      if (r.length) for (const l of r) soma(l.categoria, Number(l.valor))
+      else soma(c.categoria || 'Sem categoria', total)
+    }
+    const lista = [...mapa.entries()].map(([categoria, valor]) => ({ categoria, valor }))
+      .sort((a, b) => b.valor - a.valor)
+    const total = lista.reduce((s, l) => s + l.valor, 0)
+    return { lista, total }
+  }, [filtradas])
 
   const categoriasDoFiltro = useMemo(() => {
     const set = new Set()
@@ -447,6 +477,45 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
 
           {/* ── Gráfico: próximos 30 dias ── */}
           {!semNada && <Grafico barras={barras} />}
+
+          {/* ── Em que o dinheiro foi ── */}
+          {porCategoria.lista.length > 0 && (
+            <div className="card cpr-cats">
+              <div className="cpr-cats-topo">
+                <h3>Em que o dinheiro foi</h3>
+                <span className="cpr-cats-total">{brl(porCategoria.total)}</span>
+              </div>
+              <p className="cpr-cats-ajuda">
+                Soma o que está na lista abaixo, do jeito que seus filtros estão. Clique numa
+                categoria pra ver só ela.
+              </p>
+              <ul className="cpr-cats-lista">
+                {porCategoria.lista.slice(0, 10).map((l) => {
+                  const pct = porCategoria.total > 0 ? (l.valor / porCategoria.total) * 100 : 0
+                  const ativa = categoriaFiltro === l.categoria
+                  return (
+                    <li key={l.categoria}>
+                      <button type="button" className={`cpr-cat-linha ${ativa ? 'ativa' : ''}`}
+                        onClick={() => setCategoriaFiltro(ativa ? '' : l.categoria)}
+                        title={ativa ? 'Mostrar todas de novo' : `Ver só ${l.categoria}`}>
+                        <span className="cpr-cat-nome">{l.categoria}</span>
+                        <span className="cpr-cat-barra"><i style={{ width: `${Math.max(2, pct)}%` }} /></span>
+                        <span className="cpr-cat-valor">{brl(l.valor)}</span>
+                        <span className="cpr-cat-pct">{pct.toFixed(0)}%</span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+              {porCategoria.lista.some((l) => l.categoria === 'Sem categoria') && (
+                <p className="cpr-cats-ajuda">
+                  💡 “Sem categoria” é conta que ninguém etiquetou. Abra a conta, toque em
+                  <strong> Categoria</strong> e escreva o nome que você quiser — se não existir,
+                  aparece <strong>“＋ Criar categoria”</strong> na própria lista.
+                </p>
+              )}
+            </div>
+          )}
 
           {semNada ? (
             <div className="card cpr-vazio">
@@ -590,6 +659,17 @@ function LinhaConta({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar
           <span className={`cpr-quando cpr-quando-${sit}`}>{quandoTexto(c, hoje)}</span>
           {c.observacao && <span className="cpr-obs" title={c.observacao}> · 📝 {c.observacao}</span>}
         </div>
+        {/* A nota quebrada por categoria (mig 0389). Uma compra de R$ 110 que
+            trouxe R$ 18 de limpeza junto só conta essa história aqui. */}
+        {Array.isArray(c.rateio) && c.rateio.length > 1 && (
+          <div className="cpr-rateio">
+            {c.rateio.map((r) => (
+              <span key={r.categoria} className="cpr-rateio-item">
+                {r.categoria} <strong>{brl(Number(r.valor))}</strong>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="cpr-linha-valor">
         <span className={`cpr-valor ${pagar ? 'cpr-neg' : 'cpr-pos'} ${sit === 'paga' ? 'cpr-riscado' : ''}`}>{brl(sit === 'paga' ? c.valor : restante)}</span>
