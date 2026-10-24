@@ -90,6 +90,8 @@ export function itensParaPedido(itens) {
     const nome = comps.length ? `${i.nome} (${comps.map(c => c.nome).join(', ')})` : i.nome
     return {
       produto_id: i.produto_id ?? i.id, nome, preco: i.preco, qtd: i.qtd,
+      // Pedido pela mesa (QR): "sem cebola", "carne ao ponto" — vai pra cozinha.
+      obs: String(i.obs ?? '').trim().slice(0, 140) || undefined,
       // Além do nome, a montagem vai estruturada: é o que permite somar depois
       // quanto os adicionais custaram pra loja (migração 0247).
       complementos: complementosParaGravar(comps),

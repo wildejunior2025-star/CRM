@@ -118,14 +118,29 @@ export default function MesaCardapio() {
     if (compMap[p.produto_id]?.length) { setMontando(p); return }
     setCarrinho(c => ({ ...c, [p.produto_id]: {
       produto_id: p.produto_id, nome: p.nome, preco: Number(p.preco_venda),
-      qtd: (c[p.produto_id]?.qtd ?? 0) + 1, complementos: [],
+      qtd: (c[p.produto_id]?.qtd ?? 0) + 1, complementos: [], obs: c[p.produto_id]?.obs ?? '',
     } }))
+  }
+  function mudarObs(id, obs) {
+    setCarrinho(c => (c[id] ? { ...c, [id]: { ...c[id], obs } } : c))
+  }
+  // 2 hambúrgueres e só um sem cebola: separa uma unidade pra ela ter a própria observação.
+  function separar(id) {
+    setCarrinho(c => {
+      const it = c[id]
+      if (!it || it.qtd < 2) return c
+      return {
+        ...c,
+        [id]: { ...it, qtd: it.qtd - 1 },
+        [`${id}~${Date.now()}`]: { ...it, qtd: 1, obs: '' },
+      }
+    })
   }
   function addComplemento(produto, complementos, precoUnit) {
     const key = `${produto.produto_id}::${complementos.map(c => c.nome).join(',')}`
     setCarrinho(c => ({ ...c, [key]: {
       produto_id: produto.produto_id, nome: produto.nome, preco: precoUnit,
-      qtd: (c[key]?.qtd ?? 0) + 1, complementos,
+      qtd: (c[key]?.qtd ?? 0) + 1, complementos, obs: c[key]?.obs ?? '',
     } }))
     setMontando(null)
   }
@@ -255,17 +270,32 @@ export default function MesaCardapio() {
               <button onClick={() => setDrawer(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
             {itens.map(i => (
-              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #2c2350' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14 }}>{i.nome}</div>
-                  {(i.complementos ?? []).map((c, j) => (
-                    <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
-                  ))}
-                  <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
+              <div key={i.id} style={{ padding: '8px 0', borderBottom: '1px solid #2c2350' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14 }}>{i.nome}</div>
+                    {(i.complementos ?? []).map((c, j) => (
+                      <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
+                    ))}
+                    <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
+                  </div>
+                  <button onClick={() => mudar(i.id, -1)} style={btnQ}>−</button>
+                  <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{i.qtd}</span>
+                  <button onClick={() => mudar(i.id, +1)} style={btnQ}>+</button>
                 </div>
-                <button onClick={() => mudar(i.id, -1)} style={btnQ}>−</button>
-                <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{i.qtd}</span>
-                <button onClick={() => mudar(i.id, +1)} style={btnQ}>+</button>
+                <input
+                  value={i.obs ?? ''}
+                  onChange={e => mudarObs(i.id, e.target.value)}
+                  maxLength={140}
+                  placeholder="📝 Observação (ex.: sem cebola, carne ao ponto)"
+                  style={{ width: '100%', marginTop: 8, padding: '9px 12px', borderRadius: 10, border: '1px solid #2c2350', background: '#1b1430', color: '#fff', fontSize: 13 }}
+                />
+                {i.qtd > 1 && (
+                  <button onClick={() => separar(i.id)}
+                    style={{ marginTop: 6, background: 'none', border: 'none', color: '#a78bfa', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                    ✂ Uma das {i.qtd} é diferente? Separar
+                  </button>
+                )}
               </div>
             ))}
             <div style={{ display: 'flex', justifyContent: 'space-between', margin: '14px 0', fontSize: 16, fontWeight: 800 }}>
