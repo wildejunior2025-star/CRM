@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
+import { FORMAS_VALE } from '../lib/constants'
 import '../components/Page.css'
 import './Caixa.css'
 
@@ -82,7 +83,7 @@ function rotuloSemana(offset) {
 }
 
 export default function Caixa() {
-  const { user, profile } = useAuth()
+  const { user, profile, empresa } = useAuth()
   const isAdmin = profile?.perfil === 'admin'
 
   const [loading, setLoading] = useState(true)
@@ -133,6 +134,11 @@ export default function Caixa() {
   // o papel dela com o que foi lançado — é o que pega a venda esquecida.
   const [valorFechamentoCartao, setValorFechamentoCartao] = useState('')
   const [obsFechamento, setObsFechamento] = useState('')
+  // Vales (Pluxee, Alelo, VR, Ticket): cada bandeira tem a PRÓPRIA maquineta, então
+  // a conferência é uma por bandeira — esperado (do sistema) x contado (o que a
+  // maquineta dela fechou). { pluxee: 120.5, ... } e { pluxee: '120.50', ... }.
+  const [valesEsperados, setValesEsperados] = useState({})
+  const [valesContados, setValesContados] = useState({})
 
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState(null)
@@ -669,6 +675,41 @@ export default function Caixa() {
     if (porDia) setDiaVersao(v => v + 1); else loadAll()
   }
 
+  // Quanto cada bandeira de vale recebeu neste caixa (ou neste dia): salão/balcão
+  // vêm de `pagamentos`; delivery vem da view, que sabe a forma de CADA parte
+  // (num pagamento dividido ela está dentro da parte, não no pedido).
+  async function carregarValesPorBandeira() {
+    const marcas = FORMAS_VALE.map(v => v.value)
+    const soma = Object.fromEntries(marcas.map(m => [m, 0]))
+    const idCaixa = caixaAtual?.id
+    if (!porDia && !idCaixa) return soma
+    const [iniDia, fimDia] = limitesDoDia(dia)
+    const pg = supabase.from('pagamentos').select('valor, forma_pagamento').in('forma_pagamento', marcas)
+    const dl = supabase.from('caixa_delivery_partes').select('valor, forma').eq('bucket', 'vale')
+    const [a, b] = await Promise.all([
+      porDia ? pg.gte('created_at', iniDia).lt('created_at', fimDia) : pg.eq('caixa_id', idCaixa),
+      porDia ? dl.eq('dia', dia) : dl.eq('caixa_id', idCaixa),
+    ])
+    for (const p of (a.data ?? [])) if (soma[p.forma_pagamento] != null) soma[p.forma_pagamento] += Number(p.valor || 0)
+    for (const d of (b.data ?? [])) if (soma[d.forma] != null) soma[d.forma] += Number(d.valor || 0)
+    for (const m of marcas) soma[m] = Math.round(soma[m] * 100) / 100
+    return soma
+  }
+
+  // O que fica gravado: por bandeira, o contado e o esperado congelado. Bandeira
+  // sem movimento e sem nada digitado nem entra.
+  function montarValesConferidos() {
+    const o = {}
+    for (const v of FORMAS_VALE) {
+      const esp = Number(valesEsperados[v.value] || 0)
+      const raw = valesContados[v.value]
+      const tem = raw !== '' && raw != null
+      if (!tem && esp === 0) continue
+      o[v.value] = { contado: tem ? Number(raw) : null, esperado: esp }
+    }
+    return Object.keys(o).length ? o : null
+  }
+
   // Abre o fechamento com os três campos JÁ PREENCHIDOS com o esperado. Na
   // maioria dos dias bate, e o vendedor só confirma em vez de digitar três
   // valores no fim do expediente. Quando não bate, ele apaga e põe o certo — os
@@ -681,7 +722,12 @@ export default function Caixa() {
     setValorFechamentoCartao(resumo ? valorEsperadoCartao.toFixed(2) : '')
     setObsFechamento('')
     setFormError(null)
+    setValesEsperados({}); setValesContados({})
     setShowFechamento(true)
+    carregarValesPorBandeira().then(v => {
+      setValesEsperados(v)
+      setValesContados(Object.fromEntries(Object.entries(v).map(([k, n]) => [k, n > 0 ? n.toFixed(2) : ''])))
+    }).catch(() => { /* sem a conferência dos vales o resto do fechamento segue valendo */ })
   }
 
   // Tira o retrato congelado e o dia volta a ser calculado ao vivo. Venda
@@ -694,7 +740,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     setSaving(true)
     const { error: err } = await supabase.from('caixa_dia').update({
       contado_dinheiro: null, contado_pix: null, contado_cartao: null,
-      esperado_dinheiro: null, esperado_pix: null, esperado_cartao: null,
+      esperado_dinheiro: null, esperado_pix: null, esperado_cartao: null, conferido_vales: null,
       fechado_em: null, fechado_por: null,
     }).eq('id', diaRow.id)
     setSaving(false)
@@ -730,6 +776,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
         esperado_dinheiro: valorEsperadoDinheiro,
         esperado_pix: valorEsperadoPix,
         esperado_cartao: valorEsperadoCartao,
+        conferido_vales: montarValesConferidos(),
         observacoes: obsFechamento || null,
         fechado_em: new Date().toISOString(),
         fechado_por: user?.id ?? null,
@@ -748,6 +795,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       p_observacoes: obsFechamento || null,
       p_valor_fechamento_pix: valorFechamentoPix === '' ? null : Number(valorFechamentoPix),
       p_valor_fechamento_cartao: valorFechamentoCartao === '' ? null : Number(valorFechamentoCartao),
+      p_conferido_vales: montarValesConferidos(),
     })
     setSaving(false)
 
@@ -1463,6 +1511,18 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                                 </span>
                               </div>
                             )}
+                            {c.conferido_vales && Object.entries(c.conferido_vales).filter(([, x]) => x && x.contado != null).map(([marca, x]) => {
+                              const dv = Number(x.contado) - Number(x.esperado || 0)
+                              const nome = FORMAS_VALE.find(f => f.value === marca)?.label ?? marca
+                              return (
+                                <div key={marca} style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
+                                  🍽️ {nome} na maquineta: R$ {Number(x.contado).toFixed(2)} · esperado R$ {Number(x.esperado || 0).toFixed(2)} ·{' '}
+                                  <span style={{ color: Math.abs(dv) < 0.005 ? 'var(--success, #16a34a)' : (dv > 0 ? 'var(--primary)' : 'var(--danger, #ef4444)') }}>
+                                    Diferença: R$ {dv.toFixed(2)}{Math.abs(dv) < 0.005 ? ' (confere)' : dv > 0 ? ' (sobra)' : ' (falta)'}
+                                  </span>
+                                </div>
+                              )
+                            })}
                             {difPix !== null && (
                               <div style={{ marginTop: 4, fontSize: 13.5, fontWeight: 700 }}>
                                 📱 PIX conferido: R$ {Number(c.valor_fechamento_pix).toFixed(2)} ·{' '}
@@ -1902,6 +1962,9 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
               )}
               Esperado em dinheiro: <strong>R$ {valorEsperadoDinheiro.toFixed(2)}</strong><br />
               Esperado em PIX: <strong>R$ {valorEsperadoPix.toFixed(2)}</strong>
+              {valeDe(resumo) > 0 && (
+                <><br />Recebido em vales: <strong>R$ {valeDe(resumo).toFixed(2)}</strong> — confira na maquineta de cada um, abaixo</>
+              )}
             </p>
             <form onSubmit={handleFechar}>
               <div className="form-grid">
@@ -2030,6 +2093,51 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                     )}
                   </div>
                 )}
+                {/* VALES: uma conferência por bandeira, cada uma com a maquineta dela.
+                    Aparece pra quem aceita o vale (ligado em Minha Loja → Pagamento) ou
+                    que recebeu algum hoje — loja que não usa não vê nada disso. */}
+                {(() => {
+                  const ligadas = Array.isArray(empresa?.formas_pagamento) ? empresa.formas_pagamento : []
+                  const marcas = FORMAS_VALE.filter(v => ligadas.includes(v.value) || Number(valesEsperados[v.value] || 0) > 0)
+                  if (!marcas.length) return null
+                  return (
+                    <div className="form-field full" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                      <label>🍽️ Vales — total que cada maquineta fechou <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.85em' }}>opcional</span></label>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 8 }}>
+                        Cai na conta de cada operadora, não na gaveta. Compare com o fechamento da maquineta.
+                      </span>
+                      {marcas.map(v => {
+                        const esp = Number(valesEsperados[v.value] || 0)
+                        const raw = valesContados[v.value]
+                        const dif = (raw === '' || raw == null || Number.isNaN(Number(raw))) ? null : Number(raw) - esp
+                        return (
+                          <div key={v.value} style={{ marginBottom: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <span style={{ minWidth: 70, fontWeight: 700 }}>{v.label}</span>
+                              <input
+                                type="number" min="0" step="0.01" inputMode="decimal"
+                                value={raw ?? ''}
+                                onChange={(e) => setValesContados(p => ({ ...p, [v.value]: e.target.value }))}
+                                onFocus={(e) => e.target.select()}
+                                placeholder={`Esperado: ${esp.toFixed(2)}`}
+                                style={{ flex: 1 }}
+                              />
+                            </div>
+                            {dif !== null && (
+                              <span
+                                className={`badge ${Math.abs(dif) < 0.005 ? 'badge-success' : dif > 0 ? 'badge-primary' : 'badge-danger'}`}
+                                style={{ marginTop: 4, display: 'inline-block' }}
+                              >
+                                Diferença {v.label}: R$ {dif.toFixed(2)}
+                                {Math.abs(dif) < 0.005 ? ' (confere)' : dif > 0 ? ' (venda na maquineta não lançada)' : ' (lançado e não passou na maquineta)'}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
                 <div className="form-field full">
                   <label htmlFor="obs-fechamento">Observações</label>
                   <textarea
