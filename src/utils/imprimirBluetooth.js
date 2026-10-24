@@ -7,7 +7,7 @@
 // ⚠️ Web Bluetooth só conversa com impressoras Bluetooth "BLE". Impressoras
 // "Bluetooth Classic" (SPP) NÃO aparecem aqui — nesse caso, usar o app RawBT.
 // ============================================================================
-import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma } from '../lib/pagamentoPartes'
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, ehFiado } from '../lib/pagamentoPartes'
 import { separarItem } from '../lib/itensPedido'
 import { agruparItensComanda } from '../lib/comanda'
 
@@ -343,7 +343,11 @@ export function montarCupomBytes(pedido, empresa = {}) {
       }
     }
     if (aCobrarNaEntrega(pedido) > 0) b.bold(true).txt('COBRAR NA ENTREGA: ' + fmt(aCobrarNaEntrega(pedido))).nl().bold(false)
-  } else b.txt('Pagamento: ' + (pedido.forma_pagamento || '-')).nl()
+  } else if (ehFiado(pedido.forma_pagamento)) {
+    // Fiado: a térmica do motoqueiro mandava "Pagamento: fiado" — o nome cru da
+    // coluna. O que ele precisa ler é que NÃO cobra; o "F" identifica o papel.
+    b.bold(true).txt('*** NAO COBRAR ***').nl().bold(false).txt('F').nl()
+  } else b.txt('Pagamento: ' + semAcento(nomeForma(pedido.forma_pagamento))).nl()
   if (pedido.forma_pagamento === 'dinheiro') {
     const trocoPara = Number(pedido.troco_para || 0)
     if (trocoPara > 0) {

@@ -18,9 +18,13 @@ export const NOME_FORMA = {
   vale: 'Vale',
   outro: 'Outro',
   dividido: 'Dividido',
+  fiado: 'Fiado',
 }
 
 export const nomeForma = f => NOME_FORMA[f] ?? (f || '—')
+
+/** Fiado: a loja pendurou. Ninguém pagou, mas também não se cobra na porta. */
+export const ehFiado = f => String(f || '').toLowerCase() === 'fiado'
 
 /** [{ forma, valor, troco_para }] — uma parte só quando o pedido não é dividido. */
 export function partesPagamento(p) {
@@ -54,8 +58,12 @@ export function partePaga(p, parte) {
 
 /** Quanto ainda falta cobrar do cliente na porta. */
 export function aCobrarNaEntrega(p) {
+  // Fiado fica de fora: não está pago (por isso `partePaga` diz não), mas o
+  // motoqueiro não cobra nada na porta — a dívida já ficou registrada na loja.
+  // Sem esta linha o cupom do Agv mandava cobrar R$ 49,98 de quem acabara de
+  // pendurar (pedido #1021, 24/10/2026).
   return Math.round(partesPagamento(p)
-    .filter(x => !partePaga(p, x))
+    .filter(x => !partePaga(p, x) && !ehFiado(x.forma))
     .reduce((s, x) => s + x.valor, 0) * 100) / 100
 }
 

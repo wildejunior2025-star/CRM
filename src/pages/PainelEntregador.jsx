@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { separarItem } from '../lib/itensPedido'
-import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento } from '../lib/pagamentoPartes'
+import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, textoPagamento, ehFiado } from '../lib/pagamentoPartes'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
 import { partesCobranca } from '../lib/cobrancaEntregador'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
@@ -319,11 +319,16 @@ function pagamentoInfo(p) {
     const detalhe = partesPagamento(p)
       .map(x => `${nomeForma(x.forma)} ${fmt(x.valor)}${partePaga(p, x) ? ' (já pago)' : ''}`)
       .join(' + ')
-    return falta > 0
-      ? { pago: false, titulo: `COBRAR ${fmt(falta)} NA ENTREGA`, detalhe, cor: '#f59e0b' }
-      : { pago: true, titulo: 'JÁ PAGO', detalhe, cor: '#16a34a' }
+    if (falta > 0) return { pago: false, titulo: `COBRAR ${fmt(falta)} NA ENTREGA`, detalhe, cor: '#f59e0b' }
+    const temFiado = partesPagamento(p).some(x => ehFiado(x.forma))
+    return { pago: true, titulo: temFiado ? 'NÃO COBRAR' : 'JÁ PAGO', detalhe, cor: '#16a34a' }
   }
   const forma = p.forma_pagamento
+  // Fiado: a loja pendurou antes de o pedido sair. Ele entrega e não cobra nada
+  // na porta — a dívida já está lançada no nome do cliente.
+  if (ehFiado(forma)) {
+    return { pago: true, titulo: 'NÃO COBRAR', detalhe: 'Fiado', cor: '#16a34a' }
+  }
   const ehIfood = p.origem === 'ifood'
   const sufIfood = ehIfood ? ' (via iFood)' : ''
   if (forma === 'dinheiro') {

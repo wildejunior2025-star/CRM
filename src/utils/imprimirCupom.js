@@ -44,6 +44,9 @@ function labelPagamento(pedido) {
   if (p === 'debito') return 'Cartão de débito'
   if (p === 'cartao') return 'Cartão'
   if (p === 'vale') return 'Vale-refeição'
+  // Fiado: no papel vai só o "F" (pedido do dono) — e, acima de tudo, a ordem
+  // de não cobrar, senão o motoqueiro cobra o total de novo.
+  if (p === 'fiado') return 'NÃO COBRAR (F)'
   return p || '—'
 }
 

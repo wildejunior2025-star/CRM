@@ -110,6 +110,13 @@ function formaPagamento(p) {
   // PIX pelo Mercado Pago só aparece depois de pago → aprovado no MP conta como pago.
   const prepago = f === 'online' || (f === 'pix' && (p.pix_status === 'pago' || p.mp_payment_status === 'approved'))
   if (prepago) return { cobrar: false, label: ifood ? 'PAGO no iFood' : (f === 'pix' ? 'PAGO via PIX' : 'PAGO') }
+  // FIADO NAO E DINHEIRO (24/10/2026)
+  // O balcao do Agv vende fiado pro delivery. Sem este caso, 'fiado' caia no
+  // padrao 'Dinheiro' e o papel mandava o motoqueiro cobrar os R$ 49,98 de quem
+  // tinha acabado de pendurar (pedido #1021). Nao e cobranca nem pagamento: e
+  // divida. No papel vai so um "F" — a pedido do dono, nada de escrever "fiado"
+  // num cupom que o cliente le.
+  if (f === 'fiado') return { cobrar: false, fiado: true, label: 'F' }
   let nome = 'Dinheiro'
   if (['cartao', 'cartao', 'credito', 'debito'].includes(f)) nome = f === 'debito' ? 'Debito' : f === 'credito' ? 'Credito' : 'Cartao'
   else if (f === 'pix') nome = 'PIX (nao confirmado)'
@@ -201,7 +208,9 @@ function montarCupom(pedido, empresa) {
     // Duas formas: uma linha por parte e o valor A COBRAR em destaque — o
     // motoqueiro nao pode cobrar o total inteiro quando metade ja foi no PIX.
     const pixPago = p.pix_status === 'pago' || p.mp_payment_status === 'approved'
-    const paga = x => x.forma === 'pix' && pixPago
+    // "paga" aqui quer dizer: nao entra na conta que o motoqueiro cobra. Fiado
+    // tambem nao entra — ficou pendurado na loja.
+    const paga = x => (x.forma === 'pix' && pixPago) || x.forma === 'fiado'
     const falta = partes.filter(x => !paga(x)).reduce((s2, x) => s2 + x.valor, 0)
     parts.push(linha(falta > 0 ? '*** COBRAR ' + money(falta) + ' NA ENTREGA ***' : '*** JA PAGO ***'))
     parts.push(SIZE(0), BOLD(1), linha('Pagamento em duas formas:'), BOLD(0), ALIGN(0))
@@ -234,6 +243,11 @@ function montarCupom(pedido, empresa) {
         parts.push(linha('(troco nao informado - confirmar)'))
       }
     }
+  } else if (pg.fiado) {
+    // Fiado nao e "ja pago" — ninguem pagou. O que o motoqueiro precisa saber e
+    // que NAO cobra; o "F" e pra loja reconhecer o papel depois.
+    parts.push(linha('*** NAO COBRAR ***'))
+    parts.push(SIZE(0), linha(pg.label))
   } else {
     parts.push(linha('*** JA PAGO ***'))
     parts.push(SIZE(0), linha(pg.label))

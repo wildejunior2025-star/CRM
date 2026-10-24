@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 42
+const APP_VERSION = 43
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -557,6 +557,27 @@ function marcarImpresso(id) {
 async function imprimirPedido(p, jaReservado) {
   if (!p || pedidosImpressos.has(p.id)) return
   if (!origemLigada(p.origem)) { log('  (' + (p.origem || '?') + ' DESLIGADO nesta impressora — nao imprimiu #' + (p.numero_pedido ?? p.id) + ')'); return }
+
+  // iFood SO VIRA PAPEL DEPOIS DE ACEITAR (24/10/2026)
+  //
+  // No iFood o pedido chega com status 'aguardando': a loja ainda NAO assumiu,
+  // e tanto o cliente quanto o proprio iFood ainda podem cancelar. O Agv usa
+  // "Aceitar auto" DESLIGADO — entao a comanda saia na cozinha de pedido que
+  // ninguem tinha aceitado, e com a termica longe do balcao a cozinha ja estava
+  // preparando prato que a loja talvez nem assumisse.
+  //
+  // Nao e o caso das outras origens: na loja online e no app o pedido ja nasce
+  // assumido e o papel E o aviso. Se eu segurasse todas, loja que nunca aperta
+  // "aceitar" ficaria sem papel nenhum. Por isso a regra e so do iFood.
+  //
+  // Quando alguem aceita (no nosso painel ou no app do iFood), o status vira
+  // 'confirmado' e o UPDATE do tempo real traz o pedido de volta pra ca. O
+  // botao de reimprimir do gestor nao passa por aqui: continua forcando papel.
+  if (p.origem === 'ifood' && p.status === 'aguardando') {
+    log('  (iFood #' + (p.ifood_display_id ?? p.numero_pedido ?? p.id) + ' ainda NAO ACEITO — nao imprimiu)')
+    return
+  }
+
   log('NOVO PEDIDO #' + (p.numero_pedido ?? p.id) + ' - ' + (p.cliente_nome || '') + ' (' + (p.origem || '') + ')')
   if (config().pausado) { log('  (impressao automatica PAUSADA — nao imprimiu)'); return }
 
@@ -696,8 +717,16 @@ async function verificarPendentes() {
     const { data: its } = await supabase.from('comanda_itens').select('*')
       .eq('empresa_id', empresaId).eq('status', 'pendente').gte('created_at', since)
     for (const it of (its || [])) if (!comandaItensImpressos.has(it.id)) agendarComandaMesa(it)
+    // Olha por ULTIMA MEXIDA, nao so por chegada. Com o iFood esperando aceite,
+    // o pedido pode chegar 11:00 e so ser aceito 11:20 — se o tempo real tivesse
+    // caido nesse minuto, pela janela antiga (chegada ha 5 min) ele nunca mais
+    // seria visto e o papel nao sairia. `created_at >= APP_START` continua
+    // segurando os pedidos de antes de o app abrir, que foi o que gerou papel
+    // fantasma no Agv em 23/10.
     const { data: peds } = await supabase.from('pedidos_delivery').select('*')
-      .eq('empresa_id', empresaId).gte('created_at', since)
+      .eq('empresa_id', empresaId)
+      .gte('created_at', new Date(APP_START).toISOString())
+      .gte('updated_at', new Date(Date.now() - 5 * 60 * 1000).toISOString())
     for (const p of (peds || [])) {
       // Mesma regra do tempo real: pedido que ja andou (pronto, saiu pra
       // entrega) nao vira papel, mesmo que este PC nunca o tenha impresso.
