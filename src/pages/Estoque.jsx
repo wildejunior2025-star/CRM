@@ -94,6 +94,11 @@ export default function Estoque() {
   const [motivos, setMotivos] = useState(MOTIVOS_PADRAO)
   const [showMotivosModal, setShowMotivosModal] = useState(false)
   const [filtroEstoque, setFiltroEstoque] = useState('todos') // todos | baixo | zerado
+  // Buscar pelo nome e filtrar por categoria (pedido do usuário, 24/10/2026):
+  // com 51 itens no celular — onde a coluna Categoria nem aparece — achar um
+  // produto era rolar a lista inteira com o dedo.
+  const [buscaEstoque, setBuscaEstoque] = useState('')
+  const [categoriaEstoque, setCategoriaEstoque] = useState('')
   const [motivoTab, setMotivoTab] = useState('entrada')
   const [novoMotivo, setNovoMotivo] = useState('')
   const [savingMotivo, setSavingMotivo] = useState(false)
@@ -229,9 +234,23 @@ export default function Estoque() {
   const nBaixo = saldoControlado.filter((s) => situacaoDe(s) === 'baixo').length
   // Numa loja de conveniência a lista passa de cem itens, e o que o dono quer
   // saber é só "o que eu preciso comprar hoje" (pedido do usuário, 16/10/2026).
-  const saldoFiltrado = filtroEstoque === 'todos'
-    ? saldoControlado
-    : saldoControlado.filter((s) => situacaoDe(s) === filtroEstoque)
+  // As categorias que REALMENTE têm produto com controle de estoque. Listar
+  // todas as do catálogo encheria o seletor de opção que não mostra nada.
+  const categoriasEstoque = [...new Set(saldoControlado.map((s) => s.categoria).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+
+  // Sem acento e sem caixa: quem digita "agua" tem que achar "Água com Gás".
+  const semAcento = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const termoEstoque = semAcento(buscaEstoque).trim()
+
+  const saldoFiltrado = saldoControlado.filter((s) => {
+    if (filtroEstoque !== 'todos' && situacaoDe(s) !== filtroEstoque) return false
+    if (categoriaEstoque && s.categoria !== categoriaEstoque) return false
+    // A busca olha o nome E a categoria: digitar "cerveja" acha o que está
+    // naquela prateleira, mesmo sem saber o nome exato da marca.
+    if (termoEstoque && !semAcento(`${s.nome} ${s.categoria ?? ''}`).includes(termoEstoque)) return false
+    return true
+  })
 
   async function handleMovSubmit(e) {
     e.preventDefault()
@@ -413,6 +432,50 @@ export default function Estoque() {
           )
         })}
       </div>
+      {/* Buscar e filtrar por categoria. No celular a coluna Categoria some da
+          tabela, então sem isto o dono rolava 51 linhas pra achar um item. */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <input
+          type="search"
+          value={buscaEstoque}
+          onChange={(e) => setBuscaEstoque(e.target.value)}
+          placeholder="🔎 Buscar produto..."
+          aria-label="Buscar produto no estoque"
+          style={{
+            flex: '1 1 180px', minWidth: 0, padding: '9px 12px', borderRadius: 10,
+            border: '1.5px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text)', fontSize: 14,
+          }}
+        />
+        {categoriasEstoque.length > 1 && (
+          <select
+            value={categoriaEstoque}
+            onChange={(e) => setCategoriaEstoque(e.target.value)}
+            aria-label="Filtrar por categoria"
+            style={{
+              flex: '0 1 170px', padding: '9px 10px', borderRadius: 10,
+              border: '1.5px solid var(--border)',
+              background: categoriaEstoque ? 'var(--primary)' : 'var(--surface)',
+              color: categoriaEstoque ? '#fff' : 'var(--text)',
+              fontSize: 14, fontWeight: categoriaEstoque ? 700 : 400, cursor: 'pointer',
+            }}
+          >
+            <option value="">Todas as categorias</option>
+            {categoriasEstoque.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        )}
+      </div>
+      {(termoEstoque || categoriaEstoque) && (
+        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '-4px 0 10px' }}>
+          Mostrando <strong>{saldoFiltrado.length}</strong> de {saldoControlado.length} produtos.{' '}
+          <button type="button" onClick={() => { setBuscaEstoque(''); setCategoriaEstoque('') }}
+            style={{ border: 0, background: 'transparent', color: 'var(--primary)', cursor: 'pointer', font: 'inherit', fontWeight: 700, padding: 0 }}>
+            limpar
+          </button>
+        </p>
+      )}
       <div className="data-table tabela-estoque" style={{ marginBottom: 24 }}>
         {loading ? (
           <div className="empty-state">Carregando...</div>
@@ -420,9 +483,11 @@ export default function Estoque() {
           <div className="empty-state">Nenhum produto com controle de estoque. Ligue o "Controla estoque" no produto (Catálogo) pra ele aparecer aqui.</div>
         ) : saldoFiltrado.length === 0 ? (
           <div className="empty-state">
-            {filtroEstoque === 'baixo'
-              ? 'Nenhum produto no mínimo. Está tudo abastecido.'
-              : 'Nenhum produto zerado.'}
+            {termoEstoque || categoriaEstoque
+              ? `Nenhum produto ${termoEstoque ? `com "${buscaEstoque.trim()}"` : ''}${termoEstoque && categoriaEstoque ? ' ' : ''}${categoriaEstoque ? `em ${categoriaEstoque}` : ''}.`
+              : filtroEstoque === 'baixo'
+                ? 'Nenhum produto no mínimo. Está tudo abastecido.'
+                : 'Nenhum produto zerado.'}
           </div>
         ) : (
           <table>
@@ -444,7 +509,12 @@ export default function Estoque() {
                 const baixo = sit === 'baixo'
                 return (
                   <tr key={s.produto_id}>
-                    <td>{s.nome}</td>
+                    <td>
+                      {s.nome}
+                      {/* No celular a coluna Categoria some. Ela volta aqui como
+                          legenda — é o que diz de qual prateleira é o item. */}
+                      {s.categoria && <span className="so-no-celular">{s.categoria}</span>}
+                    </td>
                     <td className="col-extra">{s.categoria}</td>
                     <td>
                       {s.quantidade_atual}
