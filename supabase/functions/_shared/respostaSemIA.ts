@@ -1198,11 +1198,15 @@ export async function responderSemIA({
     // As últimas falas do robô: é o que diz se o link já foi (não repete a cada
     // mensagem — link em toda linha vira paisagem) e se a última coisa que ele
     // disse foi a pergunta do atendente.
+    //
+    // 12 e não 5: quem decide se o link já foi nesta hora é esta lista. Com 5, a
+    // conversa que andou (preço, taxa, endereço, status do pedido) empurrava o
+    // link pra fora da janela e ele voltava a sair como se fosse a primeira vez.
     const umaHora = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const { data: ultimas } = await supabase.from("whatsapp_conversas")
       .select("content, created_at").eq("empresa_id", empresaId)
       .like("phone", `%${chave8(phone)}`).eq("role", "assistant")
-      .gte("created_at", umaHora).order("created_at", { ascending: false }).limit(5)
+      .gte("created_at", umaHora).order("created_at", { ascending: false }).limit(12)
     const recentes = Array.isArray(ultimas) ? ultimas : []
     const vezesQueMandouOLink = recentes.filter((m: Record<string, unknown>) =>
       String(m.content ?? "").includes("lojaonline.fwcinter.com")).length
@@ -1432,9 +1436,13 @@ export async function responderSemIA({
         await abrirChamado(supabase, empresaId, phone, mensagem)
         return await responder("Já chamei alguém aqui da loja pra anotar com você. 🙌 Só um instante!")
       }
+      // O link só entra se ele não tiver saído na última hora. Quem acabou de
+      // receber o cardápio não precisa dele de novo três linhas abaixo — o
+      // caminho ("escolhe, joga na sacola, paga") é o que estava faltando.
       return await responder(
         `Boa! 🙌 Por aqui o pedido é pelo link, é rapidinho:${NL}` +
-        `é só escolher, ${MARCA_PEDIDO} e avançar pra forma de pagamento.${NL}${link}`,
+        `é só escolher, ${MARCA_PEDIDO} e avançar pra forma de pagamento.` +
+        (linkRecente ? `${NL}_(é aquele link que te mandei aqui em cima 👆)_` : `${NL}${link}`),
       )
     }
 
@@ -1470,18 +1478,18 @@ export async function responderSemIA({
       return await responder(montarPrimeiraFala(modelo, nome, link, horarioDeHoje(empresa, excecoes)))
     }
 
-    // 7) Segunda vez que ele não entende: manda o link de novo, agora dizendo o
-    //    que tem lá dentro. Pode ser que o cliente nem tenha aberto na primeira.
-    if (vezesQueMandouOLink === 1) {
-      if (!(await reservarAviso(supabase, empresaId, phone, "link2", 60))) return false
-      return await responder(
-        `Nossos produtos e as promoções tão todos aqui, dá uma conferida: 👇${NL}${link}`,
-      )
-    }
-
-    // 8) Terceira. Já mandou o link duas vezes e ele continua perguntando por
-    //    aqui — o cliente não quer o link, e insistir vira teimosia de robô.
-    //    Oferece gente, que é o que ele está pedindo desde a segunda pergunta.
+    // 7) O LINK VAI UMA VEZ POR HORA, PONTO (24/10/2026).
+    //
+    //    Aqui saía o link de novo ("Nossos produtos e as promoções tão todos
+    //    aqui") na segunda pergunta que o robô não entendia. A ideia era "pode
+    //    ser que ele nem tenha aberto na primeira" — mas na prática quem leva
+    //    esse segundo link é o cliente que JÁ pediu e voltou pra perguntar
+    //    alguma coisa enquanto a comida é feita. Receber o cardápio outra vez no
+    //    meio do pedido é o robô dizendo que não está acompanhando nada.
+    //
+    //    Então: dentro da hora em que o link já foi, ele não vai mais. O que
+    //    sobra é oferecer gente — que é o certo pra quem perguntou duas coisas
+    //    que o robô não soube responder.
     if (!(await reservarAviso(supabase, empresaId, phone, "oferece-atendente", 60))) return false
     return await responder(`Essa eu não sei te responder por aqui. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
