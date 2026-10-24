@@ -95,8 +95,8 @@ const json = (d: unknown, s = 200) =>
       "",
       "Responda SOMENTE com um JSON válido, sem texto antes ou depois:",
       "{",
-      '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null } ],',
-      '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
+      '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "por_embalagem": number | null } ],',
+      '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "por_embalagem": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
       '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null },',
       '  "classificacao": [ { "descricao": string, "valor": number, "categoria": string } ]',
       "}",
@@ -115,6 +115,21 @@ const json = (d: unknown, s = 200) =>
       // "16,000" como 15 e so a multiplicacao denunciava. Com o total da linha
       // na mao, quem corrige e o codigo, que nao erra.
       "- 'total_linha' = o TOTAL daquela linha como esta impresso na nota (a ultima coluna). Copie, nao calcule.",
+      // CAIXA/FARDO: o estoque conta UNIDADE, o dinheiro e o da LINHA (24/10/2026)
+      //
+      // Numa nota de distribuidora a linha vem "1,00 | Caranguejo latao | 51,99":
+      // uma CAIXA de 12 latas por R$ 51,99. O modelo explodia certo (12 latas no
+      // estoque) e repetia o preco da caixa em cada lata — 12 x 51,99 = R$ 623,88
+      // numa compra de R$ 51,99. O dia da La em Casa fechou em R$ 3.397 numa nota
+      // de R$ 434,86.
+      //
+      // A regra agora e so uma, e quem faz a conta e o codigo: a nota diz QUANTO
+      // FOI PAGO naquela linha; o modelo diz quantas unidades tem dentro.
+      "- 'quantidade' e 'custo_unit' sao SEMPRE os da nota, como impressos — NUNCA explodidos.",
+      "- 'por_embalagem' = quantas UNIDADES vem dentro de cada embalagem daquela linha:",
+      "  'c/ 12', 'cx 24', 'fardo c/ 6', 'pack 15' -> 12, 24, 6, 15. Long neck de cerveja em",
+      "  caixa fechada costuma vir 6. Item solto, a granel ou por peso -> 1 ou null.",
+      "  Na duvida use 1: unidade a mais no estoque o dono conserta, dinheiro errado nao.",
       "- Use ponto como separador decimal (ex.: 4.50).",
       "- Só use índices que existam no catálogo. Não invente itens que não estão na nota.",
       "- Em 'nao_encontrados', escreva o 'nome' POR EXTENSO e em minúsculo, desabreviando o que",
@@ -292,27 +307,56 @@ const json = (d: unknown, s = 200) =>
       return certo > 0 ? certo : q
     }
 
+    /**
+     * A caixa vira unidade no estoque, mas o DINHEIRO é o da linha da nota.
+     *
+     * "1,00 | Caranguejo latão | 51,99" é uma caixa de 12 latas por R$ 51,99:
+     * o estoque recebe 12, e cada lata custou 51,99 ÷ 12 = R$ 4,33. Repetir os
+     * 51,99 em cada lata foi o que fez a La em Casa fechar o dia em R$ 3.397
+     * numa nota de R$ 434,86 (24/10/2026).
+     *
+     * O total da linha é o âncora: é o que o dono pagou, está impresso, e não
+     * depende de o modelo saber quantas garrafas cabem na caixa. Se ele errar o
+     * `por_embalagem`, sobra ou falta unidade no estoque — mas o dinheiro fecha.
+     */
+    const explodir = (q: number, custo: number | null, totalLinha: unknown, porEmb: unknown) => {
+      const t = Number(totalLinha)
+      const total = Number.isFinite(t) && t > 0 ? t : (custo && custo > 0 ? Math.round(q * custo * 100) / 100 : null)
+      const f = Number(porEmb)
+      const fator = Number.isFinite(f) && f >= 2 ? Math.round(f) : 1
+      const quantidade = Math.round(q * fator * 1000) / 1000
+      if (!total || quantidade <= 0) return { quantidade, custo_unit: custo }
+      return { quantidade, custo_unit: Math.round((total / quantidade) * 10000) / 10000 }
+    }
+
     const itens: { tipo: string; id: string; nome: string; descricao: string; quantidade: number; custo_unit: number | null }[] = []
     for (const it of (Array.isArray(parsed.itens) ? parsed.itens : [])) {
       const c = cat[Number(it?.indice)]
       if (!c) continue
       const custo = it?.custo_unit != null && Number.isFinite(Number(it.custo_unit)) ? Number(it.custo_unit) : null
       const q = porConta(qtd(it?.quantidade), custo, it?.total_linha)
-      itens.push({ tipo: c.tipo, id: c.id, nome: c.nome, descricao: String(it?.descricao ?? "").slice(0, 120), quantidade: q, custo_unit: custo })
+      const fim = explodir(q, custo, it?.total_linha, it?.por_embalagem)
+      itens.push({
+        tipo: c.tipo, id: c.id, nome: c.nome, descricao: String(it?.descricao ?? "").slice(0, 120),
+        quantidade: fim.quantidade, custo_unit: fim.custo_unit,
+      })
     }
 
     const nao_encontrados = (Array.isArray(parsed.nao_encontrados) ? parsed.nao_encontrados : [])
-      .map((n: any) => ({
-        nome: String(n?.nome ?? "").slice(0, 120),
-        descricao: String(n?.descricao ?? "").slice(0, 120),
-        quantidade: porConta(
-          qtd(n?.quantidade),
-          n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null,
-          n?.total_linha,
-        ),
-        custo_unit: n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null,
-        unidade: ["kg", "g", "L", "ml", "un"].includes(String(n?.unidade)) ? String(n.unidade) : "un",
-      }))
+      .map((n: any) => {
+        const custo = n?.custo_unit != null && Number.isFinite(Number(n.custo_unit)) ? Number(n.custo_unit) : null
+        const q = porConta(qtd(n?.quantidade), custo, n?.total_linha)
+        // Mesma conta da caixa: item novo entra pelo mesmo caminho que o
+        // cadastrado, senão o erro voltava pela porta dos fundos.
+        const fim = explodir(q, custo, n?.total_linha, n?.por_embalagem)
+        return {
+          nome: String(n?.nome ?? "").slice(0, 120),
+          descricao: String(n?.descricao ?? "").slice(0, 120),
+          quantidade: fim.quantidade,
+          custo_unit: fim.custo_unit,
+          unidade: ["kg", "g", "L", "ml", "un"].includes(String(n?.unidade)) ? String(n.unidade) : "un",
+        }
+      })
       .filter((n: any) => n.nome)
 
     // Avisa o lojista quando a nota era grande demais e pode ter sobrado item de fora.
