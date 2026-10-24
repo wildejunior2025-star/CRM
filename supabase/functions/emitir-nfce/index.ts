@@ -87,6 +87,18 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(bin)
 }
 
+// A SEFAZ aceita no máximo 120 letras na descrição do item. Quentinha com a lista
+// de acompanhamentos escolhidos passa disso fácil ("Quentinha grande (Frango
+// assado, Arroz com cenoura, ...)" tem 160) e a nota inteira era recusada com
+// "Erro na validação do Schema XML" (Agv, 24/10/2026). Na nota vale o nome do
+// PRODUTO: a lista do que veio dentro é da cozinha, não do fisco.
+function descricaoDoItem(nome: string): string {
+  const limpo = nome.replace(/s+/g, " ").trim()
+  if (limpo.length <= 120) return limpo
+  const base = limpo.replace(/s*(.*$/, "").trim()
+  return (base.length > 0 && base.length <= 120 ? base : limpo.slice(0, 120)).trim()
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   const json = (d: unknown, s = 200) =>
@@ -363,7 +375,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     return {
       numero_item: String(idx + 1),
       codigo_produto: String(it.codigo ?? it.id ?? idx + 1),
-      descricao: String(it.nome ?? it.descricao ?? "Item"),
+      descricao: descricaoDoItem(String(it.nome ?? it.descricao ?? "Item")),
       codigo_ncm: ncm,
       cfop,
       unidade_comercial: "UN",
@@ -526,7 +538,11 @@ function mapearRetornoFocus(data: any, ambiente: string): Record<string, unknown
   if (data?.caminho_danfe) patch.danfe_url = data.caminho_danfe.startsWith("http") ? data.caminho_danfe : host + data.caminho_danfe
   if (data?.caminho_xml_nota_fiscal) patch.xml_url = data.caminho_xml_nota_fiscal.startsWith("http") ? data.caminho_xml_nota_fiscal : host + data.caminho_xml_nota_fiscal
   if (status === "rejeitada") {
-    patch.motivo_rejeicao = data?.mensagem_sefaz ?? data?.mensagem ?? data?.erros?.[0]?.mensagem
+    // Com o detalhe dos erros junto: "Erro na validação do Schema XML" sozinho não
+    // diz o que consertar (era uma descrição com mais de 120 letras).
+    const detalhes = Array.isArray(data?.erros) ? data.erros.map((e: any) => e?.mensagem).filter(Boolean).join("; ") : ""
+    const base = data?.mensagem_sefaz ?? data?.mensagem ?? data?.erros?.[0]?.mensagem
+    patch.motivo_rejeicao = (base && detalhes && !String(base).includes(detalhes) ? `${base}: ${detalhes}`.slice(0, 500) : base)
       ?? (data?.codigo ? String(data.codigo) : null)
       ?? JSON.stringify(data ?? {}).slice(0, 300)
   }
