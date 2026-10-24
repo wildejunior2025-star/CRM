@@ -1490,7 +1490,7 @@ export default function Produtos() {
   const totalPaginas = Math.ceil(produtosOrdenados.length / PAGE_SIZE)
   const usaCasco = produtos.some((p) => p.controla_casco)
   // Nome, Categoria, Custo, Venda, Disponível e ações são fixas.
-  const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? (MOSTRAR_UN_CAIXA ? 3 : 2) : 0) + (usaCasco ? 1 : 0)
+  const totalColunas = 6 + (MOSTRAR_PRECO_APP ? 1 : 0) + (usaEstoque ? (MOSTRAR_UN_CAIXA ? 2 : 1) : 0) + (usaCasco ? 1 : 0)
 
   return (
     <div>
@@ -1601,7 +1601,6 @@ export default function Produtos() {
               <tr>
                 <th>Nome</th>
                 <th className="col-extra">Categoria</th>
-                {usaEstoque && <th className="col-extra">Embalagem</th>}
                 {usaCasco && <th className="col-extra">Casco</th>}
                 <th className="col-extra">Custo</th>
                 <th>Venda</th>
@@ -1727,7 +1726,6 @@ export default function Produtos() {
                     </div>
                   </td>
                   <td className="col-extra">{p.categoria}</td>
-                  {usaEstoque && <td className="col-extra">{p.embalagem}</td>}
                   {usaCasco && <td className="col-extra">{p.controla_casco ? 'Sim' : 'Não'}</td>}
                   <td className="col-extra">
                     {p.custo_pct_venda != null
