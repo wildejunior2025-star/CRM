@@ -38,6 +38,7 @@ export default function PesarNaBalanca({
   const [pesando, setPesando] = useState(false)
   const [peso, setPeso] = useState(null)      // { kg, total } — congelado
   const [erro, setErro] = useState(null)
+  const [digitado, setDigitado] = useState('')  // peso digitado à mão, em gramas
   const [lancando, setLancando] = useState(false)
   const [ok, setOk] = useState(null)
   const buscaMesa = useRef(null)
@@ -152,6 +153,23 @@ export default function PesarNaBalanca({
     setTimeout(() => buscaMesa.current?.focus(), 50)
   }
 
+  // PESO DIGITADO (24/10/2026): computador sem balança ligada. O atendente lê o
+  // peso no visor da balança de outro lugar e digita as gramas; o valor sai da
+  // mesma conta da pesagem. Sem vírgula = gramas (450 → 0,450 kg); com vírgula
+  // ou ponto = quilos (0,45 / 1,2).
+  function usarDigitado() {
+    if (!produto) { setErro('Escolha o produto primeiro.'); return }
+    const s = digitado.trim().replace(/\s/g, '')
+    const n = /[.,]/.test(s) ? Number(s.replace(',', '.')) : Number(s) / 1000
+    if (!(n > 0)) { setErro('Digite o peso em gramas. Ex.: 450'); return }
+    if (n > 20) { setErro('Esse peso está alto demais pra um prato. Digite em gramas (ex.: 450).'); return }
+    const quilos = Math.round(n * 1000) / 1000
+    setErro(null); setOk(null)
+    setPeso({ kg: quilos, total: Math.round(quilos * Number(produto.preco_venda) * 100) / 100, digitado: true })
+    setDigitado('')
+    setTimeout(() => buscaMesa.current?.focus(), 50)
+  }
+
   // Porta errada é tão provável quanto velocidade errada: este computador pode
   // ter outro aparelho serial autorizado antes (a catraca da academia roda no
   // mesmo endereço), e a Web Serial entrega a primeira da lista sem dizer qual é.
@@ -210,7 +228,7 @@ export default function PesarNaBalanca({
       nome: produto.nome, preco_unitario: produto.preco_venda,
       quantidade: porPeso ? peso.kg : 1,
       status: 'entregue', lancado_por: userId ?? null,
-      observacao: porPeso ? `${kg(peso.kg)} kg × ${brl(produto.preco_venda)}/kg` : null,
+      observacao: porPeso ? `${kg(peso.kg)} kg × ${brl(produto.preco_venda)}/kg${peso.digitado ? ' (peso digitado)' : ''}` : null,
     })
     setLancando(false)
     if (error) { setErro('Não consegui lançar: ' + error.message); return }
@@ -225,16 +243,9 @@ export default function PesarNaBalanca({
     onLancou?.()
   }
 
-  if (!serialSuportado()) {
-    return (
-      <Moldura onFechar={onFechar}>
-        <p style={{ fontSize: 15 }}>
-          Este aparelho não lê balança. A leitura funciona no <strong>Chrome do computador</strong> —
-          no celular e no iPad não existe.
-        </p>
-      </Moldura>
-    )
-  }
+  // Sem leitura de balança (celular, iPad, outro navegador) a tela continua
+  // servindo: dá pra digitar o peso. Só não existe o botão de pesar.
+  const suportado = serialSuportado()
 
   const mesasFiltradas = filtroMesa.trim()
     ? mesas.filter(m => String(m.numero).includes(filtroMesa.trim()))
@@ -251,7 +262,14 @@ export default function PesarNaBalanca({
           background: 'rgba(220,38,38,.12)', color: '#dc2626' }}>{erro}</div>
       )}
 
-      {!conectada && (
+      {!suportado && (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+          Este aparelho não lê balança (isso só funciona no <strong>Chrome do computador</strong>).
+          Escolha o prato e <strong>digite o peso</strong>.
+        </p>
+      )}
+
+      {suportado && !conectada && (
         <div style={{ marginBottom: 16 }}>
           <p style={{ fontSize: 14, margin: '0 0 8px' }}>
             A balança precisa ser escolhida uma vez neste computador. Depois o Chrome lembra.
@@ -275,7 +293,7 @@ export default function PesarNaBalanca({
       {/* Qual porta e qual velocidade estao em uso. Sem isto, balanca muda nao
           tinha conserto pela tela: o Chrome entrega a primeira porta
           autorizada e o atendente nao tinha como dizer "essa nao e a minha". */}
-      {conectada && (
+      {suportado && conectada && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
           fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
           <span>Balança: <strong>{infoPorta()}</strong> · {baud} bauds</span>
@@ -335,17 +353,45 @@ export default function PesarNaBalanca({
         </div>
       )}
 
-      {/* 2. Pesar — só pra quem é vendido por quilo */}
+      {/* 2. Pesar — só pra quem é vendido por quilo. Dois jeitos lado a lado:
+          ler da balança, ou digitar o peso (computador sem balança ligada). */}
       {!peso && produto?.vendido_por_peso !== false && (
-        <div style={{ textAlign: 'center', padding: '18px 0' }}>
-          <button type="button" onClick={pesar} disabled={!conectada || !produto || pesando}
-            style={{ ...botao('#16a34a'), fontSize: 20, padding: '18px 36px',
-              opacity: (!conectada || !produto || pesando) ? 0.5 : 1 }}>
-            {pesando ? 'Lendo a balança…' : '⚖️ Pesar o prato'}
-          </button>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
-            Coloque o prato na balança e toque aqui. Eu espero o peso parar sozinho.
-          </p>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start',
+          justifyContent: 'center', padding: '18px 0' }}>
+          <div style={{ flex: '1 1 220px', textAlign: 'center' }}>
+            <button type="button" onClick={pesar} disabled={!conectada || !produto || pesando}
+              style={{ ...botao('#16a34a'), fontSize: 20, padding: '18px 24px', width: '100%',
+                opacity: (!conectada || !produto || pesando) ? 0.5 : 1 }}>
+              {pesando ? 'Lendo a balança…' : '⚖️ Pesar o prato'}
+            </button>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
+              Coloque o prato na balança e toque aqui. Eu espero o peso parar sozinho.
+            </p>
+          </div>
+
+          <div style={{ flex: '1 1 220px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={digitado}
+                onChange={e => setDigitado(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); usarDigitado() } }}
+                inputMode="numeric"
+                placeholder="Peso em gramas"
+                disabled={!produto}
+                style={{ flex: 1, minWidth: 0, padding: '16px 12px', borderRadius: 10, fontSize: 20, fontWeight: 700,
+                  textAlign: 'center', border: '1.5px solid var(--border)', color: 'var(--text)',
+                  background: 'var(--input-bg, transparent)', opacity: produto ? 1 : 0.5 }}
+              />
+              <button type="button" onClick={usarDigitado} disabled={!produto || !digitado.trim()}
+                style={{ ...botao('#2563eb'), fontSize: 18, padding: '0 18px',
+                  opacity: (!produto || !digitado.trim()) ? 0.5 : 1 }}>
+                OK
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 10 }}>
+              Sem balança ligada? Digite as gramas (ex.: <strong>450</strong>) e aperte Enter.
+            </p>
+          </div>
         </div>
       )}
 
