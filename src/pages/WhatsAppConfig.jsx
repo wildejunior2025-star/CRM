@@ -552,6 +552,31 @@ export default function WhatsAppConfig() {
     setTimeout(() => setIaSaveMsg(null), 2500)
   }
 
+  // INTERRUPTOR DE AVISO SALVA NA HORA (24/10/2026)
+  //
+  // Estes ficam dentro do formulario com o botao "Salvar configuracoes" no
+  // fim, mas METADE dos interruptores desta mesma tela (IA, resposta por link,
+  // aviso de abertura, tutorial) salva sozinha ao clicar. Quem marcou um e
+  // saiu achou que tinha ligado — foi o que aconteceu com o aviso de caixa do
+  // Braseiro: marcado, nao salvo, e o fechamento da noite nao avisou ninguem.
+  //
+  // Marcar e ligar. Se o banco recusar, o botao volta sozinho pro estado
+  // anterior, pra tela nunca mostrar ligado o que nao esta.
+  async function salvarAviso(campo, valor, rotulo) {
+    setField(campo, valor)
+    setSaveMsg(null)
+    const { error } = await supabase
+      .from('whatsapp_config')
+      .upsert({ empresa_id: profile.empresa_id, [campo]: valor }, { onConflict: 'empresa_id' })
+    if (error) {
+      setField(campo, !valor)
+      setSaveMsg({ type: 'error', text: error.message })
+      return
+    }
+    setSaveMsg({ type: 'success', text: `${rotulo} ${valor ? 'ligado' : 'desligado'}.` })
+    setTimeout(() => setSaveMsg(null), 2500)
+  }
+
   async function salvarTutorial(patch) {
     if ('tutorial_ativo' in patch) setTutorialAtivo(patch.tutorial_ativo)
     setSalvandoTutorial(true)
@@ -1410,7 +1435,7 @@ export default function WhatsAppConfig() {
                 <input
                   type="checkbox"
                   checked={form.notif_estoque}
-                  onChange={(e) => setField('notif_estoque', e.target.checked)}
+                  onChange={(e) => salvarAviso('notif_estoque', e.target.checked, 'Alerta de estoque baixo')}
                 />
                 <div className="wa-checkbox-text">
                   <span>Alerta de estoque baixo no WhatsApp</span>
@@ -1426,7 +1451,7 @@ export default function WhatsAppConfig() {
                 <input
                   type="checkbox"
                   checked={form.notif_caixa}
-                  onChange={(e) => setField('notif_caixa', e.target.checked)}
+                  onChange={(e) => salvarAviso('notif_caixa', e.target.checked, 'Aviso de caixa')}
                 />
                 <div className="wa-checkbox-text">
                   <span>Avisar quando ABRIR e FECHAR o caixa</span>
@@ -1445,7 +1470,7 @@ export default function WhatsAppConfig() {
                 <input
                   type="checkbox"
                   checked={form.notif_entrada_estoque}
-                  onChange={(e) => setField('notif_entrada_estoque', e.target.checked)}
+                  onChange={(e) => salvarAviso('notif_entrada_estoque', e.target.checked, 'Aviso de estoque')}
                 />
                 <div className="wa-checkbox-text">
                   <span>Avisar quando mexerem no estoque (entrada e baixa)</span>
