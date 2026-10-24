@@ -20,7 +20,33 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
-  const json = (d: unknown, s = 200) =>
+  // As MESMAS categorias de compra do Portal (src/lib/categoriasFinanceiro.js).
+// Duas listas viram sinônimos ("Limpeza", "Limpeza e higiene") e o relatório
+// por categoria nasce dividido. Mudou lá, muda aqui.
+const CATEGORIAS_COMPRA = [
+  "Hortifruti", "Carnes e frios", "Laticínios e ovos", "Mercearia",
+  "Padaria e confeitaria", "Congelados", "Bebidas", "Descartáveis e embalagens",
+  "Limpeza e higiene", "Gás", "Equipamentos e utensílios", "Manutenção",
+]
+const PERMITIDAS = [...CATEGORIAS_COMPRA, "Outros"]
+
+type Grupo = { categoria: string; valor: number; itens: { d: string; v: number }[] }
+
+/**
+ * A chave do item: as DUAS primeiras palavras, sem acento e sem pontuação.
+ *
+ * "DET ABSOLUTO 400G" e "DET ABSOLUTO 500G" são o mesmo produto pro dono da
+ * loja — casar pela descrição inteira perderia a correção dele na semana
+ * seguinte, quando o fornecedor mandar a embalagem maior.
+ */
+function chaveDoItem(desc: string): string {
+  return String(desc ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/ +/g, " ").trim()
+    .split(" ").slice(0, 2).join(" ")
+}
+
+const json = (d: unknown, s = 200) =>
     new Response(JSON.stringify(d), { status: s, headers: { ...cors, "Content-Type": "application/json" } })
 
   try {
@@ -31,6 +57,14 @@ serve(async (req) => {
     const mimetype: string = body?.mimetype || "image/png"
     const prod: { id: string; nome: string }[] = (Array.isArray(body?.produtos) ? body.produtos : []).slice(0, 600)
     const mats: { id: string; nome: string }[] = (Array.isArray(body?.materias) ? body.materias : []).slice(0, 400)
+    // O que a loja já corrigiu (categoria_item_aprendida, mig 0390). Vai no
+    // pedido pra IA agrupar certo, e é aplicado de novo no código mais abaixo:
+    // prompt convence, código garante.
+    const dicionario: { termo: string; categoria: string }[] =
+      (Array.isArray(body?.dicionario) ? body.dicionario : []).slice(0, 300)
+        .map((d: any) => ({ termo: String(d?.termo ?? "").trim(), categoria: String(d?.categoria ?? "").trim() }))
+        .filter((d: { termo: string; categoria: string }) => d.termo && d.categoria)
+    const dicionarioTxt = dicionario.map((d) => `    "${d.termo}" → ${d.categoria}`).join("\n")
 
     if (!imageBase64) return json({ ok: false, error: "Nenhum arquivo recebido." }, 400)
 
@@ -64,7 +98,7 @@ serve(async (req) => {
       '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null } ],',
       '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
       '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null },',
-      '  "rateio": [ { "categoria": string, "valor": number } ]',
+      '  "classificacao": [ { "descricao": string, "valor": number, "categoria": string } ]',
       "}",
       "",
       "Regras:",
@@ -126,17 +160,40 @@ serve(async (req) => {
       // pagar e não serve pra decidir nada. Separado por categoria o dono vê que
       // gastou 18 reais de limpeza numa compra de alimento — e é isso que faz
       // ele entender o próprio custo.
-      "- 'rateio' = a nota dividida POR CATEGORIA DE GASTO, somando EXATAMENTE o 'valor_total'.",
-      "  Classifique CADA linha da nota em UMA destas categorias (escreva igualzinho):",
-      "    Alimentos | Bebidas | Limpeza e higiene | Descartáveis | Gás |",
-      "    Equipamentos e utensílios | Manutenção | Serviços | Outros",
-      "  Some as linhas da mesma categoria numa entrada só. Desconto e acréscimo do rodapé:",
-      "  abata/acrescente na categoria do item a que pertencem; se não der pra saber de qual",
-      "  item é, divida proporcional ao peso de cada categoria. O total tem que FECHAR com",
-      "  'valor_total' — é o número que vira despesa.",
-      "  Nota de um assunto só (ex.: só carne) devolve UMA categoria com o total inteiro.",
-      "  Não conseguiu separar (papel ilegível, sem itens discriminados): devolva [] — melhor",
-      "  sem rateio do que rateio inventado.",
+      "- 'classificacao' = UMA ENTRADA POR LINHA da nota, em que o dinheiro foi:",
+      "  'descricao' = o texto da linha como está na nota; 'valor' = o total daquela linha",
+      "  (com o desconto da própria linha já abatido); 'categoria' = UMA desta lista,",
+      "  escrita igualzinha:",
+      `    ${CATEGORIAS_COMPRA.join(" | ")} | Outros`,
+      // SEM ISTO O MODELO OSCILA. Na segunda leitura da MESMA nota ele mandou
+      // colorífico pra "Laticínios e ovos" — não por burrice, por fronteira mal
+      // definida. Uma linha dizendo o que cabe em cada uma resolve, e é mais
+      // barato que qualquer correção depois.
+      "  O que entra em cada uma:",
+      "    Hortifruti = fruta, verdura, legume, ovo caipira a granel.",
+      "    Carnes e frios = boi, frango, porco, peixe, linguiça, presunto, queijo fatiado de frios.",
+      "    Laticínios e ovos = leite, queijo, manteiga, margarina, iogurte, creme de leite, ovos.",
+      "    Mercearia = arroz, feijão, massa, farinha, açúcar, sal, óleo, tempero, colorífico,",
+      "      enlatado, molho, café, biscoito — a despensa seca em geral.",
+      "    Padaria e confeitaria = pão, bolo, fermento, chantilly, recheio, confeito.",
+      "    Congelados = o que vem congelado pronto (batata, empanado, polpa, sorvete).",
+      "    Bebidas = refrigerante, suco, água, cerveja, energético.",
+      "    Descartáveis e embalagens = marmita, saco, papel toalha, guardanapo, copo, talher",
+      "      descartável, filme, alumínio, etiqueta.",
+      "    Limpeza e higiene = detergente, sabão, desinfetante, água sanitária, luva, álcool.",
+      "    Gás = botijão e recarga de gás.",
+      "    Equipamentos e utensílios = panela, faca, balança, freezer, mesa, cadeira.",
+      "    Manutenção = conserto, peça, material de obra.",
+      "  Linha que não é mercadoria (taxa, frete, serviço cobrado na nota) vai em Outros.",
+      "  Some a soma das linhas perto do 'valor_total' — quem fecha a conta sou eu, mas",
+      "  linha faltando vira categoria errada.",
+      "  Papel ilegível ou sem itens discriminados: devolva [] — melhor sem separação do",
+      "  que separação inventada.",
+      ...(dicionarioTxt ? [
+        "- A LOJA JÁ CORRIGIU estes itens antes. Para eles, use a categoria que ela escolheu,",
+        "  mesmo que você discorde (ela conhece o negócio dela):",
+        dicionarioTxt,
+      ] : []),
       "",
       "CATÁLOGO DA LOJA (indice<TAB>[TIPO] nome):",
       catalogoTxt || "(vazio)",
@@ -290,25 +347,36 @@ serve(async (req) => {
     // que falta pro total e joga a sobra na MAIOR categoria (é onde o desconto
     // de rodapé quase sempre mora). Se a diferença for grande demais pra ser
     // arredondamento, joga o rateio fora — a despesa sai inteira, como antes.
-    let rateio: { categoria: string; valor: number }[] | null = null
+    let rateio: Grupo[] | null = null
     if (nota) {
-      // As MESMAS que o Portal sugere em Contas a pagar (CATEGORIAS.pagar):
-      // categoria inventada aqui viraria uma etiqueta que a loja nunca escolhe
-      // na mão, e o relatório por categoria nasceria dividido em duas listas.
-      const PERMITIDAS = [
-        "Alimentos", "Bebidas", "Limpeza e higiene", "Descartáveis",
-        "Gás", "Equipamentos e utensílios", "Manutenção", "Serviços", "Outros",
-      ]
-      const soma = new Map<string, number>()
-      for (const r of (Array.isArray(parsed.rateio) ? parsed.rateio : [])) {
-        const v = Number(r?.valor)
-        if (!Number.isFinite(v) || v <= 0) continue
-        const nome = PERMITIDAS.find((c) => c.toLowerCase() === String(r?.categoria ?? "").trim().toLowerCase()) ?? "Outros"
-        soma.set(nome, Math.round(((soma.get(nome) ?? 0) + v) * 100) / 100)
+      const mapaDic = new Map(dicionario.map((d) => [chaveDoItem(d.termo), d.categoria]))
+      const grupos = new Map<string, { valor: number; itens: { d: string; v: number }[] }>()
+      let classificadas = 0
+      for (const l of (Array.isArray(parsed.classificacao) ? parsed.classificacao : [])) {
+        const v = Math.round(Number(l?.valor) * 100) / 100
+        const desc = String(l?.descricao ?? "").trim().slice(0, 80)
+        if (!Number.isFinite(v) || v <= 0 || !desc) continue
+        classificadas++
+        // O QUE A LOJA DISSE MANDA. A IA pode ter voltado a chamar papel toalha
+        // de Limpeza; se a loja já mudou pra Descartáveis uma vez, é Descartáveis.
+        const corrigida = mapaDic.get(chaveDoItem(desc))
+        const nome = corrigida
+          ?? PERMITIDAS.find((c) => c.toLowerCase() === String(l?.categoria ?? "").trim().toLowerCase())
+          ?? "Outros"
+        const g = grupos.get(nome) ?? { valor: 0, itens: [] }
+        g.valor = Math.round((g.valor + v) * 100) / 100
+        g.itens.push({ d: desc, v })
+        grupos.set(nome, g)
       }
-      const linhas = [...soma.entries()].map(([categoria, valor]) => ({ categoria, valor }))
+      const linhas: Grupo[] = [...grupos.entries()]
+        .map(([categoria, g]) => ({ categoria, valor: g.valor, itens: g.itens }))
         .sort((a, b) => b.valor - a.valor)
       if (linhas.length) {
+        // A SOMA QUEM FECHA SOU EU. Desconto de rodapé, frete e arredondamento
+        // fazem as linhas não baterem com o total do documento — e rateio que
+        // não fecha vira despesa torta. A sobra vai pra MAIOR categoria, que é
+        // onde o desconto quase sempre mora; diferença grande demais pra ser
+        // arredondamento derruba a separação inteira (a despesa sai inteira).
         const total = nota.valor_total
         const dif = Math.round((total - linhas.reduce((s, l) => s + l.valor, 0)) * 100) / 100
         const tolerancia = Math.max(2, total * 0.02)
@@ -316,7 +384,7 @@ serve(async (req) => {
           linhas[0].valor = Math.round((linhas[0].valor + dif) * 100) / 100
           rateio = linhas.filter((l) => l.valor > 0)
         } else {
-          console.log(`[nota] rateio fora do total (dif ${dif} de ${total}) — ignorei`)
+          console.log(`[nota] separação fora do total (dif ${dif} de ${total}, ${classificadas} linhas) — ignorei`)
         }
       }
     }

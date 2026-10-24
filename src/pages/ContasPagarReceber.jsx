@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
+import { CATEGORIAS_PAGAR, CATEGORIAS_RECEBER, chaveDoItem } from '../lib/categoriasFinanceiro'
 import { useConfirmar } from '../hooks/useConfirmar'
 import '../components/Page.css'
 import './ContasPagarReceber.css'
@@ -50,16 +51,10 @@ function somaMeses(s, n, diaRef) {
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 const nomeMes = (s) => { const m = MESES[Number(s.slice(5, 7)) - 1]; return `${m[0].toUpperCase()}${m.slice(1)} ${s.slice(0, 4)}` }
 
-// As seis primeiras são as que o robô do WhatsApp usa pra separar a nota por
-// categoria (ler-nota-estoque). Elas vêm na frente de propósito: são as que mais
-// aparecem no dia a dia de quem compra mercadoria, e elas PRECISAM existir aqui
-// — senão a loja veria no filtro uma etiqueta que nunca poderia escolher na mão.
-const CATEGORIAS = {
-  pagar: ['Alimentos', 'Bebidas', 'Limpeza e higiene', 'Descartáveis', 'Equipamentos e utensílios', 'Serviços',
-    'Fornecedores', 'Aluguel', 'Energia', 'Água', 'Gás', 'Internet e telefone', 'Salários e encargos', 'Impostos e taxas',
-    'Manutenção', 'Marketing', 'Maquininha e taxas', 'Empréstimos', 'Outros'],
-  receber: ['Venda a prazo', 'Repasse iFood', 'Repasse cartão', 'Empréstimo a receber', 'Aluguel recebido', 'Outros'],
-}
+// A lista mora em src/lib/categoriasFinanceiro.js, que é a MESMA que o robô
+// usa pra separar a nota. Lista copiada vira sinônimo, e sinônimo quebra o
+// relatório por categoria.
+const CATEGORIAS = { pagar: CATEGORIAS_PAGAR, receber: CATEGORIAS_RECEBER }
 const FORMAS = [['pix', 'PIX'], ['dinheiro', 'Dinheiro'], ['transferencia', 'Transferência'], ['boleto', 'Boleto'],
   ['debito', 'Débito'], ['credito', 'Crédito'], ['cheque', 'Cheque'], ['outro', 'Outro']]
 const REPETICOES = [['nenhuma', 'Não repete'], ['parcelado', 'Parcelar em vezes'], ['semanal', 'Toda semana'],
@@ -403,6 +398,49 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
     observacao: '', jaQuitada: false, forma: 'pix',
   })
 
+  // ── Corrigir a categoria de um item da nota (e ensinar o robô) ─────────────
+  //
+  // A IA acerta a maioria e erra no ambíguo — papel toalha é Limpeza numa loja
+  // e Descartáveis na outra. Aqui o dono move o item, e a correção VIRA REGRA
+  // dele: na próxima nota aquele termo já entra certo (mig 0390).
+  async function corrigirItem(conta, item, novaCategoria) {
+    const grupos = (Array.isArray(conta.rateio) ? conta.rateio : [])
+      .map((g) => ({ ...g, itens: Array.isArray(g.itens) ? [...g.itens] : [] }))
+    if (!grupos.length) return
+    // Tira o item de onde estava e põe no novo grupo, levando o valor junto.
+    for (const g of grupos) g.itens = g.itens.filter((i) => !(i.d === item.d && i.v === item.v))
+    const destino = grupos.find((g) => g.categoria === novaCategoria)
+    if (destino) destino.itens.push(item)
+    else grupos.push({ categoria: novaCategoria, valor: 0, itens: [item] })
+    // Recalcula o valor de cada grupo pelos itens que sobraram. Grupo que ficou
+    // sem item some — categoria zerada na tela é sujeira.
+    const novo = grupos
+      .map((g) => ({ categoria: g.categoria, valor: Math.round(g.itens.reduce((s, i) => s + Number(i.v || 0), 0) * 100) / 100, itens: g.itens }))
+      .filter((g) => g.itens.length > 0)
+      .sort((a, b) => b.valor - a.valor)
+    // A sobra do fechamento (desconto de rodapé) estava embutida no valor do
+    // maior grupo e se perde ao somar os itens: devolve pro maior de novo, pra
+    // separação continuar fechando com o valor da conta.
+    const dif = Math.round((Number(conta.valor) - novo.reduce((s, g) => s + g.valor, 0)) * 100) / 100
+    if (novo.length && Math.abs(dif) <= Math.max(2, Number(conta.valor) * 0.02)) {
+      novo[0].valor = Math.round((novo[0].valor + dif) * 100) / 100
+    }
+
+    setContas((prev) => prev.map((c) => (c.id === conta.id ? { ...c, rateio: novo, categoria: novo[0]?.categoria ?? c.categoria } : c)))
+    const { error } = await supabase.from('contas_financeiras')
+      .update({ rateio: novo, categoria: novo[0]?.categoria ?? conta.categoria }).eq('id', conta.id)
+    if (error) { avisar('erro', recadoDeErro(error, 'salvar a categoria')); carregar(); return }
+
+    const termo = chaveDoItem(item.d)
+    if (termo) {
+      await supabase.from('categoria_item_aprendida').upsert({
+        empresa_id: empresaId, termo, categoria: novaCategoria, exemplo: item.d,
+        atualizado_em: new Date().toISOString(),
+      }, { onConflict: 'empresa_id,termo' })
+    }
+    avisar('ok', `Anotado: “${item.d}” é ${novaCategoria}. Nas próximas notas eu já lanço assim.`)
+  }
+
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
   const semNada = !carregando && !erro && contas.length === 0
@@ -602,7 +640,8 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
                         menuAberto={menuAberto === c.id}
                         onMenu={(e) => { e.stopPropagation(); setMenuAberto(menuAberto === c.id ? null : c.id) }}
                         onBaixa={() => setBaixaDe(c)} onEditar={() => editar(c)} onDuplicar={() => duplicar(c)}
-                        onHistorico={() => setHistoricoDe(c)} onExcluir={() => excluir(c)} />
+                        onHistorico={() => setHistoricoDe(c)} onExcluir={() => excluir(c)}
+                        onCorrigirItem={(item, cat) => corrigirItem(c, item, cat)} />
                     ))}
                   </ul>
                 </section>
@@ -638,7 +677,10 @@ export default function ContasPagarReceber({ empresaId, onAbrirFiado }) {
 }
 
 // ───────────────────────── Linha da lista ─────────────────────────
-function LinhaConta({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onHistorico, onExcluir }) {
+function LinhaConta({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onHistorico, onExcluir, onCorrigirItem }) {
+  const [ajustando, setAjustando] = useState(false)
+  const itensDaNota = useMemo(() => (Array.isArray(c.rateio) ? c.rateio : [])
+    .flatMap((g) => (Array.isArray(g.itens) ? g.itens.map((i) => ({ ...i, categoria: g.categoria })) : [])), [c.rateio])
   const sit = situacaoDe(c, hoje)
   const restante = restanteDe(c)
   const parcial = c.status === 'aberta' && Number(c.valor_pago) > 0
@@ -661,13 +703,39 @@ function LinhaConta({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar
         </div>
         {/* A nota quebrada por categoria (mig 0389). Uma compra de R$ 110 que
             trouxe R$ 18 de limpeza junto só conta essa história aqui. */}
-        {Array.isArray(c.rateio) && c.rateio.length > 1 && (
+        {Array.isArray(c.rateio) && c.rateio.length > 0 && (
           <div className="cpr-rateio">
             {c.rateio.map((r) => (
               <span key={r.categoria} className="cpr-rateio-item">
                 {r.categoria} <strong>{brl(Number(r.valor))}</strong>
               </span>
             ))}
+            {itensDaNota.length > 0 && onCorrigirItem && (
+              <button type="button" className="cpr-rateio-ajustar" onClick={() => setAjustando((a) => !a)}>
+                {ajustando ? 'fechar' : '✏️ arrumar categorias'}
+              </button>
+            )}
+          </div>
+        )}
+        {/* Arrumar item por item. Cada troca aqui vira REGRA da loja: na nota da
+            semana que vem o robô já lança naquela categoria. */}
+        {ajustando && (
+          <div className="cpr-itens-nota">
+            <p className="cpr-itens-ajuda">Troquei errado? Corrija aqui — eu guardo e acerto nas próximas notas.</p>
+            <ul>
+              {itensDaNota.map((i, k) => (
+                <li key={`${i.d}-${k}`}>
+                  <span className="cpr-item-desc" title={i.d}>{i.d}</span>
+                  <span className="cpr-item-valor">{brl(Number(i.v))}</span>
+                  <select value={i.categoria} aria-label={`Categoria de ${i.d}`}
+                    onChange={(e) => { if (e.target.value !== i.categoria) onCorrigirItem(i, e.target.value) }}>
+                    {[...new Set([...CATEGORIAS_PAGAR, i.categoria])].map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>

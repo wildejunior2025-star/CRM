@@ -338,13 +338,19 @@ async function entenderTexto(
 }
 
 // Foto / PDF da nota: reaproveita a função que a tela "Lançar nota IA" já usa.
-async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType<typeof carregarCatalogo>>) {
+async function lerNota(base64: string, mimetype: string, cat: Awaited<ReturnType<typeof carregarCatalogo>>, empresaId: string) {
+  // O que esta loja já corrigiu (mig 0390). Vai junto da nota pra IA não repetir
+  // o mesmo erro — papel toalha é Limpeza numa loja e Descartáveis na outra.
+  const { data: dic } = await sb.from("categoria_item_aprendida")
+    .select("termo, categoria").eq("empresa_id", empresaId)
+    .order("atualizado_em", { ascending: false }).limit(300)
   const r = await fetch(`${SUPABASE_URL}/functions/v1/ler-nota-estoque`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
     body: JSON.stringify({
       imageBase64: base64, mimetype,
       produtos: cat.produtos, materias: cat.materias.map((m) => ({ id: m.id, nome: m.nome })),
+      dicionario: dic ?? [],
     }),
   })
   const d = await r.json().catch(() => null)
@@ -1823,7 +1829,7 @@ async function tratar(req: Request): Promise<Response> {
       const midia = await baixarMidia(instance, msg)
       if (!midia) { await enviar(instance, jid, "Não consegui baixar a foto. Manda de novo?"); return ok() }
       if (ehImagem && midia.mimetype === "image/webp") { await enviar(instance, jid, "Esse formato de imagem eu não leio. Manda como foto normal."); return ok() }
-      const r = await lerNota(midia.base64, midia.mimetype, cat)
+      const r = await lerNota(midia.base64, midia.mimetype, cat, empresaId)
       if ("erro" in r) { await enviar(instance, jid, `Não consegui ler a nota: ${r.erro}`); return ok() }
       resultado = r
     } else if (ehAudio) {
