@@ -569,6 +569,100 @@ function EmptyState({ aba, foraDoPeriodo = 0, onVerHistorico }) {
   )
 }
 
+// NOTA FISCAL (NFC-e) do pedido, dentro do detalhe. Só aparece na loja que ligou a
+// emissão e registrou o certificado (Minha Loja → Nota Fiscal). Emitir é sempre
+// uma escolha: nada sai sozinho. CPF é opcional (consumidor não identificado vale).
+function NotaFiscalDoPedido({ pedido }) {
+  const { empresa } = useAuth()
+  const [pronta, setPronta] = useState(false)   // loja habilitada pra emitir
+  const [nota, setNota] = useState(null)        // nota mais recente deste pedido
+  const [cpf, setCpf] = useState('')
+  const [emitindo, setEmitindo] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const carregar = useCallback(async () => {
+    if (!empresa?.id || !pedido?.id) return
+    const [fis, nf] = await Promise.all([
+      supabase.from('empresa_fiscal').select('ativo, focus_registrada, ambiente').eq('empresa_id', empresa.id).maybeSingle(),
+      supabase.from('nfce_notas').select('id, status, numero, serie, ambiente, danfe_url, motivo_rejeicao')
+        .eq('pedido_id', pedido.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+    ])
+    setPronta(!!(fis.data?.ativo && fis.data?.focus_registrada))
+    setNota(nf.data ?? null)
+  }, [empresa?.id, pedido?.id])
+  useEffect(() => { setMsg(null); setCpf(''); carregar() }, [carregar])
+
+  if (!pronta) return null
+  if (pedido.status === 'cancelado') return null
+
+  async function emitir() {
+    const cpfLimpo = cpf.replace(/\D/g, '')
+    if (cpf.trim() && cpfLimpo.length !== 11) { setMsg({ ok: false, txt: 'CPF precisa ter 11 números (ou deixe em branco).' }); return }
+    setEmitindo(true); setMsg(null)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+      const r = await fetch(`${base}/functions/v1/emitir-nfce`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ acao: 'emitir', pedido_id: pedido.id, cpf: cpfLimpo || undefined }),
+      })
+      const resp = await r.json()
+      if (resp?.ok || resp?.ja_emitida) {
+        setMsg({ ok: true, txt: resp?.ja_emitida ? 'Este pedido já tem nota.' : 'Nota autorizada!' })
+        if (resp?.nota?.danfe_url) window.open(resp.nota.danfe_url, '_blank')
+      } else if (resp?.status === 'processando') {
+        setMsg({ ok: true, txt: 'Enviada. Aguardando a SEFAZ autorizar — veja de novo em instantes.' })
+      } else {
+        setMsg({ ok: false, txt: resp?.mensagem || resp?.error || 'Não foi possível emitir.' })
+      }
+    } catch (e) {
+      setMsg({ ok: false, txt: String(e?.message ?? e) })
+    } finally {
+      setEmitindo(false)
+      carregar()
+    }
+  }
+
+  const autorizada = nota?.status === 'autorizada'
+  const teste = nota && nota.ambiente !== 'producao'
+  return (
+    <div>
+      <div className="pd-drawer-secao-label">Nota fiscal (NFC-e)</div>
+      {autorizada ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+          <span style={{ fontWeight: 700, color: '#16a34a' }}>
+            ✅ Nota {nota.numero ? `nº ${nota.numero}` : ''} emitida{teste ? ' (teste)' : ''}
+          </span>
+          {nota.danfe_url && (
+            <a href={nota.danfe_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">🧾 Abrir cupom</a>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {nota?.status === 'rejeitada' && (
+            <div style={{ fontSize: 12.5, color: '#dc2626' }}>Última tentativa foi rejeitada: {nota.motivo_rejeicao || 'sem motivo'}</div>
+          )}
+          {nota?.status === 'processando' && (
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Uma nota está aguardando a SEFAZ. Veja em Notas emitidas.</div>
+          )}
+          <input
+            value={cpf} onChange={e => setCpf(e.target.value)} inputMode="numeric"
+            placeholder="CPF na nota (opcional)"
+            style={{ padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, transparent)', color: 'var(--text)' }}
+          />
+          <button type="button" className="btn btn-primary" disabled={emitindo} onClick={emitir}>
+            {emitindo ? 'Emitindo…' : '🧾 Emitir nota fiscal'}
+          </button>
+        </div>
+      )}
+      {msg && (
+        <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 600, color: msg.ok ? '#16a34a' : '#dc2626' }}>{msg.txt}</div>
+      )}
+    </div>
+  )
+}
+
 function DrawerDetalhe({ pedido, onFechar, onAtualizarStatus, onCancelar }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = ehDividido(pedido) ? textoPagamento(pedido) : (pedido.forma_pagamento || '')
@@ -685,6 +779,8 @@ function DrawerDetalhe({ pedido, onFechar, onAtualizarStatus, onCancelar }) {
           <span className="pd-obs-label">Obs:</span> {pedido.observacoes}
         </div>
       )}
+
+      <NotaFiscalDoPedido pedido={pedido} />
 
       {/* Ações de status */}
       <AcoesPedido pedido={pedido} onAtualizarStatus={onAtualizarStatus} onCancelar={onCancelar} />
