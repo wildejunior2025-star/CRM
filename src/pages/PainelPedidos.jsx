@@ -3351,7 +3351,97 @@ function CodigoColetaIfood({ pedido, onLiberar }) {
   )
 }
 
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo }) {
+// TROCA DA FORMA DE PAGAMENTO
+//
+// O cliente escolhe PIX no site e paga em dinheiro na porta. Antes isso so
+// tinha conserto em pedido de balcao; no delivery ficava errado e o caixa nao
+// fechava. Aqui a correcao e so do pagamento: nao mexe em item, valor nem
+// endereco, porque quem corrige na correria nao pode ter como errar o resto.
+//
+// "Fiado" fica de fora de proposito: fiar abre divida no nome do cliente, e
+// isso tem tela propria — virar fiado por este atalho criaria venda recebida
+// que ninguem cobra.
+const FORMAS_TROCA = [
+  { id: 'dinheiro', label: '\ud83d\udcb5 Dinheiro' },
+  { id: 'pix_entrega', label: '\ud83d\udcf1 PIX na entrega' },
+  { id: 'debito', label: '\ud83d\udcb3 D\u00e9bito' },
+  { id: 'credito', label: '\ud83d\udcb3 Cr\u00e9dito' },
+  { id: 'vale', label: '\ud83c\udf7d\ufe0f Vale-refei\u00e7\u00e3o' },
+]
+
+function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
+  const [forma, setForma] = useState(pedido?.forma_pagamento || 'dinheiro')
+  const [troco, setTroco] = useState(pedido?.troco_para ? String(pedido.troco_para).replace('.', ',') : '')
+  const [salvando, setSalvando] = useState(false)
+  if (!pedido) return null
+
+  const trocoNum = Math.round(parseFloat(String(troco).replace(',', '.')) * 100) / 100
+  const trocoValido = !troco || (Number.isFinite(trocoNum) && trocoNum >= Number(pedido.total || 0))
+
+  async function confirmar() {
+    if (!trocoValido) return
+    setSalvando(true)
+    await onSalvar(pedido, forma, forma === 'dinheiro' && troco ? trocoNum : null)
+    setSalvando(false)
+  }
+
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 220 }}>
+      <div className="pp-modal" onClick={e => e.stopPropagation()}>
+        <p className="pp-modal-titulo">
+          Como o cliente pagou o #{pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()}?
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 14px' }}>
+          Estava como <strong>{nomeForma(pedido.forma_pagamento)}</strong> \u00b7 total {fmt(pedido.total)}
+        </p>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          {FORMAS_TROCA.map(f => (
+            <button key={f.id} type="button" onClick={() => setForma(f.id)}
+              style={{ padding: '11px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                fontSize: 14, fontWeight: 700,
+                border: `1.5px solid ${forma === f.id ? 'var(--primary)' : 'var(--border)'}`,
+                background: forma === f.id ? 'var(--primary-bg)' : 'var(--surface)',
+                color: forma === f.id ? 'var(--primary)' : 'var(--text)' }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {forma === 'dinheiro' && (
+          <div style={{ marginTop: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 700 }}>Pagou com quanto? (troco)</label>
+            <input value={troco} onChange={e => setTroco(e.target.value)} placeholder="deixe vazio se pagou certo"
+              inputMode="decimal"
+              style={{ width: '100%', marginTop: 4, padding: '9px 11px', borderRadius: 8,
+                border: `1.5px solid ${trocoValido ? 'var(--border)' : 'var(--danger)'}`,
+                background: 'var(--surface)', color: 'var(--text)', fontSize: 14 }} />
+            {!trocoValido && (
+              <p style={{ fontSize: 12, color: 'var(--danger)', margin: '4px 0 0' }}>
+                Tem que ser pelo menos o total ({fmt(pedido.total)}).
+              </p>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button type="button" onClick={onFechar}
+            style={{ flex: 1, padding: 11, borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+              border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
+            Cancelar
+          </button>
+          <button type="button" onClick={confirmar} disabled={salvando || !trocoValido}
+            style={{ flex: 1, padding: 11, borderRadius: 9, cursor: salvando ? 'wait' : 'pointer', fontWeight: 800,
+              border: 'none', background: 'var(--primary)', color: '#fff', opacity: salvando || !trocoValido ? 0.6 : 1 }}>
+            {salvando ? 'Salvando...' : 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo, onTrocarPagamento }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -3795,6 +3885,21 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
             💵 Cobrar do cliente · {fmt(pedido.total)}
           </span>
+        )}
+        {/* O CLIENTE TROCA DE IDEIA NA PORTA (24/10/2026)
+            Escolhe PIX no site e paga em dinheiro na entrega. Só o pedido de
+            BALCÃO tinha "Editar"; nos de delivery não havia como corrigir, e o
+            caixa fechava errado todo dia. Pré-pago (iFood online, PIX já
+            confirmado) fica de fora: ali o dinheiro passou por outro caminho e
+            mexer só bagunçaria a conciliação. */}
+        {onTrocarPagamento && pedido.status !== 'cancelado'
+          && !(pagamento === 'online' || (pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved'))) && (
+          <button type="button" onClick={() => onTrocarPagamento(pedido)}
+            title="O cliente pagou de outro jeito? Corrija aqui"
+            style={{ marginLeft: 2, padding: '1px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+              border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)' }}>
+            ✏️ trocar
+          </button>
         )}
       </div>
       )}
@@ -6964,12 +7069,27 @@ export default function PainelPedidos() {
   const [aceitarAuto, setAceitarAuto] = useState(aceitarAutoAtivo)
   // NFC-e: a loja habilitou a emissão E registrou o certificado no emissor?
   const [nfceHabilitada, setNfceHabilitada] = useState(false)
+  const [trocaPag, setTrocaPag] = useState(null)   // pedido com a forma de pagamento sendo corrigida
   const [nfceEmitindo, setNfceEmitindo] = useState(null) // id do pedido em emissão
   useEffect(() => {
     if (!empresa?.id) return
     supabase.from('empresa_fiscal').select('ativo, focus_registrada').eq('empresa_id', empresa.id).maybeSingle()
       .then(({ data }) => setNfceHabilitada(!!(data?.ativo && data?.focus_registrada)))
   }, [empresa?.id])
+
+  // Corrige o que o cliente REALMENTE pagou. Mexe so no pagamento: a conta do
+  // caixa (mig 0334) le este campo, entao e isto que faz o dia fechar.
+  async function salvarTrocaPagamento(pedido, forma, trocoPara) {
+    const { error } = await supabase.from('pedidos_delivery').update({
+      forma_pagamento: forma,
+      // Pagamento dividido deixa de existir quando se escolhe uma forma unica —
+      // senao o caixa somaria as partes antigas E a nova.
+      pagamentos: null,
+      troco_para: forma === 'dinheiro' ? trocoPara : null,
+    }).eq('id', pedido.id)
+    if (error) { alert('N\u00e3o consegui salvar: ' + error.message); return }
+    setTrocaPag(null)
+  }
 
   async function handleEmitirNfce(pedido) {
     if (!pedido?.id) return
@@ -10532,6 +10652,7 @@ export default function PainelPedidos() {
                       onEnviarMensagem={(ped) => setPedidoMensagem(ped)}
                       onImprimir={handleImprimir} onImprimirCelular={handleImprimirCelular}
                       nfceHabilitada={nfceHabilitada}
+                      onTrocarPagamento={setTrocaPag}
                       onEmitirNfce={handleEmitirNfce}
                       nfceEmitindo={nfceEmitindo}
                     />
@@ -10760,6 +10881,7 @@ export default function PainelPedidos() {
               onImprimir={handleImprimir} onImprimirCelular={handleImprimirCelular}
               entregadores={entregadores}
               nfceHabilitada={nfceHabilitada}
+              onTrocarPagamento={setTrocaPag}
               onEmitirNfce={handleEmitirNfce}
               nfceEmitindo={nfceEmitindo}
             />
@@ -12243,6 +12365,12 @@ export default function PainelPedidos() {
         dados={acertoAberto}
         onFechar={() => setAcertoAberto(null)}
         onConfirmar={fecharAcertoEntregador}
+      />
+
+      <ModalTrocaPagamento
+        pedido={trocaPag}
+        onFechar={() => setTrocaPag(null)}
+        onSalvar={salvarTrocaPagamento}
       />
     </div>
   )
