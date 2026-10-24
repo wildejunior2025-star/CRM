@@ -590,6 +590,7 @@ export default function Produtos() {
   // o botão voltar do navegador fecha ela e dá pra abrir direto pelo link.
   const [searchParams, setSearchParams] = useSearchParams()
   const showCategModal = searchParams.has('categorias')
+  const [buscaCat, setBuscaCat] = useState('') // filtro da página de Categorias
   const setShowCategModal = (abrir) => setSearchParams(abrir ? { categorias: '1' } : {})
   // Exclusão de categoria que ainda tem produtos: { id, nome, qtd, destino }
   const [catExcluir, setCatExcluir] = useState(null)
@@ -1566,11 +1567,40 @@ export default function Produtos() {
         </div>
       </details>
 
+      {/* Busca: loja com muita categoria (a Agv tem dezenas) não pode sair
+          rolando atrás de uma. Fica colada no topo enquanto a lista rola. */}
+      {categorias.length > 5 && (
+        <div style={{ position: 'sticky', top: 0, zIndex: 5, background: 'var(--bg)', padding: '8px 0 12px' }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              value={buscaCat}
+              onChange={e => setBuscaCat(e.target.value)}
+              placeholder={`🔍 Buscar categoria (${categorias.length})`}
+              autoComplete="off"
+              style={{ width: '100%', padding: '11px 38px 11px 14px', fontSize: 15, borderRadius: 10,
+                border: '1.5px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
+            />
+            {buscaCat && (
+              <button type="button" onClick={() => setBuscaCat('')} title="Limpar a busca"
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--text-muted)' }}>✕</button>
+            )}
+          </div>
+          {buscaCat.trim() && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+              {categorias.filter(c => norm(c.nome).includes(norm(buscaCat))).length} de {categorias.length} categorias
+              {' · '}reordenar fica desligado enquanto a busca está ligada.
+            </div>
+          )}
+        </div>
+      )}
+
       {categorias.length === 0 ? (
         <div className="empty-state">Nenhuma categoria cadastrada.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {categorias.map((c, i) => {
+            if (buscaCat.trim() && !norm(c.nome).includes(norm(buscaCat))) return null
             const f = Array.isArray(c.faixas_preco) ? c.faixas_preco[0] : null
             const salvarFaixa = (e) => {
               const linha = e.currentTarget.closest('[data-faixa]')
@@ -1589,15 +1619,15 @@ export default function Produtos() {
                 {/* Topo: arrastar, subir/descer, nome, duplicar/excluir */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
                   <span
-                    draggable
+                    draggable={!buscaCat.trim()}
                     onDragStart={() => setDragIdx(i)}
                     onDragEnd={() => setDragIdx(null)}
                     title="Arraste para reordenar"
                     style={{ cursor: 'grab', color: 'var(--text-muted)', fontSize: 20, userSelect: 'none', padding: '0 4px' }}
                   >⠿</span>
                   <span style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn btn-secondary btn-sm" title="Subir" disabled={i === 0} onClick={() => moverCategoria(i, -1)} style={{ padding: '2px 8px' }}>↑</button>{' '}
-                    <button className="btn btn-secondary btn-sm" title="Descer" disabled={i === categorias.length - 1} onClick={() => moverCategoria(i, 1)} style={{ padding: '2px 8px' }}>↓</button>
+                    <button className="btn btn-secondary btn-sm" title="Subir" disabled={i === 0 || !!buscaCat.trim()} onClick={() => moverCategoria(i, -1)} style={{ padding: '2px 8px' }}>↑</button>{' '}
+                    <button className="btn btn-secondary btn-sm" title="Descer" disabled={i === categorias.length - 1 || !!buscaCat.trim()} onClick={() => moverCategoria(i, 1)} style={{ padding: '2px 8px' }}>↓</button>
                   </span>
                   <div style={{ flex: '1 1 200px', fontSize: 16, fontWeight: 700 }}>
                     {editandoCatId === c.id ? (
