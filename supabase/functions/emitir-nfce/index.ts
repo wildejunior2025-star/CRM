@@ -34,12 +34,36 @@ function tokenPrincipal(): string | null {
   return Deno.env.get("FOCUS_NFE_TOKEN_PRODUCAO") ?? null
 }
 
+// A LOJA SE ACHA PELO ID, NUNCA PELO CNPJ (24/10/2026)
+//
+// `/v2/empresas/{cnpj}` responde 404 "Empresa não encontrada" mesmo com a loja
+// cadastrada e com os dois tokens prontos — aquela API só aceita o id interno.
+// Era isso que fazia a Agv registrar com sucesso e, logo depois, falhar ao
+// emitir pedindo pra "registrar de novo". O id vem da listagem e fica guardado
+// (mig 0384); da segunda vez em diante é uma chamada direta.
+async function idNoEmissor(sb: any, empresaId: string, cnpj: string, principal: string): Promise<string | null> {
+  const { data: fis } = await sb.from("empresa_fiscal").select("emissor_empresa_id").eq("empresa_id", empresaId).maybeSingle()
+  if (fis?.emissor_empresa_id) return String(fis.emissor_empresa_id)
+
+  const r = await fetch(`${FOCUS_REVENDA}/v2/empresas`, { headers: { "Authorization": authHeader(principal) } })
+  if (!r.ok) return null
+  const d = await r.json().catch(() => null)
+  const todas = Array.isArray(d) ? d : (d?.empresas ?? [])
+  const achou = todas.find((e: any) => soDigitos(e?.cnpj) === cnpj)
+  if (!achou?.id) return null
+  await sb.from("empresa_fiscal").update({ emissor_empresa_id: String(achou.id) }).eq("empresa_id", empresaId)
+  return String(achou.id)
+}
+
 // Emissão/consulta usa o token da PRÓPRIA loja (o Focus devolve um de
-// homologação e um de produção por CNPJ). Buscamos na hora, sem guardar no banco.
-async function tokenDaLoja(cnpj: string, ambiente: string): Promise<string | null> {
+// homologação e um de produção). Buscamos na hora, sem guardar no banco: token
+// é credencial, e credencial guardada é credencial vazada um dia.
+async function tokenDaLoja(sb: any, empresaId: string, cnpj: string, ambiente: string): Promise<string | null> {
   const principal = tokenPrincipal()
   if (!principal) return null
-  const r = await fetch(`${FOCUS_REVENDA}/v2/empresas/${cnpj}`, { headers: { "Authorization": authHeader(principal) } })
+  const id = await idNoEmissor(sb, empresaId, cnpj, principal)
+  if (!id) return null
+  const r = await fetch(`${FOCUS_REVENDA}/v2/empresas/${id}`, { headers: { "Authorization": authHeader(principal) } })
   if (!r.ok) return null
   const d = await r.json().catch(() => ({}))
   return (ambiente === "producao" ? d?.token_producao : d?.token_homologacao) ?? null
@@ -78,6 +102,7 @@ Deno.serve(async (req) => {
   const acao = body?.acao ?? ""
 
   try {
+    if (acao === "diagnostico")       return json(await diagnostico(sb, body?.empresa_id))
     if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
     if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf))
     if (acao === "consultar")         return json(await consultar(sb, body?.nota_id, body?.ref))
@@ -87,6 +112,64 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
   }
 })
+
+// DIAGNOSTICO — o que o emissor sabe desta loja.
+//
+// Existe porque "não consegui o token desta loja" não diz NADA: pode ser a
+// loja não cadastrada lá, o CNPJ consultado de um jeito que a API não aceita,
+// ou o cadastro ainda em análise. Devolve o que a API respondeu SEM jamais
+// devolver token — só se existe ou não.
+async function diagnostico(sb: any, empresaId: string) {
+  const { data: emp } = await sb.from("empresas").select("cnpj, nome").eq("id", empresaId).single()
+  const cnpj = soDigitos(emp?.cnpj)
+  const principal = tokenPrincipal()
+  if (!principal) return { ok: false, error: "sem token principal do Focus na plataforma" }
+
+  const porCnpj = await fetch(`${FOCUS_REVENDA}/v2/empresas/${cnpj}`, { headers: { "Authorization": authHeader(principal) } })
+  const txtCnpj = await porCnpj.text()
+  let achadaNaLista: any = null
+  const lista = await fetch(`${FOCUS_REVENDA}/v2/empresas`, { headers: { "Authorization": authHeader(principal) } })
+  const txtLista = await lista.text()
+  try {
+    const arr = JSON.parse(txtLista)
+    const todas = Array.isArray(arr) ? arr : (arr?.empresas ?? [])
+    const achou = todas.find((e: any) => soDigitos(e?.cnpj) === cnpj)
+    if (achou) {
+      achadaNaLista = {
+        id: achou.id, nome: achou.nome, cnpj: achou.cnpj,
+        habilita_nfce: achou.habilita_nfce,
+        tem_token_homologacao: !!achou.token_homologacao,
+        tem_token_producao: !!achou.token_producao,
+      }
+    } else {
+      achadaNaLista = { nao_esta_na_lista: true, quantas_empresas: todas.length }
+    }
+  } catch { achadaNaLista = { lista_nao_e_json: txtLista.slice(0, 200) } }
+
+  // O que o emissor guardou de CSC. Nunca devolve o codigo em si — so se ele
+  // existe e qual o id, que e o bastante pra saber se o QR vai sair completo.
+  let csc: any = null
+  if (achadaNaLista?.id) {
+    const r2 = await fetch(`${FOCUS_REVENDA}/v2/empresas/${achadaNaLista.id}`, { headers: { "Authorization": authHeader(principal) } })
+    const d2 = await r2.json().catch(() => ({}))
+    csc = {
+      status: r2.status,
+      tem_csc_homologacao: !!d2?.csc_nfce_homologacao,
+      id_token_homologacao: d2?.id_token_nfce_homologacao ?? null,
+      tem_csc_producao: !!d2?.csc_nfce_producao,
+      id_token_producao: d2?.id_token_nfce_producao ?? null,
+      habilita_nfce: d2?.habilita_nfce,
+      chaves: Object.keys(d2 ?? {}).filter((k) => /csc|token|nfce/i.test(k)),
+    }
+  }
+
+  return {
+    ok: true, cnpj, loja: emp?.nome,
+    consulta_por_cnpj: { status: porCnpj.status, corpo: txtCnpj.slice(0, 400) },
+    na_lista: achadaNaLista,
+    csc_no_emissor: csc,
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // REGISTRAR EMPRESA — sobe o A1 + CSC pro Focus (loja pronta pra emitir)
@@ -113,18 +196,20 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
   if (dl.error || !dl.data) return { ok: false, error: `não consegui ler o certificado: ${dl.error?.message ?? "arquivo ausente"}` }
   const certB64 = toBase64(await dl.data.arrayBuffer())
 
-  // CSC/token do ambiente escolhido
-  const cscKey = ambiente === "producao" ? "csc_nfce_producao" : "csc_nfce_homologacao"
-  const idTokenKey = ambiente === "producao" ? "id_token_nfce_producao" : "id_token_nfce_homologacao"
-
-  // O CSC TAMBEM E POR AMBIENTE (24/10/2026)
+  // O CSC E POR AMBIENTE, E OS DOIS VAO JUNTOS (24/10/2026)
+  //
   // A SEFAZ emite um codigo pra homologacao e outro pra producao — na Agv os
-  // quatro existem lado a lado no portal. Antes a tabela guardava um so, entao
-  // virar a chave pra producao mandaria o codigo de homologacao e TODA nota
-  // seria rejeitada bem na estreia. `fis.csc` fica como reserva, pras lojas
-  // cadastradas antes das colunas por ambiente (mig 0383).
-  const cscDoAmbiente = (ambiente === "producao" ? fis.csc_producao : fis.csc_homologacao) || fis.csc
-  const cscIdDoAmbiente = (ambiente === "producao" ? fis.csc_id_producao : fis.csc_id_homologacao) || fis.csc_id
+  // quatro existem lado a lado no portal. Antes a tabela guardava um so, e o
+  // cadastro levava so o do ambiente atual. As duas coisas somadas davam a
+  // mesma estreia ruim: virar a chave pra producao com o campo de la vazio, e
+  // a nota sair sem assinatura no QR ou ser rejeitada.
+  //
+  // Agora o cadastro leva os dois de uma vez. `fis.csc` fica como reserva, pras
+  // lojas cadastradas antes das colunas por ambiente (mig 0383).
+  const cscHomolog = fis.csc_homologacao || (ambiente !== "producao" ? fis.csc : null)
+  const cscIdHomolog = fis.csc_id_homologacao || (ambiente !== "producao" ? fis.csc_id : null)
+  const cscProd = fis.csc_producao || (ambiente === "producao" ? fis.csc : null)
+  const cscIdProd = fis.csc_id_producao || (ambiente === "producao" ? fis.csc_id : null)
 
   const payload: Record<string, unknown> = {
     nome: emp.razao_social || emp.nome,
@@ -143,8 +228,10 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
     habilita_nfce: true,
     arquivo_certificado_base64: certB64,
     senha_certificado: senhaCert,
-    [cscKey]: cscDoAmbiente || undefined,
-    [idTokenKey]: cscIdDoAmbiente || undefined,
+    csc_nfce_homologacao: cscHomolog || undefined,
+    id_token_nfce_homologacao: cscIdHomolog || undefined,
+    csc_nfce_producao: cscProd || undefined,
+    id_token_nfce_producao: cscIdProd || undefined,
   }
 
   const base = `${FOCUS_REVENDA}/v2/empresas`
@@ -158,14 +245,19 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
   let txt = await res.text()
 
   if (!res.ok) {
-    // Já cadastrada -> atualiza
+    // Já cadastrada -> atualiza. O PUT também é por ID, não por CNPJ: com o
+    // CNPJ ele dá 404 e a loja ficaria com o cadastro velho pra sempre, sem
+    // ninguém notar (o POST já tinha falhado por duplicidade).
     if (res.status === 422 || /existe|cadastrad/i.test(txt)) {
-      res = await fetch(`${base}/${cnpj}${dry}`, {
-        method: "PUT",
-        headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      txt = await res.text()
+      const id = await idNoEmissor(sb, empresaId, cnpj, token)
+      if (id) {
+        res = await fetch(`${base}/${id}${dry}`, {
+          method: "PUT",
+          headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        txt = await res.text()
+      }
     }
   }
 
@@ -174,10 +266,14 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
     return { ok: false, error: `Focus ${res.status}: ${txt.slice(0, 400)}` }
   }
 
+  // Guarda o id que o emissor devolveu: é a chave de tudo depois daqui.
+  const idDevolvido = (() => { try { return JSON.parse(txt)?.id } catch { return null } })()
+
   await sb.from("empresa_fiscal").update({
     focus_registrada: true,
     focus_registrada_em: new Date().toISOString(),
     ultimo_erro_fiscal: null,
+    ...(idDevolvido ? { emissor_empresa_id: String(idDevolvido) } : {}),
   }).eq("empresa_id", empresaId)
 
   return { ok: true, mensagem: "Loja registrada no emissor. Já pode emitir NFC-e." }
@@ -211,7 +307,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
 
   const cnpj = soDigitos(emp?.cnpj)
   const ambiente = fis.ambiente === "producao" ? "producao" : "homologacao"
-  const token = await tokenDaLoja(cnpj, ambiente)
+  const token = await tokenDaLoja(sb, ped.empresa_id, cnpj, ambiente)
   if (!token) return { ok: false, error: `Não consegui o token do Focus desta loja (${ambiente}). Registre a loja de novo em Minha Loja → Nota Fiscal` }
 
   const ncm = fis.ncm_padrao || "21069090"
@@ -266,9 +362,20 @@ async function emitir(sb: any, pedidoId: string, cpf?: string) {
     items,
     formas_pagamento: formasNota,
   }
+  // NOME DE CLIENTE SO EXISTE SE TIVER CPF (24/10/2026)
+  //
+  // Na NFC-e o bloco do destinatario comeca obrigatoriamente por CNPJ, CPF ou
+  // idEstrangeiro; o nome vem DEPOIS. Mandando so o nome, a SEFAZ rejeita no
+  // proprio leiaute: "Element 'xNome': This element is not expected".
+  //
+  // E o nosso caso comum: quase todo pedido tem nome do cliente e NENHUM CPF,
+  // porque ninguem pede CPF na nota pra comprar quentinha. Entao, sem CPF, o
+  // pedido sai como consumidor nao identificado — que e o certo pra NFC-e.
   const cpfLimpo = soDigitos(cpf)
-  if (cpfLimpo.length === 11) nfce.cpf_destinatario = cpfLimpo
-  if (ped.cliente_nome && ped.cliente_nome !== "Cliente iFood") nfce.nome_destinatario = ped.cliente_nome
+  if (cpfLimpo.length === 11) {
+    nfce.cpf_destinatario = cpfLimpo
+    if (ped.cliente_nome && ped.cliente_nome !== "Cliente iFood") nfce.nome_destinatario = ped.cliente_nome
+  }
 
   // grava rascunho antes de enviar (rastro mesmo se cair)
   const { data: rascunho } = await sb.from("nfce_notas").insert({
@@ -306,7 +413,7 @@ async function consultar(sb: any, notaId?: string, refIn?: string) {
   if (!ref) return { ok: false, error: "informe nota_id ou ref" }
   const ambiente = nota?.ambiente === "producao" ? "producao" : "homologacao"
   const { data: empNota } = await sb.from("empresas").select("cnpj").eq("id", nota?.empresa_id).maybeSingle()
-  const token = await tokenDaLoja(soDigitos(empNota?.cnpj), ambiente)
+  const token = await tokenDaLoja(sb, nota?.empresa_id, soDigitos(empNota?.cnpj), ambiente)
   if (!token) return { ok: false, error: `Não consegui o token do Focus desta loja (${ambiente})` }
 
   const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce/${encodeURIComponent(ref)}`, {
@@ -340,7 +447,7 @@ async function cancelar(sb: any, req: Request, notaId?: string, justificativa?: 
 
   const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", nota.empresa_id).maybeSingle()
   const ambiente = nota.ambiente === "producao" ? "producao" : "homologacao"
-  const token = await tokenDaLoja(soDigitos(emp?.cnpj), ambiente)
+  const token = await tokenDaLoja(sb, nota.empresa_id, soDigitos(emp?.cnpj), ambiente)
   if (!token) return { ok: false, error: "Não consegui o token do Focus desta loja" }
 
   const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce/${encodeURIComponent(nota.ref)}`, {
@@ -365,6 +472,12 @@ function mapearRetornoFocus(data: any, ambiente: string): Record<string, unknown
   if (st === "autorizado") status = "autorizada"
   else if (st.includes("erro") || st === "rejeitado" || st === "denegado") status = "rejeitada"
   else if (st === "cancelado") status = "cancelada"
+  // RESPOSTA SEM STATUS E ERRO, NAO ESPERA (24/10/2026)
+  // Quando o emissor recusa a nota ele devolve {codigo, mensagem} e NENHUM
+  // status. Caindo no padrao, a nota ficava "processando" pra sempre e a
+  // consulta seguinte dizia "nota nao encontrada" — ninguem descobria o motivo
+  // real, que estava escrito ali na primeira resposta.
+  else if (!st && (data?.codigo || data?.mensagem || data?.erros)) status = "rejeitada"
 
   const patch: Record<string, unknown> = { status }
   if (data?.chave_nfe) patch.chave_acesso = data.chave_nfe
@@ -373,6 +486,10 @@ function mapearRetornoFocus(data: any, ambiente: string): Record<string, unknown
   if (data?.qrcode_url) patch.qrcode_url = data.qrcode_url
   if (data?.caminho_danfe) patch.danfe_url = data.caminho_danfe.startsWith("http") ? data.caminho_danfe : host + data.caminho_danfe
   if (data?.caminho_xml_nota_fiscal) patch.xml_url = data.caminho_xml_nota_fiscal.startsWith("http") ? data.caminho_xml_nota_fiscal : host + data.caminho_xml_nota_fiscal
-  if (status === "rejeitada") patch.motivo_rejeicao = data?.mensagem_sefaz ?? data?.mensagem ?? data?.erros?.[0]?.mensagem ?? "rejeitada"
+  if (status === "rejeitada") {
+    patch.motivo_rejeicao = data?.mensagem_sefaz ?? data?.mensagem ?? data?.erros?.[0]?.mensagem
+      ?? (data?.codigo ? String(data.codigo) : null)
+      ?? JSON.stringify(data ?? {}).slice(0, 300)
+  }
   return patch
 }
