@@ -125,7 +125,7 @@ export default function NotasFiscais() {
       const j = await r.json()
       setMsg(j?.ok
         ? { ok: true, txt: 'Cupom enviado para a impressora.' }
-        : { ok: false, txt: j?.erro === 'sem impressora' ? 'Nenhuma impressora configurada neste computador.' : (j?.erro || 'Não consegui imprimir.') })
+        : { ok: false, txt: j?.erro === 'sem impressora' ? 'Nenhuma impressora configurada neste computador.' : (j?.erro || 'O app Impressora FWC deste computador está desatualizado. Feche ele pelo ícone perto do relógio e abra de novo — ele se atualiza sozinho.') })
     } catch (e) {
       setMsg({ ok: false, txt: 'O app Impressora FWC não respondeu neste computador. Ele precisa estar aberto.' })
     } finally { setOcupado(null) }
