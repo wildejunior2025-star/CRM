@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import NotaFiscalVenda from '../components/NotaFiscalVenda'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
 import { rotuloComanda } from '../lib/comanda'
@@ -1248,6 +1249,23 @@ export default function PresencialHistorico() {
                     {impMsg?.id === c.id && (
                       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>{impMsg.texto}</div>
                     )}
+
+                    {/* NOTA FISCAL DA VENDA DE SALAO (24/10/2026)
+                        O botao de emitir so existia no delivery, e no Agv a mesa
+                        e a maior parte do movimento: a loja gerava nota de uma
+                        parte do dia so. O bloco e o MESMO do delivery (componente
+                        compartilhado), pra nao existirem duas regras fiscais que
+                        amanha discordam. */}
+                    <NotaFiscalVenda
+                      empresaId={empresa?.id}
+                      venda={{
+                        tipo: 'comanda',
+                        id: c.id,
+                        itens: c.comanda_itens ?? [],
+                        forma_pagamento: c.forma_pagamento,
+                        status: c.status,
+                      }}
+                    />
                     {impMsg?.id === c.id && impMsg.conectar && (
                       <button type="button" onClick={() => conectarEImprimir(c)} disabled={imprimindo === c.id}
                         style={{ width: '100%', marginTop: 8, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
