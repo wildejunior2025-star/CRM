@@ -1134,7 +1134,7 @@ async function carregarCatalogoCompleto(empresaId) {
     // `ativo`/`disponivel_delivery` vêm junto pro cardápio por categoria mostrar
     // o mesmo que a busca por nome mostra (o RPC filtra os dois): item pausado
     // aparecendo na lista e sumindo na busca é bug na cara de quem atende.
-    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery, codigo_barras, ordem')
+    fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, preco_promocional, faixas_preco, categoria, ativo, disponivel_delivery, vende_salao, vende_online, codigo_barras, ordem')
       // A ordem do cardapio (produtos.ordem) vem primeiro: quem monta o pedido
       // procura na ordem do papel. Sem ordem definida, volta pro nome.
       .eq('empresa_id', empresaId).is('arquivado_em', null).order('ordem', { ascending: true, nullsFirst: false }).order('nome', { ascending: true }).order('id')),
@@ -2189,8 +2189,9 @@ ${url}
   // Aplica o preço especial do cliente (se houver) antes de mostrar/adicionar — só afeta este cliente.
   // Produto desligado (ativo = false) não aparece pra vender: é o jeito de
   // esconder do balcão sem mexer no iFood quando a categoria é "pausa só aqui".
+  // Cada produto escolhe se vende no salão/balcão (mig 0384): quem lança aqui é a equipe.
   const produtosComPreco = produtos
-    .filter(p => p.ativo !== false)
+    .filter(p => p.ativo !== false && p.vende_salao !== false)
     .map(p => (precoEspMap[p.id] != null ? { ...p, preco_venda: precoEspMap[p.id] } : p))
   // Busca ignorando acento: quem digita rápido escreve "camarao", e o produto
   // está cadastrado como "Camarão".
@@ -5956,8 +5957,9 @@ function BuscaProdutoNoChat({ empresaId, onEscolher, onAvulso, semBotao = false,
         if (!vivo) return
         const grupos = new Map()
         for (const p of (produtos ?? [])) {
-          // Mesmo filtro do RPC de busca: pausado não entra.
-          if (p.ativo === false || p.disponivel_delivery === false) continue
+          // Mesmo filtro do RPC de busca: pausado não entra, nem o que não vende
+          // online (aqui a atendente monta pedido pelo WhatsApp do cliente).
+          if (p.ativo === false || p.disponivel_delivery === false || p.vende_online === false) continue
           const cat = String(p.categoria ?? '').trim() || 'Sem categoria'
           if (!grupos.has(cat)) grupos.set(cat, [])
           // `preco` é o nome que o resto da sacola espera (a busca vem do RPC

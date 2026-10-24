@@ -380,6 +380,8 @@ export default function DeliveryLoja() {
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
         .eq('disponivel_delivery', true)
+        // Cada produto escolhe se vende na Loja Online (mig 0384).
+        .eq('vende_online', true)
         .order('categoria')
         // Ordem manual do dono dentro da categoria (mig 0201). nullsFirst:false
         // deixa quem nunca foi ordenado no fim, em ordem alfabetica.

@@ -321,7 +321,8 @@ export default function PortalLoja() {
       setCatOrdem(ordemMap)
       setEmpresa(empRes.data ?? null)
       setLidos((prodRes.data ?? []).length)
-      setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false))
+      // vende_app: o produto escolhe se aparece no app do cliente (mig 0384).
+      setProdutos((prodRes.data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false && p.vende_app !== false))
       setTotalProdutos(prodRes.count ?? 0)
 
       // Complementos (sabores, bordas...): mesma consulta da Loja Online. Só chegam pro cliente
@@ -612,7 +613,7 @@ export default function PortalLoja() {
       .order('categoria').order('ordem', { nullsFirst: false }).order('nome')
       .range(lidos, lidos + 199)
     setLidos(n => n + (data ?? []).length)
-    setProdutos(prev => [...prev, ...(data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false)])
+    setProdutos(prev => [...prev, ...(data ?? []).filter(p => !categoriasOcultas.current.has(p.categoria) && p.disponivel_delivery !== false && p.vende_app !== false)])
     setCarregandoMais(false)
   }
 

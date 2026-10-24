@@ -3519,6 +3519,8 @@ serve(async (req) => {
         // Pausado no delivery some da Loja Online e da busca do catálogo grande
         // (buscar_produto_nome); aqui o robô ainda oferecia.
         .eq("disponivel_delivery", true)
+        // Cada produto escolhe se vende no robô/Loja Online (mig 0384).
+        .eq("vende_online", true)
         .is("arquivado_em", null)
         .order("nome")
         .limit(MENU_INTEIRO_ATE),

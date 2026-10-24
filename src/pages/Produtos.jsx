@@ -157,9 +157,22 @@ const emptyForm = {
   faixas_preco: [],
   estoque_minimo: 0,
   ativo: true,
+  // Onde o produto vende (mig 0384). Tudo ligado por padrão.
+  vende_salao: true,
+  vende_mesa: true,
+  vende_online: true,
+  vende_app: true,
   foto_url: '',
   descricao: '',
 }
+
+// Os canais, na ordem da tela. `texto` explica em que telas o produto aparece.
+const CANAIS_VENDA = [
+  { campo: 'vende_salao',  nome: 'Salão e balcão',  texto: 'garçom, balcão e PDV (a equipe lança)' },
+  { campo: 'vende_mesa',   nome: 'QR da mesa',      texto: 'o cliente pede pelo celular na mesa' },
+  { campo: 'vende_online', nome: 'Loja Online',     texto: 'cardápio da loja e robô do WhatsApp' },
+  { campo: 'vende_app',    nome: 'App do cliente',  texto: 'app da Play Store / iPhone' },
+]
 
 const CATALOGO_BASE = 'https://lojaonline.fwcinter.com'
 
@@ -691,14 +704,6 @@ export default function Produtos() {
     await supabase.from('categorias').update({ isento_taxa: isento }).eq('id', id)
   }
 
-  // Categoria só de salão (mig 0328): some da Loja Online, do app e do robô, mas
-  // segue vendendo no balcão, no salão e na mesa. Pausar o item não serve pra
-  // isso — ele tira o produto de TUDO.
-  async function salvarOcultaOnline(id, oculta) {
-    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, oculta_online: oculta } : c)))
-    await supabase.from('categorias').update({ oculta_online: oculta }).eq('id', id)
-  }
-
   // Preço por quantidade da CATEGORIA (mig 0329): "a partir de 3, R$ 3,33". Conta
   // a soma de tudo que o cliente leva da categoria (misturando os sabores) e vale
   // no lugar da faixa de cada produto. Qtd ou preço vazios = sem faixa.
@@ -1058,6 +1063,10 @@ export default function Produtos() {
       faixas_preco: produto.faixas_preco ?? [],
       estoque_minimo: produto.estoque_minimo ?? 0,
       ativo: produto.ativo ?? true,
+      vende_salao: produto.vende_salao ?? true,
+      vende_mesa: produto.vende_mesa ?? true,
+      vende_online: produto.vende_online ?? true,
+      vende_app: produto.vende_app ?? true,
       foto_url: produto.foto_url ?? '',
       descricao: produto.descricao ?? '',
     }
@@ -1550,10 +1559,6 @@ export default function Produtos() {
             do cálculo da taxa — e sai na comanda com <strong>(isento de taxa)</strong> do lado, pro cliente ver.
           </p>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-            🍻 <strong>Só no salão</strong> — marque a categoria que <strong>não deve aparecer na Loja Online, no app nem no robô</strong>
-            (Happy Hour, por exemplo). Os itens continuam vendendo normalmente no balcão, no salão e na mesa.
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
             🏷️ <strong>A partir de ... por R$ ...</strong> — desconto por quantidade <strong>da categoria inteira</strong>. Ex.: espetos,
             a partir de 3 por R$ 3,33: um de carne + um de frango + um de queijo já saem a R$ 3,33 cada. Estoque e custo
             seguem por produto. Preenchido, vale no lugar da faixa de cada produto; vazio, cada produto segue a sua.
@@ -1724,13 +1729,10 @@ export default function Produtos() {
                       <input type="checkbox" checked={!!c.isento_taxa} onChange={(e) => salvarIsentoTaxa(c.id, e.target.checked)} />
                       <span>💸 Sem taxa de serviço <span style={{ color: 'var(--text-muted)' }}>(couvert, ingresso)</span></span>
                     </label>
-                    <label
-                      style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13 }}
-                      title="Marcado: os itens desta categoria NÃO aparecem na Loja Online, no app nem no robô do WhatsApp. Continuam vendendo no balcão, no salão e na mesa."
-                    >
-                      <input type="checkbox" checked={!!c.oculta_online} onChange={(e) => salvarOcultaOnline(c.id, e.target.checked)} />
-                      <span>🍻 Só no salão <span style={{ color: 'var(--text-muted)' }}>(não aparece online)</span></span>
-                    </label>
+                    <div style={{ ...dicaCampo, marginTop: 8 }}>
+                      Onde cada item vende (salão, mesa, loja online, app) agora se escolhe
+                      <strong> em cada produto</strong>, no cadastro dele.
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2642,6 +2644,30 @@ export default function Produtos() {
                       : 'Item pausado — não aparece pra vender. Dê play pra voltar.'}
                     {' '}(Isto não é estoque — estoque é o "Controla estoque" acima.)
                   </p>
+                </div>
+
+                {/* ONDE VENDE (mig 0384): cada produto escolhe os canais. Antes era a
+                    categoria inteira ("só no salão"), e quem tinha item de salão e item
+                    de delivery na mesma categoria precisava criar categoria separada. */}
+                <div className="form-field full">
+                  <label style={{ display: 'block', marginBottom: 6 }}>Onde este produto vende</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+                    {CANAIS_VENDA.map(c => (
+                      <div key={c.campo}>
+                        <label style={{ fontSize: 12.5, fontWeight: 700, display: 'block', marginBottom: 4 }}>{c.nome}</label>
+                        <select
+                          value={form[c.campo] === false ? 'nao' : 'sim'}
+                          onChange={e => setForm(f => ({ ...f, [c.campo]: e.target.value === 'sim' }))}
+                          style={{ width: '100%', fontWeight: 700,
+                            color: form[c.campo] === false ? '#a16207' : '#16a34a' }}
+                        >
+                          <option value="sim">✅ Disponível</option>
+                          <option value="nao">🚫 Indisponível</option>
+                        </select>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>{c.texto}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Complementos: escolher categorias já criadas (as opções vivem na tela Complementos) */}

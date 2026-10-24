@@ -476,7 +476,7 @@ export default function PresencialSalao() {
       // primeiros 500 nomes em ordem alfabetica e o resto sumia da tela.
       // `faixas_preco` e `preco_promocional` vem junto desde 15/10/2026: sem eles a
       // mesa cobrava o preco cheio mesmo com atacado ou promocao cadastrados (mig 0326).
-      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional, ordem, vendido_por_peso').eq('empresa_id', empresaId).order('ordem', { ascending: true, nullsFirst: false }).order('nome').order('produto_id')),
+      fetchAll(() => supabase.from('estoque_catalogo').select('produto_id, nome, preco_venda, categoria, codigo_barras, faixas_preco, preco_promocional, ordem, vendido_por_peso, vende_salao').eq('empresa_id', empresaId).order('ordem', { ascending: true, nullsFirst: false }).order('nome').order('produto_id')),
       supabase.from('profiles').select('id, nome').eq('empresa_id', empresaId),
       // `setor` vem junto: é ele que diz qual categoria NÃO sai no papel — e
       // essas o garçom pega ele mesmo, sem esperar cozinha nenhuma (mig 0185).
@@ -499,7 +499,8 @@ export default function PresencialSalao() {
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
     setMpConectado(mp.data === true)
-    setProdutosTodos(ps.data ?? [])
+    // Cada produto escolhe se vende no salão/balcão (mig 0384).
+    setProdutosTodos((ps.data ?? []).filter(p => p.vende_salao !== false))
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
     const om = {}
     for (const c of (cat.data ?? [])) if (c?.nome != null) om[String(c.nome).trim().toLowerCase()] = c.ordem == null ? 9999 : c.ordem

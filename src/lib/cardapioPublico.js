@@ -20,6 +20,8 @@ export async function carregarCardapio(supabase, empresaId) {
     .from('estoque_catalogo')
     .select('produto_id, nome, preco_venda, categoria, foto_url, ordem')
     .eq('empresa_id', empresaId)
+    // Cada produto escolhe se vende pelo QR da mesa / link do cliente (mig 0384).
+    .eq('vende_mesa', true)
     // Mesma ordem que o dono montou na tela de Produtos (mig 0201): sem isso o
     // cardapio da mesa sairia alfabetico e o do celular na ordem escolhida.
     .order('categoria').order('ordem', { nullsFirst: false }).order('nome').order('produto_id'))
