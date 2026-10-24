@@ -196,20 +196,37 @@ export default function ConfirmarLocal() {
 
   function usarMinhaLocalizacao() {
     if (!navigator.geolocation) { setAviso('Seu celular não deixou pegar a localização.'); return }
-    setGps(true)
+    setGps(true); setAviso(null)
+    const deu = pos => {
+      setGps(false)
+      const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+      mexeu.current = true
+      setPrecisao('gps')
+      setAviso(null)
+      coordRef.current = c
+      if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
+      if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 18)
+    }
+    const falhou = err => {
+      setGps(false)
+      // Código 1 = o cliente (ou o navegador) negou a permissão: não adianta
+      // insistir, ele precisa liberar. Dizer COMO é o que faz a diferença —
+      // "não deu pra pegar" deixava o cliente achando que o botão estava quebrado.
+      setAviso(err?.code === 1
+        ? 'O celular bloqueou a localização pra este site. Toque no cadeado ao lado do endereço → Permissões → Localização → Permitir, e toque no botão verde de novo. Se preferir, arraste o pino até a sua porta.'
+        : 'Não consegui pegar sua localização agora. Ligue o GPS do celular e toque no botão verde de novo — ou arraste o pino até a sua porta.')
+    }
     navigator.geolocation.getCurrentPosition(
-      pos => {
-        setGps(false)
-        const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        mexeu.current = true
-        setPrecisao('gps')
-        setAviso(null)
-        coordRef.current = c
-        if (pinRef.current) pinRef.current.setLatLng([c.lat, c.lng])
-        if (mapObj.current) mapObj.current.setView([c.lat, c.lng], 18)
+      deu,
+      err => {
+        if (err?.code === 1) { falhou(err); return }
+        // O GPS fino não achou a tempo (dentro de casa é comum): tenta pela
+        // rede/wi-fi, que é menos preciso mas responde — e o cliente ajusta o
+        // pino depois de ver onde ele caiu.
+        navigator.geolocation.getCurrentPosition(deu, falhou,
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 })
       },
-      () => { setGps(false); setAviso('Não deu pra pegar sua localização. Arraste o pino mesmo.') },
-      { enableHighAccuracy: true, timeout: 10000 },
+      { enableHighAccuracy: true, timeout: 12000 },
     )
   }
 

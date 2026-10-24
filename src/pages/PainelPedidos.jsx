@@ -632,6 +632,26 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
     setBuscandoCep(false)
   }
 
+  // Busca de rua pelo NOME (a mesma da tela de venda e do checkout): quem
+  // cadastra o cliente raramente sabe o CEP, mas ouve o nome da rua. Digitou 3
+  // letras, aparece a lista, escolheu e já vêm bairro, cidade e CEP.
+  const [ruaSug, setRuaSug] = useState([])
+  const [ruaSugAberta, setRuaSugAberta] = useState(false)
+  useEffect(() => {
+    const termo = String(form.endereco ?? '').trim()
+    const uf = String(empresa?.estado ?? '').trim()
+    const cid = String(form.cidade || empresa?.cidade || '').trim()
+    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSug([]); return }
+    let vivo = true
+    const t = setTimeout(async () => {
+      try {
+        const d = await buscarRuas(uf, cid, termo)
+        if (vivo) setRuaSug(d)
+      } catch { if (vivo) setRuaSug([]) }
+    }, 500)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [form.endereco, form.cidade, empresa])
+
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onFechar() }
     window.addEventListener('keydown', onKey)
@@ -722,9 +742,30 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 12, position: 'relative' }}>
               <label style={lbl}>Endereço</label>
-              <input name="endereco" value={form.endereco} onChange={ch} style={inp} placeholder="Rua, avenida..." />
+              <input name="endereco" value={form.endereco} style={inp} autoComplete="off"
+                onChange={e => { ch(e); setRuaSugAberta(true) }}
+                onFocus={() => setRuaSugAberta(true)}
+                placeholder="Rua, avenida... (digite o nome e escolha)" />
+              {ruaSugAberta && ruaSug.length > 0 && (
+                <ListaDeRuas
+                  sugestoes={ruaSug}
+                  onFechar={() => setRuaSugAberta(false)}
+                  onEscolher={r => {
+                    const c = String(r.cep ?? '').replace(/\D/g, '')
+                    setForm(p => ({ ...p,
+                      endereco: r.logradouro || p.endereco,
+                      bairro: r.bairro || p.bairro,
+                      cidade: r.localidade || p.cidade,
+                      estado: p.estado || String(empresa?.estado ?? '').trim(),
+                      // Rua do mapa não traz CEP: limpa em vez de deixar o da rua anterior.
+                      cep: c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : '',
+                    }))
+                    setRuaSug([]); setRuaSugAberta(false)
+                  }}
+                />
+              )}
             </div>
 
             <div style={{ marginBottom: 12 }}>
@@ -743,7 +784,7 @@ function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar
               </div>
             </div>
 
-            <p className="pp-cliente-dica">💡 Digite o CEP que a gente puxa rua, bairro e cidade.</p>
+            <p className="pp-cliente-dica">💡 Digite o nome da rua e escolha na lista (ou o CEP) que a gente puxa bairro e cidade.</p>
           </div>
         </div>
 
