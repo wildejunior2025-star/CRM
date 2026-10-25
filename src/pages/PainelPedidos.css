@@ -1621,3 +1621,23 @@
   70%  { transform: scale(1.12); box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); }
   100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
 }
+
+
+/* ── + Vender embutido na coluna do chat (25/10/2026) ──────────────────────
+   Mesma tela da janela, só que sem a janela: ela mora dentro da coluna, que
+   tem a sua própria rolagem, e a conversa fica do lado. Sem isto a tela de
+   venda herdava a altura e a sombra do modal e nascia com rolagem dentro de
+   rolagem. */
+.pp-venda-embutida {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  overflow: visible;
+}
+.pp-venda-embutida .pp-modal-titulo { display: none; }

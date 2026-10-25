@@ -1575,11 +1575,22 @@ function lerDraftVenda(empresaId) {
   try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null }
 }
 
-function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
+/**
+ * `embutido` = a mesma tela, sem a janela por cima (usada na coluna do chat, no
+ * computador). A conversa continua do lado, lendo e respondendo — era isso que
+ * a sacola do chat tinha que ser desde o começo: o + Vender aberto ali, não um
+ * formulário parecido mas diferente.
+ *
+ * `prefill` = cliente da conversa (telefone, nome e o endereço que o robô já
+ * pegou). Com ele o rascunho é ignorado de propósito: rascunho é da venda de
+ * balcão, e trazer o carrinho de outro cliente pra dentro da conversa é como
+ * se começa a mandar o pedido errado pra pessoa errada.
+ */
+function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido = false, prefill = null }) {
   const editando = !!pedidoEdicao
   // Rascunho só vale pra venda nova (não pra edição de pedido existente)
-  const draft = editando ? null : lerDraftVenda(empresa?.id)
-  const draftKey = editando ? null : draftKeyFor(empresa?.id)
+  const draft = (editando || prefill) ? null : lerDraftVenda(empresa?.id)
+  const draftKey = (editando || prefill) ? null : draftKeyFor(empresa?.id)
   const [produtos, setProdutos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
@@ -1594,8 +1605,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   const [ordemCats, setOrdemCats] = useState({})
   const [catSel, setCatSel] = useState(null)
   const [produtoComp, setProdutoComp] = useState(null) // produto sendo montado (complementos)
-  const [nome, setNome]         = useState(draft?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
-  const [telefone, setTelefone] = useState(draft?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
+  const [nome, setNome]         = useState(draft?.nome ?? prefill?.nome ?? (pedidoEdicao && pedidoEdicao.cliente_nome !== 'Balcão' ? (pedidoEdicao.cliente_nome ?? '') : ''))
+  const [telefone, setTelefone] = useState(draft?.telefone ?? prefill?.telefone ?? (pedidoEdicao && pedidoEdicao.cliente_telefone !== '—' ? (pedidoEdicao.cliente_telefone ?? '') : ''))
   // Abre em ENTREGA. O padrão era Retirada e isso custava venda: a venda saía
   // como balcão, sem endereço e sem taxa, e o pedido nunca aparecia no app do
   // motoqueiro — o pedido 1001 da CD Bom (31/08/2026) ficou parado assim, com o
@@ -1603,12 +1614,12 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // Esquecer de marcar Entrega some com o pedido; esquecer de marcar Retirada
   // só faz o sistema pedir o endereço, e aí dá pra corrigir na hora.
   const [tipo, setTipo]         = useState(draft?.tipo ?? pedidoEdicao?.tipo_entrega ?? 'entrega') // 'retirada' (balcão) | 'entrega'
-  const [cep, setCep]           = useState(draft?.cep ?? pedidoEdicao?.endereco_cep ?? '')
+  const [cep, setCep]           = useState(draft?.cep ?? prefill?.cep ?? pedidoEdicao?.endereco_cep ?? '')
   const [buscandoCepVenda, setBuscandoCepVenda] = useState(false)
-  const [rua, setRua]           = useState(draft?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
-  const [numero, setNumero]     = useState(draft?.numero ?? pedidoEdicao?.endereco_numero ?? '')
-  const [bairro, setBairro]     = useState(draft?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
-  const [cidade, setCidade]     = useState(draft?.cidade ?? (pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : ''))
+  const [rua, setRua]           = useState(draft?.rua ?? prefill?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
+  const [numero, setNumero]     = useState(draft?.numero ?? prefill?.numero ?? pedidoEdicao?.endereco_numero ?? '')
+  const [bairro, setBairro]     = useState(draft?.bairro ?? prefill?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
+  const [cidade, setCidade]     = useState(draft?.cidade ?? prefill?.cidade ?? (pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : ''))
   const [taxa, setTaxa]         = useState(draft?.taxa ?? (pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : ''))
   // Formas ligadas na loja. Se a que veio do rascunho/edição foi desligada
   // depois, cai na primeira ativa — senão o botão sumiria com ela selecionada.
@@ -2575,10 +2586,19 @@ ${url}
     color: pagamento === val ? '#16a34a' : 'var(--text)',
   })
 
+  // Embutido: sem a janela por cima e sem o fundo escuro — quem está do lado é
+  // a conversa, e ela tem que continuar visível e clicável.
+  const Moldura = embutido
+    ? ({ children }) => <div className="pp-venda pp-venda-embutida">{children}</div>
+    : ({ children }) => (
+      <div className="pp-modal-overlay" onClick={onFechar}>
+        <div className="pp-modal pp-venda" onClick={e => e.stopPropagation()}>{children}</div>
+      </div>
+    )
+
   return (
     <>
-    <div className="pp-modal-overlay" onClick={onFechar}>
-      <div className="pp-modal pp-venda" onClick={e => e.stopPropagation()}>
+    <Moldura>
         <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
 
         {/* Duas colunas na tela grande, uma só no celular (ver PainelPedidos.css).
@@ -3167,8 +3187,7 @@ ${url}
 
         </div>{/* fim da coluna da direita */}
         </div>{/* fim do grid */}
-      </div>
-    </div>
+    </Moldura>
 
     {cadastroAberto && (
       <ModalNovoCliente
@@ -12259,7 +12278,10 @@ export default function PainelPedidos() {
         <aside style={{
           position: 'fixed', top: 60, bottom: 0, zIndex: 39,
           right: 'calc(min(50vw, calc(100vw - 80px)) + 56px)',
-          width: 'min(440px, 34vw)',
+          // Larga o bastante pras duas colunas do + Vender (produtos | venda) e
+          // ainda sobrar a conversa do lado. No celular essa coluna nem existe:
+          // lá continua a gaveta da sacola, que é o certo pra tela pequena.
+          width: 'min(720px, 44vw)',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 18,
         }}>
@@ -12282,107 +12304,28 @@ export default function PainelPedidos() {
 
               Só o `display` muda: desmontar o "Fechar" apagaria o que já foi
               digitado (número da casa, troco) a cada ida e volta. */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            {[
-              { id: 'itens',  rot: '🛒 Produtos', extra: sacolaChat.length ? `${sacolaChat.length} ${sacolaChat.length === 1 ? 'item' : 'itens'}` : '' },
-              { id: 'fechar', rot: '📋 Fechar',   extra: totalSacolaChat > 0 ? `R$ ${totalSacolaChat.toFixed(2).replace('.', ',')}` : '' },
-            ].map(t => {
-              const ativa = abaEfetivaSacola === t.id
-              return (
-                <button key={t.id} type="button" onClick={() => setAbaSacola(t.id)}
-                  style={{
-                    flex: 1, padding: '9px 8px', borderRadius: 9, cursor: 'pointer',
-                    fontSize: 13, fontWeight: 800, lineHeight: 1.25,
-                    border: `1.5px solid ${ativa ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
-                    background: ativa ? 'rgba(124,58,237,.18)' : 'transparent',
-                    color: ativa ? '#a78bfa' : 'var(--text-muted)',
-                  }}>
-                  {t.rot}
-                  {t.extra ? <span style={{ display: 'block', fontSize: 11, fontWeight: 700, opacity: .85 }}>{t.extra}</span> : null}
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={{ display: abaEfetivaSacola === 'itens' ? 'block' : 'none' }}>
-            {/* Escolha do sabor AQUI, na coluna — a conversa segue à vista do
-                lado. Enquanto está montando, a busca some: são dois campos
-                disputando a mesma atenção. */}
-            {produtoCompChat ? (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: '#a78bfa' }}>
-                    {editandoSacola != null ? '✏️ TROCANDO O SABOR' : '🍧 ESCOLHA DO CLIENTE'}
-                  </span>
-                  <button type="button" onClick={fecharSeletorDoChat}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12.5 }}>
-                    cancelar
-                  </button>
-                </div>
-                <ModalComplementos
-                  embutido
-                  produto={produtoCompChat}
-                  iniciais={produtoCompChat.iniciais ?? []}
-                  onFechar={fecharSeletorDoChat}
-                  onConfirmar={adicionarComComplementosNoChat}
-                  onEnviarLista={enviarListaDeSabores}
-                  enviandoLista={enviandoLista}
-                />
-              </div>
-            ) : (
-              <BuscaProdutoNoChat
-                empresaId={empresa?.id}
-                onEscolher={escolherProdutoNoChat}
-                onAvulso={item => setSacolaChat(prev => [...prev, item])}
-                onEnviarCategoria={enviarListaDaCategoria}
-                enviandoCategoria={enviandoLista}
-                semBotao
-              />
-            )}
-
-            {sacolaChat.length === 0 ? (
-              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', marginTop: 14, lineHeight: 1.5 }}>
-                Digite o nome ou abra uma categoria acima e clique no produto.<br />
-                Não achou? Ponha o preço e mande mesmo sem cadastro.
-              </div>
-            ) : (
-              <SacolaNoChat
-                roboLigado={roboLigado}
-                itens={sacolaChat}
-                onQtd={mudarQtdSacola}
-                onQtdDireta={definirQtdSacola}
-                onRemover={idx => mudarQtdSacola(idx, -999)}
-                onEditar={editarItemDaSacola}
-                onObs={mudarObsSacola}
-                onEnviar={enviarSacolaDoChat}
-                enviando={enviandoSacola}
-              />
-            )}
-          </div>
-
-          <div style={{ display: abaEfetivaSacola === 'fechar' ? 'block' : 'none' }}>
-            {sacolaChat.length === 0 ? (
-              <div style={{ fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                Sacola vazia. Ponha os produtos em <strong>🛒 Produtos</strong> e volte aqui pra fechar.
-              </div>
-            ) : (
-              /* Endereço, pagamento e o botão que joga no sistema. `key` no
-                 telefone: trocou de conversa, formulário novo — senão o
-                 endereço de um cliente ia parar no pedido do outro. */
-              <FecharPedidoNoChat
-                key={threadAberta?.cliente_ref}
-                empresa={empresa}
-                telefone={threadAberta?.cliente_ref}
-                nomeThread={threadAberta?.cliente_nome}
-                itens={sacolaChat}
-                onFinalizar={finalizarPedidoDoChat}
-                salvando={salvandoPedidoChat}
-                cadastroVersao={cadastroVersao}
-                pinChat={pinChat}
-                enderecoRobo={enderecoRobo}
-              />
-            )}
-          </div>
+          {/* NO COMPUTADOR, A SACOLA DO CHAT É O + VENDER (25/10/2026).
+              Era uma tela parecida mas diferente: outro jeito de buscar
+              produto, outro formulário de endereço, outro botão de fechar — e
+              o atendente tinha que aprender as duas. Agora é a MESMA tela, com
+              o cliente da conversa já preenchido, e a conversa continua do
+              lado pra ele ler e responder enquanto monta. */}
+          <ModalVenda
+            key={threadAberta?.cliente_ref}
+            embutido
+            empresa={empresa}
+            prefill={{
+              telefone: threadAberta?.cliente_ref ?? '',
+              nome: threadAberta?.cliente_nome ?? '',
+              rua: enderecoRobo?.rua ?? '',
+              numero: enderecoRobo?.numero ?? '',
+              bairro: enderecoRobo?.bairro ?? '',
+              cidade: enderecoRobo?.cidade ?? '',
+              cep: enderecoRobo?.cep ?? '',
+            }}
+            onFechar={() => setSacolaLateral(false)}
+            onCriado={() => { carregarPedidos(); setSacolaLateral(false) }}
+          />
         </aside>
       )}
 
