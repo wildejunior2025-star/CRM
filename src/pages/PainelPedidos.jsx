@@ -1678,6 +1678,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
   )
   // O que o Google entendeu do endereço, pro atendente conferir ANTES de salvar
   // o ponto: endereço por extenso, nível de precisão e a foto do mapa.
+  // Embutido na coluna do chat, as duas metades não cabem lado a lado sem
+  // espremer as duas. Então vira UMA DE CADA VEZ, com as abas em cima — do
+  // jeito que a sacola antiga já fazia e o lojista já conhecia.
+  const [abaEmbutida, setAbaEmbutida] = useState('produtos')
   const [revisaoGoogle, setRevisaoGoogle] = useState(null)
   const [mapaArrastar, setMapaArrastar] = useState(false)
   // Quem acabou de preencher os campos foi a escolha no Google, não o dedo do
@@ -2609,8 +2613,32 @@ ${url}
             o carrinho; à direita o que ele preenche uma vez por venda. Numa tela
             larga a coluna única deixava a lista de produtos com 5 linhas visíveis
             e metade da tela vazia. */}
-        <div className="pp-venda-grid">
-        <div className="pp-venda-col">
+        {embutido && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[
+              { id: 'produtos', rot: '🛒 Produtos', extra: itens.length ? `${itens.length} ${itens.length === 1 ? 'item' : 'itens'}` : '' },
+              { id: 'fechar', rot: '📋 Fechar', extra: total > 0 ? fmt(total) : '' },
+            ].map(t => {
+              const ativa = abaEmbutida === t.id
+              return (
+                <button key={t.id} type="button" onClick={() => setAbaEmbutida(t.id)}
+                  style={{
+                    flex: 1, padding: '9px 8px', borderRadius: 9, cursor: 'pointer',
+                    fontSize: 13, fontWeight: 800, lineHeight: 1.25,
+                    border: `1.5px solid ${ativa ? '#7c3aed' : 'var(--border, #2a2a3a)'}`,
+                    background: ativa ? 'rgba(124,58,237,.18)' : 'transparent',
+                    color: ativa ? '#a78bfa' : 'var(--text-muted)',
+                  }}>
+                  {t.rot}{t.extra ? ` · ${t.extra}` : ''}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <div className={embutido ? 'pp-venda-grid pp-venda-grid-uma' : 'pp-venda-grid'}>
+        {/* Só o `display` muda: desmontar a outra metade apagaria o que já foi
+            digitado (endereço, troco) a cada ida e volta. */}
+        <div className="pp-venda-col" style={embutido && abaEmbutida !== 'produtos' ? { display: 'none' } : undefined}>
 
         {/* Leitor de print — pra loja que recebe pedido por outro canal (iFood,
             WhatsApp...): tira o print de lá e a IA preenche a venda.
@@ -2757,7 +2785,7 @@ ${url}
         </div>
 
         </div>{/* fim da coluna da esquerda */}
-        <div className="pp-venda-col">
+        <div className="pp-venda-col" style={embutido && abaEmbutida !== 'fechar' ? { display: 'none' } : undefined}>
 
         {/* Itens da venda — é a lista que o caixa confere em voz alta com o
             cliente. Ficava espremida embaixo da busca, em letra de 13px; agora
@@ -11135,7 +11163,7 @@ export default function PainelPedidos() {
           // precisa de campo pra digitar, e ler a conversa é olhar de relance.
           width: telaGrande
             ? (sacolaLateral && painelDireito === 'chat'
-              ? 'min(36vw, calc(100vw - 80px))'
+              ? 'min(46vw, calc(100vw - 80px))'
               : 'min(50vw, calc(100vw - 80px))')
             : 'min(480px, calc(100vw - 64px))',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
@@ -12300,12 +12328,12 @@ export default function PainelPedidos() {
       {telaGrande && painelDireito === 'chat' && threadAberta && sacolaLateral && (
         <aside style={{
           position: 'fixed', top: 60, bottom: 0, zIndex: 39,
-          right: 'calc(min(36vw, calc(100vw - 80px)) + 56px)',
+          right: 'calc(min(46vw, calc(100vw - 80px)) + 56px)',
           // Larga o bastante pras duas colunas do + Vender (produtos | venda)
           // respirarem — espremida, a coluna da venda ficava com o botão de
           // pagamento quebrando em três linhas. No celular essa coluna nem
           // existe: lá continua a gaveta da sacola.
-          width: 'min(900px, 56vw)',
+          width: 'min(580px, 40vw)',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 18,
         }}>

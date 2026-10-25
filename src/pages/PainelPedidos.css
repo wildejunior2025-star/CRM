@@ -1655,3 +1655,9 @@
    manda), mas existe pro React — trocar a ÁRVORE a cada render fazia o campo
    perder o foco a cada letra. */
 .pp-venda-fora { display: contents; }
+
+/* Embutido na coluna do chat: uma metade de cada vez, ocupando a largura toda.
+   Lado a lado aqui as duas ficavam espremidas — os campos de endereco cortavam
+   a palavra e os botoes de pagamento quebravam em tres linhas. */
+.pp-venda-grid-uma { grid-template-columns: 1fr !important; gap: 0 !important; }
+.pp-venda-grid-uma > .pp-venda-col + .pp-venda-col { border-left: 0 !important; padding-left: 0 !important; }
