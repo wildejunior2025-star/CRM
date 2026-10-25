@@ -7745,6 +7745,59 @@ export default function PainelPedidos() {
   }, [chaveSacola, chatAberto, sacolaChat])
   // Painel da sacola colado na conversa (só no PC).
   const [sacolaLateral, setSacolaLateral] = useState(false)
+  // Largura da sacola, arrastada pela borda. Cada balcão tem um monitor e um
+  // jeito de trabalhar: quem monta pedido grande quer a sacola larga, quem só
+  // confere quer ela fina e a conversa inteira à vista. Fica guardada no
+  // navegador — arrastar toda vez que abre seria pior que não ter.
+  // 0 = ainda não arrastou: vale a largura automática (min(580px, 40vw)).
+  const [larguraSacola, setLarguraSacola] = useState(() => {
+    try { return Number(localStorage.getItem('gestor-sacola-largura')) || 0 } catch { return 0 }
+  })
+  const arrastandoSacola = useRef(null)
+  // Pointer events, não mouse: pega mouse e caneta do mesmo jeito, e o
+  // setPointerCapture faz o arrasto continuar mesmo quando o cursor passa por
+  // cima da conversa (senão solta sozinho no meio do caminho).
+  function comecarArrastoSacola(e) {
+    e.preventDefault()
+    // `direita` é a borda que NÃO se mexe (a sacola está colada na conversa).
+    // O teto sai dela, não da largura da janela: medindo pela janela, a sacola
+    // podia crescer até começar fora da tela, à esquerda.
+    const r = e.currentTarget.parentElement?.getBoundingClientRect()
+    arrastandoSacola.current = {
+      x0: e.clientX, w0: r?.width ?? 580, direita: r?.right ?? window.innerWidth, ultima: 0,
+    }
+    try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* sem captura: o arrasto ainda funciona */ }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+  function arrastarSacola(e) {
+    const a = arrastandoSacola.current
+    if (!a) return
+    // A sacola está ancorada à DIREITA (colada na conversa): puxar o mouse pra
+    // esquerda ALARGA. Por isso a conta é invertida.
+    const bruta = a.w0 + (a.x0 - e.clientX)
+    // Piso: abaixo de 320px as duas colunas do + Vender não cabem. Teto: a
+    // borda esquerda tem que parar antes do fim da tela, senão o topo do
+    // painel (título e o X de fechar) some pra fora e não dá mais pra fechar.
+    const teto = Math.max(360, a.direita - 60)
+    const nova = Math.round(Math.min(teto, Math.max(320, bruta)))
+    a.ultima = nova
+    setLarguraSacola(nova)
+  }
+  function soltarSacola(e) {
+    const a = arrastandoSacola.current
+    if (!a) return
+    arrastandoSacola.current = null
+    try { e.currentTarget?.releasePointerCapture?.(e.pointerId) } catch { /* ignore */ }
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    if (a.ultima) { try { localStorage.setItem('gestor-sacola-largura', String(a.ultima)) } catch { /* ignore */ } }
+  }
+  // Dois cliques na alça devolvem a largura de fábrica.
+  function resetarLarguraSacola() {
+    setLarguraSacola(0)
+    try { localStorage.removeItem('gestor-sacola-largura') } catch { /* ignore */ }
+  }
   const [enviandoSacola, setEnviandoSacola] = useState(false)
   const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
@@ -12355,10 +12408,31 @@ export default function PainelPedidos() {
           // respirarem — espremida, a coluna da venda ficava com o botão de
           // pagamento quebrando em três linhas. No celular essa coluna nem
           // existe: lá continua a gaveta da sacola.
-          width: 'min(580px, 40vw)',
+          // Depois que o atendente arrasta a borda, manda a largura dele.
+          width: larguraSacola ? `${larguraSacola}px` : 'min(580px, 40vw)',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 18,
         }}>
+          {/* ALÇA DE ARRASTAR (borda esquerda).
+              Fica fixa (não rola junto com o conteúdo) e é fininha, mas a área
+              que pega o mouse é maior que o risco que aparece — alça de 1px é
+              alça que ninguém acerta. */}
+          <div
+            className="pp-alca-sacola"
+            onPointerDown={comecarArrastoSacola}
+            onPointerMove={arrastarSacola}
+            onPointerUp={soltarSacola}
+            onPointerCancel={soltarSacola}
+            onDoubleClick={resetarLarguraSacola}
+            title="Arraste para mudar a largura (dois cliques volta ao normal)"
+            style={{
+              position: 'fixed', top: 60, bottom: 0, width: 12, marginLeft: -19,
+              cursor: 'col-resize', zIndex: 2, touchAction: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <i />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
               🛒 Sacola do cliente

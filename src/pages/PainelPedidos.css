@@ -1661,3 +1661,22 @@
    a palavra e os botoes de pagamento quebravam em tres linhas. */
 .pp-venda-grid-uma { grid-template-columns: 1fr !important; gap: 0 !important; }
 .pp-venda-grid-uma > .pp-venda-col + .pp-venda-col { border-left: 0 !important; padding-left: 0 !important; }
+
+/* Alça de arrastar a largura da sacola (borda esquerda do painel).
+   Parada ela é um risquinho discreto; com o mouse em cima vira uma barra
+   roxa, que é o que conta pro atendente DESCOBRIR que dá pra puxar — alça
+   invisível é alça que ninguém usa. */
+.pp-alca-sacola > i {
+  display: block;
+  width: 3px;
+  height: 44px;
+  border-radius: 3px;
+  background: var(--border, #2a2a3a);
+  transition: background .12s, height .12s, width .12s;
+}
+.pp-alca-sacola:hover > i,
+.pp-alca-sacola:active > i {
+  width: 5px;
+  height: 90px;
+  background: var(--primary, #863bff);
+}
