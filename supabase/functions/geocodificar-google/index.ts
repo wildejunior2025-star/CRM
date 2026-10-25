@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify(corpo),
       })
       if (!r.ok) {
-        const t = (await r.text()).slice(0, 300)
+        const t = (await r.text()).slice(0, 900)
         console.warn('[geocode-google] autocomplete recusou:', r.status, t)
         // 403 = a API "Places API (New)" não está ligada no projeto do Google.
         return json({ ok: false, erro: r.status === 403 ? 'places_desligado' : 'autocomplete_falhou', detalhe: t })
@@ -188,13 +188,17 @@ Deno.serve(async (req) => {
     // Ja pagamos por este endereco? (30 dias)
     const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
     const { data: cache } = await supabase.from('geocode_cache')
-      .select('lat, lng, precisao, formatado').eq('chave', chave).gte('created_at', corte).maybeSingle()
+      .select('lat, lng, precisao, formatado, partes').eq('chave', chave).gte('created_at', corte).maybeSingle()
     if (cache) {
       // A foto não entra no cache do banco (base64 pesa e o Google não deixa
       // guardar imagem). Endereço repetido não paga a BUSCA de novo; a foto
       // sim, e é o SKU barato.
       const foto = b.mapa === true ? await fotoDoMapa(cache.lat, cache.lng) : null
-      return json({ ok: true, lat: cache.lat, lng: cache.lng, precisao: cache.precisao, formatado: cache.formatado, mapa: foto, cache: true })
+      // As PARTES vao junto (mig 0392). Sem elas, endereco repetido vinha do
+      // cache so com o ponto e a tela nao preenchia bairro, cidade e CEP — o
+      // atendente tinha que digitar tudo de novo justamente no caso mais comum,
+      // que e o cliente que ja comprou antes.
+      return json({ ok: true, lat: cache.lat, lng: cache.lng, precisao: cache.precisao, formatado: cache.formatado, mapa: foto, partes: cache.partes ?? null, cache: true })
     }
 
     // Teto diario da loja.
@@ -258,7 +262,7 @@ Deno.serve(async (req) => {
 
     const precisaoFinal = bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE'
     await supabase.from('geocode_cache').upsert(
-      { chave, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
+      { chave, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, partes: endereco_partes, created_at: new Date().toISOString() },
       { onConflict: 'chave' })
     const foto = b.mapa === true ? await fotoDoMapa(lat, lng) : null
     return json({ ok: true, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, mapa: foto, partes: endereco_partes })
