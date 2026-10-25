@@ -2588,17 +2588,20 @@ ${url}
 
   // Embutido: sem a janela por cima e sem o fundo escuro — quem está do lado é
   // a conversa, e ela tem que continuar visível e clicável.
-  const Moldura = embutido
-    ? ({ children }) => <div className="pp-venda pp-venda-embutida">{children}</div>
-    : ({ children }) => (
-      <div className="pp-modal-overlay" onClick={onFechar}>
-        <div className="pp-modal pp-venda" onClick={e => e.stopPropagation()}>{children}</div>
-      </div>
-    )
+  //
+  // ISTO AQUI JÁ FOI UM COMPONENTE (<Moldura>) DECLARADO DENTRO DO RENDER, e
+  // custou caro: a cada tecla digitada o React via um componente NOVO, jogava
+  // a árvore inteira fora e montava outra. Na prática, o campo da rua perdia o
+  // foco a cada letra — digitava "r", tinha que clicar de novo pra digitar "u".
+  // Componente novo a cada render remonta tudo; por isso aqui é só a classe que
+  // muda, no mesmo elemento.
+  const classeFora = embutido ? 'pp-venda-fora' : 'pp-modal-overlay'
+  const classeDentro = embutido ? 'pp-venda pp-venda-embutida' : 'pp-modal pp-venda'
 
   return (
     <>
-    <Moldura>
+    <div className={classeFora} onClick={embutido ? undefined : onFechar}>
+      <div className={classeDentro} onClick={e => e.stopPropagation()}>
         <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
 
         {/* Duas colunas na tela grande, uma só no celular (ver PainelPedidos.css).
@@ -3187,7 +3190,8 @@ ${url}
 
         </div>{/* fim da coluna da direita */}
         </div>{/* fim do grid */}
-    </Moldura>
+      </div>
+    </div>
 
     {cadastroAberto && (
       <ModalNovoCliente
@@ -11034,9 +11038,14 @@ export default function PainelPedidos() {
         />
       )}
 
-      {/* Modal de venda no balcão (PDV) */}
+      {/* Modal de venda no balcão (PDV).
+          `key` fixa: sem ela, o React casava este modal por POSIÇÃO no meio de
+          dezenas de irmãos condicionais. Bastava um irmão acima aparecer ou
+          sumir pra ele jogar a tela fora e montar outra — e quem estava
+          digitando o endereço perdia o foco a cada letra (25/10/2026). */}
       {vendaAberta && (
         <ModalVenda
+          key="venda-balcao"
           empresa={empresa}
           onFechar={() => setVendaAberta(false)}
           onCriado={carregarPedidos}
@@ -11046,6 +11055,7 @@ export default function PainelPedidos() {
       {/* Edição de um pedido de balcão */}
       {vendaEditando && (
         <ModalVenda
+          key={`venda-edit-${vendaEditando.id}`}
           empresa={empresa}
           pedidoEdicao={vendaEditando}
           onFechar={() => setVendaEditando(null)}

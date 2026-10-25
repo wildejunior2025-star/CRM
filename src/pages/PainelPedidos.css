@@ -1650,3 +1650,8 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --chat-fundo: rgba(0, 0, 0, .18); }
 }
+
+/* Embutido: o elemento de fora não existe pro layout (a coluna do chat é que
+   manda), mas existe pro React — trocar a ÁRVORE a cada render fazia o campo
+   perder o foco a cada letra. */
+.pp-venda-fora { display: contents; }
