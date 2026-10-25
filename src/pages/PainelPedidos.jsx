@@ -11262,46 +11262,14 @@ export default function PainelPedidos() {
             </div>
           )}
 
-          {painelDireito === 'chat' && (
-            threadAberta ? (
-              <ChatConversa
-                thread={threadAberta}
-                texto={chatTexto}
-                onTexto={setChatTexto}
-                enviando={enviandoChat}
-                onEnviar={enviarChat}
-                onVoltar={() => { setChatAberto(null); setChatAviso(null) }}
-                canalLabel={CANAL_LABEL[threadAberta.canal] ?? threadAberta.canal}
-                aviso={chatAviso}
-                empresaId={empresa?.id}
-                onEscolherProduto={escolherProdutoNoChat}
-                botPausado={botPausado}
-                onDevolverAoRobo={devolverConversaAoRobo}
-                onPausarRobo={pausarConversaRobo}
-                sacola={sacolaChat}
-                onQtdSacola={mudarQtdSacola}
-                onQtdDiretaSacola={definirQtdSacola}
-                empresa={empresa}
-                onFinalizarPedido={finalizarPedidoDoChat}
-                salvandoPedido={salvandoPedidoChat}
-                onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
-                onEditarSacola={editarItemDaSacola}
-                onObsSacola={mudarObsSacola}
-                onEnviarSacola={enviarSacolaDoChat}
-                enviandoSacola={enviandoSacola}
-                onAbrirSacola={() => setSacolaLateral(true)}
-                onPedirLocalizacao={pedirLocalizacaoNoChat}
-                onUsarLocalizacao={usarLocalizacaoNoPedido}
-                onUsarEndereco={end => usarEnderecoDaConversa(end)}
-                onNomeDoCliente={nomearClienteDaConversa}
-                cadastroVersao={cadastroVersao}
-                pinChat={pinChat}
-                enderecoRobo={enderecoRobo}
-                onEnviarCategoria={enviarListaDaCategoria}
-                enviandoCategoria={enviandoLista}
-                roboLigado={roboLigado}
-              />
-            ) : (
+          {painelDireito === 'chat' && (() => {
+            // WHATSAPP WEB (25/10/2026): no computador a lista de conversas fica
+            // SEMPRE à vista, numa coluna estreita ao lado da conversa aberta.
+            // Antes ela sumia ao abrir alguém, e quem atendia tinha que voltar pra
+            // saber se outro cliente tinha falado — num horário de pico isso é
+            // cliente esperando sem ninguém saber. No celular continua uma tela de
+            // cada vez: lá não cabem as duas.
+            const lista = (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {/* Procurar conversa pelo número do cliente. A caixa mostra só
                     o dia de hoje; a busca vai no banco e traz os dias de trás. */}
@@ -11384,7 +11352,61 @@ export default function PainelPedidos() {
                 })}
               </div>
             )
-          )}
+            // Sem conversa aberta e so a lista — e o <ChatConversa> nem pode ser
+            // montado aqui: ele le thread.canal, e sem thread isso derruba a tela.
+            if (!threadAberta) return lista
+            const conversa = (
+              <ChatConversa
+                thread={threadAberta}
+                texto={chatTexto}
+                onTexto={setChatTexto}
+                enviando={enviandoChat}
+                onEnviar={enviarChat}
+                onVoltar={() => { setChatAberto(null); setChatAviso(null) }}
+                canalLabel={CANAL_LABEL[threadAberta.canal] ?? threadAberta.canal}
+                aviso={chatAviso}
+                empresaId={empresa?.id}
+                onEscolherProduto={escolherProdutoNoChat}
+                botPausado={botPausado}
+                onDevolverAoRobo={devolverConversaAoRobo}
+                onPausarRobo={pausarConversaRobo}
+                sacola={sacolaChat}
+                onQtdSacola={mudarQtdSacola}
+                onQtdDiretaSacola={definirQtdSacola}
+                empresa={empresa}
+                onFinalizarPedido={finalizarPedidoDoChat}
+                salvandoPedido={salvandoPedidoChat}
+                onAvulsoSacola={item => setSacolaChat(prev => [...prev, item])}
+                onEditarSacola={editarItemDaSacola}
+                onObsSacola={mudarObsSacola}
+                onEnviarSacola={enviarSacolaDoChat}
+                enviandoSacola={enviandoSacola}
+                onAbrirSacola={() => setSacolaLateral(true)}
+                onPedirLocalizacao={pedirLocalizacaoNoChat}
+                onUsarLocalizacao={usarLocalizacaoNoPedido}
+                onUsarEndereco={end => usarEnderecoDaConversa(end)}
+                onNomeDoCliente={nomearClienteDaConversa}
+                cadastroVersao={cadastroVersao}
+                pinChat={pinChat}
+                enderecoRobo={enderecoRobo}
+                onEnviarCategoria={enviarListaDaCategoria}
+                enviandoCategoria={enviandoLista}
+                roboLigado={roboLigado}
+              />
+            )
+            if (!telaGrande) return conversa
+            return (
+              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <div style={{
+                  width: 236, flex: '0 0 236px', maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
+                  paddingRight: 10, borderRight: '1px solid var(--border, #2a2a3a)',
+                }}>
+                  {lista}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>{conversa}</div>
+              </div>
+            )
+          })()}
 
           {/* Painel: Impressora */}
           {painelDireito === 'impressora' && (
