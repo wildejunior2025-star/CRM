@@ -1343,6 +1343,26 @@ async function buscarRuasNoMapa(uf, termo) {
  * volta ao ViaCEP e pega o CEP de verdade. O CEP vem sozinho, que é o ponto —
  * o cliente não sabe o CEP dele, e quem atende não tem como conferir chute.
  */
+/**
+ * "av nascimento de castro 81" → { rua: "av nascimento de castro", numero: "81" }
+ *
+ * O atendente digita do jeito que o cliente fala, com o número no fim. A busca
+ * de rua (Correios) é literal: ela procurava "nascimento de castro 81" como se
+ * fosse o NOME da rua e não achava nada — a lista vinha com Vila Nascimento,
+ * Travessa Nascimento, qualquer coisa menos a avenida certa (Agv, 25/10/2026).
+ *
+ * Só separa quando o que sobra ainda parece nome de rua: duas palavras ou mais.
+ * Senão "Travessa 7" viraria rua "Travessa", número 7.
+ */
+function separaNumeroDaRua(texto) {
+  const t = String(texto ?? '').trim()
+  const m = t.match(/^(.*?)[,\s]+(?:n[ºo°.]?\s*)?(\d{1,6}[a-zA-Z]?)$/)
+  if (!m) return { rua: t, numero: '' }
+  const nome = m[1].trim()
+  if (nome.split(/\s+/).filter(Boolean).length < 2 || nome.length < 6) return { rua: t, numero: '' }
+  return { rua: nome, numero: m[2] }
+}
+
 async function buscarRuas(uf, cidade, termo) {
   const [viacep, mapa] = await Promise.all([
     buscarRuasViaCep(uf, cidade, termo).catch(() => []),
@@ -1434,7 +1454,7 @@ function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
         boxShadow: '0 12px 28px rgba(0,0,0,.35)',
       }}>
         {sugestoes.map(r => (
-          <button key={`${r.cep}-${r.logradouro}`} type="button" onClick={() => onEscolher(r)}
+          <button key={r.place_id ?? `${r.cep}-${r.logradouro}`} type="button" onClick={() => onEscolher(r)}
             style={{
               display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
               border: 'none', borderRadius: 7, background: 'none', color: 'var(--text)', cursor: 'pointer',
@@ -1448,6 +1468,13 @@ function ListaDeRuas({ sugestoes, onEscolher, onFechar }) {
             </span>
           </button>
         ))}
+        {/* Atribuicao exigida pelo Google quando a sugestao dele aparece fora de
+            um mapa do Google — e o mesmo "powered by Google" que o iFood mostra. */}
+        {sugestoes.some(r => r.doGoogle) && (
+          <div style={{ padding: '4px 10px 2px', fontSize: 10.5, color: 'var(--text-muted)', textAlign: 'right' }}>
+            powered by Google
+          </div>
+        )}
       </div>
     </>
   )
@@ -1642,6 +1669,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // o ponto: endereço por extenso, nível de precisão e a foto do mapa.
   const [revisaoGoogle, setRevisaoGoogle] = useState(null)
   const [mapaArrastar, setMapaArrastar] = useState(false)
+  // Quem acabou de preencher os campos foi a escolha no Google, não o dedo do
+  // atendente: a limpeza automática logo abaixo tem que deixar essa passar,
+  // senão a conferência aparecia e sumia no mesmo instante.
+  const veioDoGoogle = useRef(false)
   // Pino que veio do cliente (cadastro ou link confirmado): o buscador de mapa
   // não sobrescreve o que a pessoa apontou com o dedo.
   const pinDoCliente = useRef(false)
@@ -1819,7 +1850,17 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       // o número) vale mais que uma busca nova por texto — e é o mesmo ponto
       // que vai no pedido, então a taxa e o mapa do motoboy contam a mesma
       // história.
-      let coords = coordCliente ?? await geocodificarPreciso({ rua, numero, bairro, cidade, cep })
+      // GOOGLE É O PRINCIPAL AQUI (25/10/2026). Nas outras telas quem digita é o
+      // cliente, que confirma o ponto no mapa depois; no balcão quem digita é o
+      // atendente, pro endereço de uma casa que ele nunca viu — e é aqui que o
+      // mapa grátis mais erra (ele não tem número de casa em bairro novo).
+      // Sobra a busca grátis como plano B, pra quando a chave do Google não
+      // estiver configurada ou o Google não achar.
+      //
+      // Custo: cada endereço paga uma vez a cada 30 dias (cache no servidor), e
+      // são ~150 vendas de balcão com entrega por mês em TODAS as lojas, contra
+      // 10 mil consultas grátis por mês.
+      let coords = coordCliente ?? null
       // Rua que o mapa não conhece (bairro novo, loteamento): em vez de não dar
       // taxa nenhuma, mede até o CENTRO DO BAIRRO e avisa que é aproximado. O
       // ponto do pedido continua vazio — o do bairro não serve pra o motoboy.
@@ -1830,8 +1871,8 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       // tem — e ele também guarda o ponto da rua. Esse ponto é bem melhor que o
       // centro do bairro (a Rua Babaçulândia dá 250 m da loja, o centro 450 m).
       const cepLimpo = cep.replace(/\D/g, '')
-      // Google: só entra quando o mapa grátis não achou, e só se a chave estiver
-      // configurada no servidor (sem ela a função responde "sem_chave" e segue).
+      // 1º) GOOGLE. Sem a chave configurada a função responde "sem_chave" e a
+      // busca grátis logo abaixo assume, como era antes.
       if (!coords && rua.trim()) {
         try {
           const { data: g } = await supabase.functions.invoke('geocodificar-google', {
@@ -1953,7 +1994,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   useEffect(() => { setCalcTaxa(c => (c.msg ? { loading: false, msg: null } : c)) }, [rua, numero, bairro, cidade, cep])
   // A conferência do mapa é daquele endereço: mudou o endereço, ela sai da tela
   // junto (senão o atendente confirma um ponto que não é mais o que ele digitou).
-  useEffect(() => { setRevisaoGoogle(null) }, [rua, numero, bairro, cidade, cep])
+  useEffect(() => {
+    if (veioDoGoogle.current) { veioDoGoogle.current = false; return }
+    setRevisaoGoogle(null)
+  }, [rua, numero, bairro, cidade, cep])
 
   // Endereço mudou de verdade? O pino do cliente era do endereço ANTIGO.
   useEffect(() => {
@@ -2137,13 +2181,32 @@ ${url}
     const termo = String(rua ?? '').trim()
     const uf = String(empresa?.estado ?? '').trim()
     const cid = String(cidade || empresa?.cidade || '').trim()
-    if (termo.length < 3 || !uf || cid.length < 3) { setRuaSug([]); return }
+    if (termo.length < 3) { setRuaSug([]); return }
     let vivo = true
     const t = setTimeout(async () => {
+      // O GOOGLE VEM PRIMEIRO (25/10/2026), igual ao iFood: ele entende o
+      // endereço do jeito que o cliente fala, com o número junto ("av
+      // nascimento de castro 81") e até por nome de lugar ("escola
+      // hipócrates"). A busca dos Correios é literal e procurava isso tudo
+      // como NOME de rua — por isso trazia "Vila Nascimento" em vez da
+      // avenida. Ela fica embaixo, como reserva pra quando o Google não
+      // responder (ou a chave não estiver configurada).
+      let doGoogle = []
       try {
-        const d = await buscarRuas(uf, cid, termo)
-        if (vivo) setRuaSug(d)
-      } catch { if (vivo) setRuaSug([]) }
+        const { data: g } = await supabase.functions.invoke('geocodificar-google', {
+          body: { acao: 'sugerir', texto: termo, lat: empresa?.latitude, lng: empresa?.longitude },
+        })
+        if (g?.ok && Array.isArray(g.sugestoes)) {
+          doGoogle = g.sugestoes.map(x => ({
+            place_id: x.place_id, logradouro: x.titulo, bairro: x.detalhe, localidade: '', cep: '', doGoogle: true,
+          }))
+        }
+      } catch { /* sem a função: segue só com a busca grátis */ }
+      let gratis = []
+      try {
+        if (uf && cid.length >= 3) gratis = await buscarRuas(uf, cid, termo)
+      } catch { /* sem rede */ }
+      if (vivo) setRuaSug([...doGoogle, ...gratis].slice(0, 10))
     }, 500)
     return () => { vivo = false; clearTimeout(t) }
   }, [rua, cidade, empresa, tipo])
@@ -2823,7 +2886,37 @@ ${url}
                   <ListaDeRuas
                     sugestoes={ruaSug}
                     onFechar={() => setRuaSugAberta(false)}
-                    onEscolher={r => {
+                    onEscolher={async r => {
+                      setRuaSug([]); setRuaSugAberta(false)
+                      // ESCOLHEU UMA DO GOOGLE: ele devolve o endereço já
+                      // separado (rua, número, bairro, cidade, CEP) e o ponto
+                      // exato. A tela se preenche sozinha e o atendente só
+                      // confere a foto do mapa.
+                      if (r.place_id) {
+                        setRua(r.logradouro || rua)
+                        try {
+                          const { data: g } = await supabase.functions.invoke('geocodificar-google', {
+                            body: { place_id: r.place_id, mapa: true },
+                          })
+                          if (g?.ok) {
+                            veioDoGoogle.current = true
+                            const p = g.partes ?? {}
+                            if (p.rua) setRua(p.rua)
+                            if (p.numero) setNumero(p.numero)
+                            if (p.bairro) setBairro(p.bairro)
+                            if (p.cidade) setCidade(p.cidade)
+                            const cg = String(p.cep ?? '').replace(/\D/g, '')
+                            setCep(cg.length === 8 ? `${cg.slice(0, 5)}-${cg.slice(5)}` : '')
+                            if (Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+                              setRevisaoGoogle({
+                                lat: g.lat, lng: g.lng, precisao: g.precisao ?? '',
+                                formatado: g.formatado ?? '', mapa: g.mapa ?? null,
+                              })
+                            }
+                          }
+                        } catch { /* sem a função: fica o que ele digitou */ }
+                        return
+                      }
                       const c = String(r.cep ?? '').replace(/\D/g, '')
                       setRua(r.logradouro || rua)
                       if (r.bairro) setBairro(r.bairro)
@@ -2831,7 +2924,6 @@ ${url}
                       // Rua do mapa não traz CEP: limpa o campo em vez de deixar o
                       // CEP da rua escolhida antes, que é de outro lugar.
                       setCep(c.length === 8 ? `${c.slice(0, 5)}-${c.slice(5)}` : '')
-                      setRuaSug([]); setRuaSugAberta(false)
                     }}
                   />
                 )}

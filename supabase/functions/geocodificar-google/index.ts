@@ -120,10 +120,70 @@ Deno.serve(async (req) => {
     if (!GOOGLE_KEY) return json({ ok: false, erro: 'sem_chave' })
 
     const b = await req.json().catch(() => ({}))
+
+    // ── SUGERIR ENDEREÇO ENQUANTO DIGITA (igual ao iFood) ────────────────────
+    //
+    // O Autocomplete do Google entende o endereço do jeito que a pessoa fala:
+    // "av nascimento de castro 81" devolve "Av. Nascimento de Castro, 81 —
+    // Lagoa Nova, Natal - RN". A busca dos Correios, que a tela usava, é
+    // literal: procurava isso tudo como NOME de rua e trazia Vila Nascimento,
+    // Travessa Nascimento... qualquer coisa menos a avenida (Agv, 25/10/2026).
+    // E o Autocomplete ainda acha por NOME DE LUGAR — "escola hipócrates".
+    //
+    // SKU barato: US$ 2,83 por mil com 10 mil grátis por mês, e só dispara
+    // depois que a pessoa para de digitar.
+    if (b.acao === 'sugerir') {
+      const texto = String(b.texto ?? '').trim()
+      if (texto.length < 4) return json({ ok: true, sugestoes: [] })
+      const corpo: Record<string, unknown> = {
+        input: texto,
+        languageCode: 'pt-BR',
+        regionCode: 'BR',
+        includedRegionCodes: ['br'],
+      }
+      // Puxa pro lado da loja: "Rua São José" existe em toda cidade do Brasil.
+      if (Number.isFinite(Number(b.lat)) && Number.isFinite(Number(b.lng))) {
+        corpo.locationBias = {
+          circle: { center: { latitude: Number(b.lat), longitude: Number(b.lng) }, radius: 30000 },
+        }
+      }
+      const r = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_KEY,
+          'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
+        },
+        body: JSON.stringify(corpo),
+      })
+      if (!r.ok) {
+        const t = (await r.text()).slice(0, 300)
+        console.warn('[geocode-google] autocomplete recusou:', r.status, t)
+        // 403 = a API "Places API (New)" não está ligada no projeto do Google.
+        return json({ ok: false, erro: r.status === 403 ? 'places_desligado' : 'autocomplete_falhou', detalhe: t })
+      }
+      const d = await r.json()
+      // deno-lint-ignore no-explicit-any
+      const sug = ((d?.suggestions ?? []) as any[])
+        .map((s) => s?.placePrediction)
+        .filter(Boolean)
+        .slice(0, 6)
+        .map((p: Record<string, any>) => ({
+          place_id: p.placeId,
+          titulo: p.structuredFormat?.mainText?.text ?? p.text?.text ?? '',
+          detalhe: p.structuredFormat?.secondaryText?.text ?? '',
+        }))
+        .filter((s: { titulo: string }) => s.titulo)
+      return json({ ok: true, sugestoes: sug })
+    }
+
     const rua = String(b.rua ?? '').trim()
-    if (!rua) return json({ ok: false, erro: 'sem_rua' }, 400)
+    const placeId = String(b.place_id ?? '').trim()
+    if (!rua && !placeId) return json({ ok: false, erro: 'sem_rua' }, 400)
     const partes = [rua, b.numero, b.bairro, b.cidade, b.estado].map(v => String(v ?? '').trim()).filter(Boolean)
-    const chave = norm(partes.join('|'))
+    // Endereco escolhido na lista do Google ja vem com identidade propria: a
+    // chave e o place_id, que e o mesmo pra qualquer jeito de escrever a rua.
+    const chave = placeId ? 'place:' + placeId : norm(partes.join('|'))
 
     // Ja pagamos por este endereco? (30 dias)
     const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
@@ -152,9 +212,13 @@ Deno.serve(async (req) => {
     await avisarSePassou(supabase, hoje).catch((e) => console.error('[geocode-google] aviso falhou:', e))
 
     const endereco = partes.join(', ')
-    const url = 'https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams({
-      address: endereco, region: 'br', language: 'pt-BR', components: 'country:BR', key: GOOGLE_KEY,
-    })
+    // Com place_id nao ha o que adivinhar: o Google devolve exatamente aquele
+    // lugar, com rua, numero, bairro, cidade e CEP separados.
+    const url = 'https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams(
+      placeId
+        ? { place_id: placeId, language: 'pt-BR', key: GOOGLE_KEY }
+        : { address: endereco, region: 'br', language: 'pt-BR', components: 'country:BR', key: GOOGLE_KEY },
+    )
     const r = await fetch(url)
     const g = await r.json()
     if (g.status !== 'OK' || !g.results?.length) {
@@ -172,14 +236,32 @@ Deno.serve(async (req) => {
     // no endereço devolvido; senão o gestor trata como aproximado.
     const bairro = norm(b.bairro)
     const textos = [res.formatted_address, ...(res.address_components ?? []).map((c: { long_name?: string }) => c.long_name)]
-    const bairroConfere = !bairro || textos.some(t => norm(t).includes(bairro))
+    // Escolhido na lista do Google, o bairro e o DELE: nao ha o que conferir
+    // contra o que o atendente tinha digitado (ele nem digitou ainda).
+    const bairroConfere = !!placeId || !bairro || textos.some(t => norm(t).includes(bairro))
+
+    // As partes do endereco, pra tela preencher os campos sozinha.
+    // deno-lint-ignore no-explicit-any
+    const comps = (res.address_components ?? []) as any[]
+    const parte = (tipo: string, curto = false) => {
+      const c = comps.find((x) => (x.types ?? []).includes(tipo))
+      return c ? String(curto ? c.short_name : c.long_name) : ''
+    }
+    const endereco_partes = {
+      rua: parte('route'),
+      numero: parte('street_number'),
+      bairro: parte('sublocality_level_1') || parte('sublocality') || parte('neighborhood'),
+      cidade: parte('administrative_area_level_2') || parte('locality'),
+      estado: parte('administrative_area_level_1', true),
+      cep: parte('postal_code').replace(/\D/g, ''),
+    }
 
     const precisaoFinal = bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE'
     await supabase.from('geocode_cache').upsert(
       { chave, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
       { onConflict: 'chave' })
     const foto = b.mapa === true ? await fotoDoMapa(lat, lng) : null
-    return json({ ok: true, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, mapa: foto })
+    return json({ ok: true, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, mapa: foto, partes: endereco_partes })
   } catch (e) {
     console.error('[geocode-google] erro:', e)
     return json({ ok: false, erro: 'erro_interno' }, 500)
