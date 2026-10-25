@@ -31,7 +31,11 @@ const loadingStyle = {
 }
 const footer = { display: 'flex', gap: 10, padding: 16 }
 
-export default function ModalMapaEndereco({ enderecoTexto, onConfirmar, onFechar, onPular }) {
+// `centroInicial` = ponto que já veio de alguma busca (ex.: o do Google, na Nova
+// venda). Com ele o mapa abre JÁ no lugar certo, e o atendente só confere ou
+// arrasta — sem isso a tela pedia o endereço ao mapa de graça de novo e o pino
+// nascia no meio da rua, que é justamente o que se quer corrigir.
+export default function ModalMapaEndereco({ enderecoTexto, centroInicial, onConfirmar, onFechar, onPular }) {
   const mapRef    = useRef(null)
   const mapObjRef = useRef(null)
   const markerRef = useRef(null)
@@ -43,6 +47,10 @@ export default function ModalMapaEndereco({ enderecoTexto, onConfirmar, onFechar
   // 1) Geocodifica o endereço digitado para centralizar o mapa
   useEffect(() => {
     let ativo = true
+    if (centroInicial && Number.isFinite(centroInicial.lat) && Number.isFinite(centroInicial.lng)) {
+      setCentro({ lat: Number(centroInicial.lat), lng: Number(centroInicial.lng) })
+      return () => { ativo = false }
+    }
     ;(async () => {
       try {
         const q = encodeURIComponent(`${enderecoTexto}, Brasil`)
@@ -66,7 +74,7 @@ export default function ModalMapaEndereco({ enderecoTexto, onConfirmar, onFechar
       }
     })()
     return () => { ativo = false }
-  }, [enderecoTexto])
+  }, [enderecoTexto, centroInicial])
 
   // 2) Inicializa o mapa quando o centro é definido (uma única vez)
   useEffect(() => {

@@ -18,6 +18,7 @@ import { useChamados } from '../hooks/useChamados'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
+import ModalMapaEndereco from '../components/ModalMapaEndereco'
 import 'leaflet/dist/leaflet.css'   // mapa da posição do entregador (mig 0245)
 import Caixa from './Caixa'
 
@@ -1637,6 +1638,10 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       ? { lat: Number(pedidoEdicao.endereco_lat), lng: Number(pedidoEdicao.endereco_lng) }
       : null
   )
+  // O que o Google entendeu do endereço, pro atendente conferir ANTES de salvar
+  // o ponto: endereço por extenso, nível de precisão e a foto do mapa.
+  const [revisaoGoogle, setRevisaoGoogle] = useState(null)
+  const [mapaArrastar, setMapaArrastar] = useState(false)
   // Pino que veio do cliente (cadastro ou link confirmado): o buscador de mapa
   // não sobrescreve o que a pessoa apontou com o dedo.
   const pinDoCliente = useRef(false)
@@ -1830,10 +1835,21 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
       if (!coords && rua.trim()) {
         try {
           const { data: g } = await supabase.functions.invoke('geocodificar-google', {
-            body: { rua, numero, bairro, cidade, estado: empresa?.estado ?? '' },
+            body: { rua, numero, bairro, cidade, estado: empresa?.estado ?? '', mapa: true },
           })
           if (g?.ok && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
             coords = { lat: g.lat, lng: g.lng }
+            // O QUE O GOOGLE ENTENDEU VAI PRA TELA (25/10/2026). O atendente do
+            // balcão digita o endereço de uma casa que ele nunca viu — mas ele
+            // conhece os bairros pra onde entrega. Vendo o endereço por extenso
+            // e a foto do mapa, ele pega o erro grande (rua que existe em três
+            // bairros) antes de o motoboy sair.
+            setRevisaoGoogle({
+              lat: g.lat, lng: g.lng,
+              precisao: g.precisao ?? '',
+              formatado: g.formatado ?? '',
+              mapa: g.mapa ?? null,
+            })
             // O ponto do Google serve pra TAXA. Não vira o ponto do pedido: os
             // termos dele limitam o uso fora do mapa do próprio Google, e o ponto
             // do pedido é o que o cliente confirma no nosso mapa.
@@ -1935,6 +1951,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null }) {
   // Mexeu no endereço: o "2,6 km → taxa R$ 8,00" de antes era de OUTRO
   // endereço e não pode ficar na tela parecendo o cálculo deste.
   useEffect(() => { setCalcTaxa(c => (c.msg ? { loading: false, msg: null } : c)) }, [rua, numero, bairro, cidade, cep])
+  // A conferência do mapa é daquele endereço: mudou o endereço, ela sai da tela
+  // junto (senão o atendente confirma um ponto que não é mais o que ele digitou).
+  useEffect(() => { setRevisaoGoogle(null) }, [rua, numero, bairro, cidade, cep])
 
   // Endereço mudou de verdade? O pino do cliente era do endereço ANTIGO.
   useEffect(() => {
@@ -2868,6 +2887,70 @@ ${url}
                   border: '1px solid var(--border,#2a2f3a)',
                 }}>
                   <div style={{ fontSize: 12, color: cor, fontWeight: 600, lineHeight: 1.5 }}>{txt}</div>
+
+                  {/* O QUE O GOOGLE ACHOU — pro atendente conferir e decidir.
+                      Três níveis, porque "achou" não quer dizer "achou a casa". */}
+                  {revisaoGoogle && (() => {
+                    const p = revisaoGoogle.precisao
+                    const nivel = p === 'ROOFTOP'
+                      ? { cor: '#16a34a', txt: '✅ Casa exata — o Google achou este número' }
+                      : p === 'RANGE_INTERPOLATED'
+                        ? { cor: '#16a34a', txt: '✅ Entre os números da rua — serve pro motoboy' }
+                        : p === 'BAIRRO_NAO_CONFERE'
+                          ? { cor: 'var(--danger,#ef4444)', txt: '🚫 BAIRRO DIFERENTE — essa rua existe em outro bairro. Confira!' }
+                          : { cor: '#eab308', txt: '⚠️ Meio da rua — o número não existe no mapa. Confira.' }
+                    return (
+                      <div style={{
+                        marginTop: 9, padding: '9px 10px', borderRadius: 8,
+                        background: 'var(--surface,#15181f)', border: `1.5px solid ${nivel.cor}`,
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: nivel.cor, lineHeight: 1.45 }}>{nivel.txt}</div>
+                        {revisaoGoogle.formatado && (
+                          <div style={{ fontSize: 12.5, color: 'var(--text)', marginTop: 4, lineHeight: 1.45 }}>
+                            O mapa entendeu: <strong>{revisaoGoogle.formatado}</strong>
+                          </div>
+                        )}
+                        {revisaoGoogle.mapa && (
+                          <img src={revisaoGoogle.mapa} alt="Onde o ponto caiu no mapa"
+                            style={{ width: '100%', maxWidth: 440, borderRadius: 8, marginTop: 7, display: 'block' }} />
+                        )}
+                        <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 8 }}>
+                          <button type="button"
+                            onClick={() => { setCoordCliente({ lat: revisaoGoogle.lat, lng: revisaoGoogle.lng }); setRevisaoGoogle(null) }}
+                            style={{
+                              padding: '7px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                              background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 12.5,
+                            }}>
+                            ✔️ É aqui, salvar o ponto
+                          </button>
+                          {mapaArrastar && (
+                            <ModalMapaEndereco
+                              enderecoTexto={[rua, numero, bairro, cidade].filter(Boolean).join(', ')}
+                              centroInicial={{ lat: revisaoGoogle.lat, lng: revisaoGoogle.lng }}
+                              onFechar={() => setMapaArrastar(false)}
+                              onConfirmar={(lat, lng) => {
+                                // Ponto colocado pela PESSOA: vale mais que o do
+                                // mapa, e é ele que vai pro motoboy.
+                                setCoordCliente({ lat, lng })
+                                pinDoCliente.current = true
+                                setMapaArrastar(false)
+                                setRevisaoGoogle(null)
+                              }}
+                            />
+                          )}
+                          <button type="button" onClick={() => setMapaArrastar(true)}
+                            style={{
+                              padding: '7px 12px', borderRadius: 7, cursor: 'pointer',
+                              border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.12)',
+                              color: '#a78bfa', fontWeight: 700, fontSize: 12.5,
+                            }}>
+                            📍 Arrastar o pino
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   {!pinConfirmado && (
                     <button
                       type="button" onClick={pedirConfirmacaoNoMapa} disabled={pinBusy || !rua.trim()}

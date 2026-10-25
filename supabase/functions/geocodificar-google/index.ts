@@ -26,6 +26,43 @@ const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g
   .toLowerCase().replace(/\s+/g, ' ').trim()
 
 const LIMITE_DIA_TOTAL = 330
+
+/**
+ * A FOTO DO MAPA COM O PINO (25/10/2026).
+ *
+ * O atendente do balcão digita o endereço de uma casa que ele nunca viu — não
+ * tem como saber se o ponto caiu certo. Mas ele reconhece o ERRO GRANDE: "isso
+ * aí tá no Alecrim e o cliente falou Potengi". É pra isso que serve a foto.
+ *
+ * Vem pelo servidor, em base64, e não como URL: no <img src> a chave iria junto
+ * e qualquer um copiaria do código-fonte da página.
+ *
+ * Mapa estático é o SKU barato do Google (US$ 2 por mil, com 10 mil grátis por
+ * mês) — o mapa que arrasta custa US$ 7 e não serviria aqui, porque arrastar no
+ * chute é pior que não arrastar.
+ *
+ * Se a chave não liberar o Static Maps, devolve null e a tela segue sem a foto:
+ * o aviso de precisão sozinho já pega a maior parte dos erros.
+ */
+async function fotoDoMapa(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = 'https://maps.googleapis.com/maps/api/staticmap?' + new URLSearchParams({
+      center: `${lat},${lng}`, zoom: '17', size: '440x240', scale: '2',
+      language: 'pt-BR', region: 'br',
+      markers: `color:red|${lat},${lng}`,
+      key: GOOGLE_KEY,
+    })
+    const r = await fetch(url)
+    if (!r.ok) { console.warn('[geocode-google] mapa recusado:', r.status, (await r.text()).slice(0, 120)); return null }
+    const buf = new Uint8Array(await r.arrayBuffer())
+    let bin = ''
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
+    return 'data:image/png;base64,' + btoa(bin)
+  } catch (e) {
+    console.warn('[geocode-google] mapa falhou:', e)
+    return null
+  }
+}
 const EVOLUTION_API_URL = (Deno.env.get('EVOLUTION_API_URL') ?? '').replace(/\/$/, '')
 const EVOLUTION_API_KEY = Deno.env.get('EVOLUTION_API_KEY') ?? ''
 
@@ -92,7 +129,13 @@ Deno.serve(async (req) => {
     const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
     const { data: cache } = await supabase.from('geocode_cache')
       .select('lat, lng, precisao, formatado').eq('chave', chave).gte('created_at', corte).maybeSingle()
-    if (cache) return json({ ok: true, lat: cache.lat, lng: cache.lng, precisao: cache.precisao, formatado: cache.formatado, cache: true })
+    if (cache) {
+      // A foto não entra no cache do banco (base64 pesa e o Google não deixa
+      // guardar imagem). Endereço repetido não paga a BUSCA de novo; a foto
+      // sim, e é o SKU barato.
+      const foto = b.mapa === true ? await fotoDoMapa(cache.lat, cache.lng) : null
+      return json({ ok: true, lat: cache.lat, lng: cache.lng, precisao: cache.precisao, formatado: cache.formatado, mapa: foto, cache: true })
+    }
 
     // Teto diario da loja.
     const hoje = new Date().toISOString().slice(0, 10)
@@ -131,10 +174,12 @@ Deno.serve(async (req) => {
     const textos = [res.formatted_address, ...(res.address_components ?? []).map((c: { long_name?: string }) => c.long_name)]
     const bairroConfere = !bairro || textos.some(t => norm(t).includes(bairro))
 
+    const precisaoFinal = bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE'
     await supabase.from('geocode_cache').upsert(
-      { chave, lat, lng, precisao: bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE', formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
+      { chave, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, created_at: new Date().toISOString() },
       { onConflict: 'chave' })
-    return json({ ok: true, lat, lng, precisao: bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE', formatado: res.formatted_address ?? null })
+    const foto = b.mapa === true ? await fotoDoMapa(lat, lng) : null
+    return json({ ok: true, lat, lng, precisao: precisaoFinal, formatado: res.formatted_address ?? null, mapa: foto })
   } catch (e) {
     console.error('[geocode-google] erro:', e)
     return json({ ok: false, erro: 'erro_interno' }, 500)
