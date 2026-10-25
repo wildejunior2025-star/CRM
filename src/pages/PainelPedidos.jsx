@@ -5931,7 +5931,14 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
       {/* Mensagens. O minHeight é o que garante que a conversa continue à vista
           mesmo com a gaveta da sacola aberta no celular. */}
-      <div style={{ flex: 1, minHeight: g ? undefined : 110, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 2px' }}>
+      {/* Fundo um tom mais escuro que o painel: sem ele, no modo claro, o balão
+          do cliente (branco) sumia dentro do branco da tela e a conversa virava
+          um texto corrido só. */}
+      <div style={{
+        flex: 1, minHeight: g ? undefined : 110, overflowY: 'auto', display: 'flex',
+        flexDirection: 'column', gap: 6, padding: '8px 8px',
+        background: 'var(--chat-fundo, rgba(0,0,0,.14))', borderRadius: 10,
+      }}>
         {thread.msgs.map(m => {
           const daLoja = m.remetente === 'loja'
           const doRobo = daLoja && m.bot
@@ -11114,7 +11121,13 @@ export default function PainelPedidos() {
           // monitor que tem espaço sobrando. A outra metade continua mostrando
           // os pedidos, que é o que a loja não pode perder de vista.
           position: 'fixed', top: 60, right: 56, bottom: 0, zIndex: 39,
-          width: telaGrande ? 'min(50vw, calc(100vw - 80px))' : 'min(480px, calc(100vw - 64px))',
+          // Com a sacola aberta o chat encolhe: quem está montando o pedido
+          // precisa de campo pra digitar, e ler a conversa é olhar de relance.
+          width: telaGrande
+            ? (sacolaLateral && painelDireito === 'chat'
+              ? 'min(36vw, calc(100vw - 80px))'
+              : 'min(50vw, calc(100vw - 80px))')
+            : 'min(480px, calc(100vw - 64px))',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden',
           padding: telaGrande ? 22 : 16,
@@ -12277,11 +12290,12 @@ export default function PainelPedidos() {
       {telaGrande && painelDireito === 'chat' && threadAberta && sacolaLateral && (
         <aside style={{
           position: 'fixed', top: 60, bottom: 0, zIndex: 39,
-          right: 'calc(min(50vw, calc(100vw - 80px)) + 56px)',
-          // Larga o bastante pras duas colunas do + Vender (produtos | venda) e
-          // ainda sobrar a conversa do lado. No celular essa coluna nem existe:
-          // lá continua a gaveta da sacola, que é o certo pra tela pequena.
-          width: 'min(720px, 44vw)',
+          right: 'calc(min(36vw, calc(100vw - 80px)) + 56px)',
+          // Larga o bastante pras duas colunas do + Vender (produtos | venda)
+          // respirarem — espremida, a coluna da venda ficava com o botão de
+          // pagamento quebrando em três linhas. No celular essa coluna nem
+          // existe: lá continua a gaveta da sacola.
+          width: 'min(900px, 56vw)',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
           boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', padding: 18,
         }}>

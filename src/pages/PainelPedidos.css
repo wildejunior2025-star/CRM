@@ -1641,3 +1641,12 @@
   overflow: visible;
 }
 .pp-venda-embutida .pp-modal-titulo { display: none; }
+
+
+/* Fundo da conversa: um tom mais escuro que o painel, pra o balão do cliente
+   não sumir dentro do branco (pedido do usuário, 25/10/2026). */
+:root { --chat-fundo: #e9ebf0; }
+[data-theme="dark"], .dark { --chat-fundo: rgba(0, 0, 0, .18); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --chat-fundo: rgba(0, 0, 0, .18); }
+}
