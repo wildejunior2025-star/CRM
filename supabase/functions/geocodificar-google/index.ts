@@ -102,24 +102,80 @@ async function avisarSePassou(supabase: any, hoje: string) {
   if (!r.ok) console.error('[geocode-google] Evolution recusou:', (await r.text()).slice(0, 200))
 }
 
+// Teto diario da loja + aviso de cota. Devolve false quando a loja ja gastou o
+// dia. Virou funcao porque agora sao DOIS caminhos pagos (endereco escrito e
+// ponto no mapa) e os dois tem que entrar na mesma conta.
+// deno-lint-ignore no-explicit-any
+async function cobrarConsulta(supabase: any, empresaId: string): Promise<boolean> {
+  const hoje = new Date().toISOString().slice(0, 10)
+  const { data: uso } = await supabase.from('geocode_uso')
+    .select('consultas').eq('empresa_id', empresaId).eq('dia', hoje).maybeSingle()
+  if ((uso?.consultas ?? 0) >= TETO_DIA_POR_LOJA) return false
+  await supabase.from('geocode_uso').upsert(
+    { empresa_id: empresaId, dia: hoje, consultas: (uso?.consultas ?? 0) + 1 },
+    { onConflict: 'empresa_id,dia' })
+  // Aviso no WhatsApp do dono da FWC se, somando TODAS as lojas, o dia passar
+  // do limite (a cota gratis do Google e por mes, ~330/dia). So fala quando
+  // passa, e uma vez por dia; abaixo disso nao manda nada.
+  // deno-lint-ignore no-explicit-any
+  await avisarSePassou(supabase, hoje).catch((e: any) => console.error('[geocode-google] aviso falhou:', e))
+  return true
+}
+
+// As partes do endereco, pra tela (ou o robo) preencher os campos sozinha.
+//
+// Varre TODOS os resultados, nao so o primeiro: no reverso o de cima e a casa
+// e vem sem CEP, enquanto o de baixo e o bairro e tem. Pegar so o primeiro
+// deixava campo vazio com a resposta ali do lado.
+// deno-lint-ignore no-explicit-any
+function partesDoEndereco(results: any[]) {
+  const de = (tipo: string, curto = false) => {
+    for (const r of results) {
+      // deno-lint-ignore no-explicit-any
+      const c = ((r?.address_components ?? []) as any[]).find((x) => (x.types ?? []).includes(tipo))
+      if (c) return String(curto ? c.short_name : c.long_name)
+    }
+    return ''
+  }
+  return {
+    rua:    de('route'),
+    numero: de('street_number'),
+    bairro: de('sublocality_level_1') || de('sublocality') || de('neighborhood'),
+    cidade: de('administrative_area_level_2') || de('locality'),
+    estado: de('administrative_area_level_1', true),
+    cep:    de('postal_code').replace(/\D/g, ''),
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
+    const b = await req.json().catch(() => ({}))
 
     // Quem chama tem que ser alguem LOGADO numa loja — a chave publica (anon)
     // sozinha nao basta, senao qualquer pagina gastaria a nossa cota.
+    //
+    // A EXCECAO e o nosso proprio servidor. O robo do WhatsApp atende sem
+    // ninguem logado — quem fala com ele e o cliente, pelo celular dele — e
+    // tambem precisa do Google pra achar a rua. Ele se identifica com a chave
+    // de servico, que nunca sai do servidor, e diz de qual loja e a consulta
+    // (senao o teto diario e o aviso de cota nao teriam dono).
     const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '')
-    const { data: u } = await supabase.auth.getUser(token)
-    if (!u?.user) return json({ ok: false, erro: 'nao_autenticado' }, 401)
-    const { data: perfil } = await supabase.from('profiles')
-      .select('empresa_id').eq('id', u.user.id).maybeSingle()
-    const empresaId = perfil?.empresa_id as string | undefined
-    if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
+    let empresaId: string | undefined
+    if (token && token === SERVICE_KEY) {
+      empresaId = String(b.empresa_id ?? '').trim() || undefined
+      if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
+    } else {
+      const { data: u } = await supabase.auth.getUser(token)
+      if (!u?.user) return json({ ok: false, erro: 'nao_autenticado' }, 401)
+      const { data: perfil } = await supabase.from('profiles')
+        .select('empresa_id').eq('id', u.user.id).maybeSingle()
+      empresaId = perfil?.empresa_id as string | undefined
+      if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
+    }
 
     if (!GOOGLE_KEY) return json({ ok: false, erro: 'sem_chave' })
-
-    const b = await req.json().catch(() => ({}))
 
     // ── SUGERIR ENDEREÇO ENQUANTO DIGITA (igual ao iFood) ────────────────────
     //
@@ -177,6 +233,45 @@ Deno.serve(async (req) => {
       return json({ ok: true, sugestoes: sug })
     }
 
+    // ── PONTO NO MAPA → ENDERECO ESCRITO (reverso) ─────────────────────
+    //
+    // E o caminho do pininho do WhatsApp: o cliente toca em "minha
+    // localizacao" e o robo precisa saber que rua e aquela, porque o GPS manda
+    // ponto, nao endereco. O mapa gratis erra justamente onde o nosso cliente
+    // mora — conjunto novo, loteamento recente — e devolve a rua vizinha ou
+    // nem o bairro, e aquele texto errado e o que o motoboy le.
+    //
+    // Mesmo SKU do Geocoding (reverso custa igual), entao entra no mesmo teto
+    // e no mesmo cache.
+    if (b.acao === 'reverso') {
+      const lat = Number(b.lat), lng = Number(b.lng)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return json({ ok: false, erro: 'sem_ponto' }, 400)
+      // 5 casas decimais ≈ 1 metro: o mesmo pino nao paga duas vezes.
+      const chave = `rev:${lat.toFixed(5)},${lng.toFixed(5)}`
+      const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
+      const { data: cache } = await supabase.from('geocode_cache')
+        .select('precisao, formatado, partes').eq('chave', chave).gte('created_at', corte).maybeSingle()
+      if (cache) {
+        return json({ ok: true, lat, lng, precisao: cache.precisao, formatado: cache.formatado, partes: cache.partes ?? null, cache: true })
+      }
+      if (!await cobrarConsulta(supabase, empresaId)) return json({ ok: false, erro: 'teto_diario' })
+      const r = await fetch('https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams({
+        latlng: `${lat},${lng}`, language: 'pt-BR', key: GOOGLE_KEY,
+      }))
+      const g = await r.json()
+      if (g.status !== 'OK' || !g.results?.length) {
+        console.log('[geocode-google] reverso sem resultado:', g.status, lat, lng)
+        return json({ ok: false, erro: g.status === 'ZERO_RESULTS' ? 'nao_achou' : (g.status ?? 'falhou') })
+      }
+      const res0 = g.results[0]
+      const partes = partesDoEndereco(g.results)
+      const precisao = String(res0.geometry?.location_type ?? '')
+      await supabase.from('geocode_cache').upsert(
+        { chave, lat, lng, precisao, formatado: res0.formatted_address ?? null, partes, created_at: new Date().toISOString() },
+        { onConflict: 'chave' })
+      return json({ ok: true, lat, lng, precisao, formatado: res0.formatted_address ?? null, partes })
+    }
+
     const rua = String(b.rua ?? '').trim()
     const placeId = String(b.place_id ?? '').trim()
     if (!rua && !placeId) return json({ ok: false, erro: 'sem_rua' }, 400)
@@ -201,19 +296,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, lat: cache.lat, lng: cache.lng, precisao: cache.precisao, formatado: cache.formatado, mapa: foto, partes: cache.partes ?? null, cache: true })
     }
 
-    // Teto diario da loja.
-    const hoje = new Date().toISOString().slice(0, 10)
-    const { data: uso } = await supabase.from('geocode_uso')
-      .select('consultas').eq('empresa_id', empresaId).eq('dia', hoje).maybeSingle()
-    if ((uso?.consultas ?? 0) >= TETO_DIA_POR_LOJA) return json({ ok: false, erro: 'teto_diario' })
-    await supabase.from('geocode_uso').upsert(
-      { empresa_id: empresaId, dia: hoje, consultas: (uso?.consultas ?? 0) + 1 },
-      { onConflict: 'empresa_id,dia' })
-
-    // Aviso no WhatsApp do dono da FWC se, somando TODAS as lojas, o dia passar do
-    // limite (a cota grátis do Google é por mês, ~330/dia). Só fala quando passa,
-    // e uma vez por dia; abaixo disso não manda nada.
-    await avisarSePassou(supabase, hoje).catch((e) => console.error('[geocode-google] aviso falhou:', e))
+    if (!await cobrarConsulta(supabase, empresaId)) return json({ ok: false, erro: 'teto_diario' })
 
     const endereco = partes.join(', ')
     // Com place_id nao ha o que adivinhar: o Google devolve exatamente aquele
@@ -244,21 +327,7 @@ Deno.serve(async (req) => {
     // contra o que o atendente tinha digitado (ele nem digitou ainda).
     const bairroConfere = !!placeId || !bairro || textos.some(t => norm(t).includes(bairro))
 
-    // As partes do endereco, pra tela preencher os campos sozinha.
-    // deno-lint-ignore no-explicit-any
-    const comps = (res.address_components ?? []) as any[]
-    const parte = (tipo: string, curto = false) => {
-      const c = comps.find((x) => (x.types ?? []).includes(tipo))
-      return c ? String(curto ? c.short_name : c.long_name) : ''
-    }
-    const endereco_partes = {
-      rua: parte('route'),
-      numero: parte('street_number'),
-      bairro: parte('sublocality_level_1') || parte('sublocality') || parte('neighborhood'),
-      cidade: parte('administrative_area_level_2') || parte('locality'),
-      estado: parte('administrative_area_level_1', true),
-      cep: parte('postal_code').replace(/\D/g, ''),
-    }
+    const endereco_partes = partesDoEndereco([res])
 
     const precisaoFinal = bairroConfere ? precisao : 'BAIRRO_NAO_CONFERE'
     await supabase.from('geocode_cache').upsert(

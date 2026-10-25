@@ -1,4 +1,4 @@
-// Bot v189 — link do Google Maps vira endereço escrito + link do pino (quem pede PRA OUTRA pessoa não tem como mandar a própria localização). v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
+// Bot v190 — endereço pelo GOOGLE (escrito, pino e cidade), mapa grátis vira reserva. v189 — link do Google Maps vira endereço escrito + link do pino (quem pede PRA OUTRA pessoa não tem como mandar a própria localização). v188 — pede a LOCALIZAÇÃO primeiro (CEP/escrito viram a saída); endereço em pedaços vira um só; pedido do robô nasce com o ponto. v187 — promessa de retorno vira chamado de verdade; busca perdoa erro de digitação. v186: endereço+taxa no fechamento. v185: pedido de endereço pergunta rua e bairro (CEP vira a saída alternativa). v184: vendia o CEP como atalho (escrever é só a saída de quem não sabe). v183: escrito guarda bairro/cidade. v182: cadastro sem e-mail.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import {
@@ -36,11 +36,40 @@ const TEXTO_PEDIR_ENDERECO =
 // robô entendia.
 const RE_RETIRADA = /\b(retir\w*|vou buscar|vou pegar a[ií]|vou pegar na loja|eu (busco|pego)|busco a[ií]|pego a[ií]|passo a[ií]|(buscar|pegar) (a[ií]|na loja|no balc[aã]o)|eu mesm[oa] (busco|pego|vou)|n[aã]o precisa entregar)\b/i
 
-/** Depois do nome: endereço (com a saída da retirada à vista) ou, sem entrega, a retirada. */
-function textoDepoisDoCadastro(aceitaDelivery: boolean, enderecoLoja: string, pgtoOpcoes: string): string {
-  return aceitaDelivery
-    ? `${TEXTO_PEDIR_ENDERECO}\n\n🏪 Vai *retirar* na loja? É só me dizer.`
-    : `✅ Cadastro feito!\n\nPode retirar em: *${enderecoLoja}*.\n\nComo vai pagar: ${pgtoOpcoes}? 💳`
+/**
+ * Depois do nome: endereço (com a saída da retirada à vista) ou, sem entrega, a
+ * retirada.
+ *
+ * `enderecoConhecido` é o conserto de 25/10/2026. O cliente novo que manda a
+ * LOCALIZAÇÃO antes de dizer o nome — que é justamente o que o robô pede
+ * primeiro — ouvia, logo depois do cadastro: "me manda sua localização ou o
+ * endereço". Ele acabou de mandar. O endereço estava guardado no carrinho, com
+ * rua, número, bairro e o ponto do GPS, e o robô pedia tudo de novo porque
+ * este texto era fixo.
+ *
+ * Pedir ao cliente o que ele já deu é o jeito mais rápido de ele achar que o
+ * robô não entende nada.
+ */
+function textoDepoisDoCadastro(
+  aceitaDelivery: boolean, enderecoLoja: string, pgtoOpcoes: string,
+  enderecoConhecido: string | null = null, faltaNumero = false,
+  foraDoRaio = false,
+): string {
+  if (!aceitaDelivery) {
+    return `✅ Cadastro feito!\n\nPode retirar em: *${enderecoLoja}*.\n\nComo vai pagar: ${pgtoOpcoes}? 💳`
+  }
+  // Endereço além do raio da loja: este texto é fixo e passava por cima do
+  // aviso, prometendo "Entrega em: [endereço]" num lugar onde a loja não vai.
+  if (foraDoRaio && enderecoConhecido) {
+    return `✅ Cadastro feito!\n\n😕 Só que *${enderecoConhecido}* fica fora da nossa área de entrega.\n\nMas dá pra *retirar na loja*, em *${enderecoLoja}*. Quer assim? 🏪`
+  }
+  if (enderecoConhecido && faltaNumero) {
+    return `✅ Cadastro feito!\n\n📍 Entrega em: *${enderecoConhecido}*\n\nSó falta o *número* da casa. 😊`
+  }
+  if (enderecoConhecido) {
+    return `✅ Cadastro feito!\n\n📍 Entrega em: *${enderecoConhecido}*\n\nComo vai pagar: ${pgtoOpcoes}? 💳`
+  }
+  return `${TEXTO_PEDIR_ENDERECO}\n\n🏪 Vai *retirar* na loja? É só me dizer.`
 }
 
 // ── "Quero falar com uma pessoa" ─────────────────────────────────────────────
@@ -426,12 +455,32 @@ async function handleSalvarRua(
     // Cria a sacola se ainda não existe: quem só pergunta "entrega na Redinha?"
     // e manda o endereço não tinha linha, o update não gravava nada e o número
     // respondia "Não encontrei o endereço salvo" (CDBom, 15/09/2026).
-    await salvarEnderecoNoCarrinho(empresaId, phone, {
-      endereco_rua: rua,
-      ...(bairro ? { endereco_bairro: bairro } : {}),
-      ...(cidade ? { endereco_cidade: cidade } : {}),
-      ...(estado ? { endereco_estado: estado } : {}),
-    })
+    // RUA DIFERENTE DA QUE ESTAVA SALVA = endereço novo, e aí o número e o
+    // pino da casa antiga TÊM que sair. Sem isto, o cliente que trocou o
+    // endereço ("hoje é em outro lugar: rua X 250") levava o número e o ponto
+    // de GPS da casa velha junto com o texto novo — o entregador seguiria o
+    // pino, que é o que o app dele abre (teste da Agv, 25/10/2026).
+    //
+    // A comparação é necessária porque salvar_rua também é emitido DE NOVO
+    // quando só o bairro chega depois ("rua que você já tem MAIS o bairro"):
+    // ali o número já está certo e não pode ser apagado.
+    const { data: atual } = await supabase.from("whatsapp_carrinho")
+      .select("endereco_rua").eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
+    const ruaAntiga = String(atual?.endereco_rua ?? "")
+    const trocouDeRua = !!ruaAntiga && normNomeSafe(ruaAntiga) !== normNomeSafe(rua)
+    if (trocouDeRua) console.log(`[Rua] trocou "${ruaAntiga}" → "${rua}": limpando número e pino`)
+    const campos: Record<string, unknown> = { endereco_rua: rua }
+    if (trocouDeRua) {
+      campos.endereco_numero = null
+      campos.endereco_lat    = null
+      campos.endereco_lng    = null
+      // Bairro velho também não vale pra rua nova, a não ser que ele venha agora.
+      campos.endereco_bairro = null
+    }
+    if (bairro) campos.endereco_bairro = bairro
+    if (cidade) campos.endereco_cidade = cidade
+    if (estado) campos.endereco_estado = estado
+    await salvarEnderecoNoCarrinho(empresaId, phone, campos)
 
     const detalhe = [rua, bairro, cidade].filter(Boolean).join(" — ")
     return { resposta: `✅ Endereço salvo!\n\n📍 ${detalhe}\n\nQual o *número* da sua casa? 😊` }
@@ -462,8 +511,38 @@ function limparRotuloEndereco(txt: string): string {
     .trim()
 }
 
+// As mesmas palavras do PREFIXO_RUA, pra procurar o começo do endereço no MEIO
+// da frase (lá o padrão está ancorado no início do texto).
+const PALAVRA_RUA = "(?:rua|r\\.|av|av\\.|avenida|travessa|trav|estrada|rod|rodovia|praca|praça|alameda|al\\.|beco|conj|conjunto|quadra|qd|loteamento|sitio|sítio|vila)"
+// Palavras que costumam vir logo antes do endereço quando ele vem emendado.
+const ANTES_DO_ENDERECO = "(?:pra|para|na|no|em|entregar?|entrega|moro|mora|fica|manda|mande|anota|anote|[eé]|eh)"
+
+/**
+ * Onde o endereço COMEÇA dentro da mensagem.
+ *
+ * Ele quase nunca vem sozinho: "é pra entrega, rua Jaguarari 1200, Lagoa
+ * Nova", "manda pra av. Prudente de Morais 3800". O reconhecimento estava
+ * ancorado no início do texto, então tudo isso passava batido: o robô repetia
+ * o endereço na tela ("Vou confirmar seu endereço: ...") e não guardava nada —
+ * e, depois do cadastro, pedia o endereço de novo (teste da Agv, 25/10/2026).
+ */
+function recortarEnderecoNoTexto(txt: string): string {
+  const base = String(txt ?? "")
+  if (PREFIXO_RUA.test(base.trim())) return base
+  // 1) Um pedaço separado por vírgula, dois-pontos ou linha que começa com
+  //    rua/av/... Os dois-pontos entraram porque é assim que a pessoa avisa
+  //    que vai mudar o endereço: "hoje a entrega é em outro lugar: rua X 250".
+  const pedacos = base.split(/[,\n:;]+/).map(p => p.trim()).filter(Boolean)
+  const i = pedacos.findIndex(p => PREFIXO_RUA.test(p))
+  if (i > 0) return pedacos.slice(i).join(", ")
+  // 2) Emendado na frase, depois de uma palavra de intenção.
+  const m = new RegExp(`\\b${ANTES_DO_ENDERECO}\\s+(${PALAVRA_RUA}[ .].*)$`, "i").exec(base)
+  if (m) return m[1].trim()
+  return base
+}
+
 function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; bairro: string | null } | null {
-  const bruto = limparRotuloEndereco(txt)
+  const bruto = limparRotuloEndereco(recortarEnderecoNoTexto(txt))
   if (bruto.length < 8 || bruto.length > 160) return null
   const partes = bruto.split(",").map(p => p.trim()).filter(Boolean)
   let rua = partes[0] ?? ""
@@ -507,10 +586,17 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
  * responde: acha o ponto pela rua + bairro e pergunta de volta em que cidade
  * ele caiu.
  */
-async function descobrirCidade(rua: string, bairro: string | null, estado: string | null, cidadeLoja: string | null): Promise<string | null> {
+async function descobrirCidade(rua: string, bairro: string | null, estado: string | null, cidadeLoja: string | null, empresaId: string | null = null): Promise<string | null> {
   try {
-    const ponto = await geocodificarEndereco([rua, bairro, estado].filter(Boolean).join(", "))
+    const ponto = await geocodificarEndereco([rua, bairro, estado].filter(Boolean).join(", "), empresaId)
     if (!ponto) return cidadeLoja
+    // Com o Google, o ponto já vem com a cidade separada — uma consulta resolve
+    // as duas coisas, e o reverso só é pago quando o cache não tem.
+    const gRev = await googleEndereco(empresaId, { acao: "reverso", lat: ponto.lat, lng: ponto.lng })
+    if (gRev?.partes?.cidade) {
+      console.log(`[Geo] cidade do endereço (Google): ${gRev.partes.cidade}`)
+      return String(gRev.partes.cidade)
+    }
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${ponto.lat}&lon=${ponto.lng}&format=json&addressdetails=1`,
       { headers: { "User-Agent": "CRM-FWC/1.0" } },
@@ -536,11 +622,53 @@ async function descobrirCidade(rua: string, bairro: string | null, estado: strin
 // salvar, não gasta crédito pra entender um pino, e não corre o risco de
 // responder "não entendi" pra quem fez exatamente o que foi pedido.
 
+// ── O GOOGLE COMO PRIMEIRA TENTATIVA (25/10/2026) ────────────────────
+//
+// O mapa grátis (Nominatim) é bom no centro das cidades antigas e ruim onde o
+// nosso cliente mora: conjunto novo, loteamento, rua que foi registrada
+// depois. Ele devolve a rua vizinha — e esse ponto errado decide a FAIXA DA
+// TAXA e vira o endereço escrito que o motoboy lê.
+//
+// No balção o Google já entrou e acertou (Agv, 25/10). Aqui é o mesmo
+// problema com mais volume, então a ordem passa a ser: Google primeiro, mapa
+// grátis como reserva quando o Google não acha, não responde ou a loja bateu o
+// teto do dia.
+//
+// Não é desperdício: o mesmo endereço não paga duas vezes (cache de 30 dias
+// dentro da própria função) e a cota grátis é de 10 mil consultas por mês.
+// deno-lint-ignore no-explicit-any
+async function googleEndereco(empresaId: string | null, corpo: Record<string, unknown>): Promise<any | null> {
+  if (!empresaId || !SUPABASE_URL || !SUPABASE_KEY) return null
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/geocodificar-google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_KEY}` },
+      body: JSON.stringify({ ...corpo, empresa_id: empresaId }),
+    })
+    const d = await r.json().catch(() => null)
+    if (d?.ok) return d
+    if (d?.erro) console.log(`[Geo] Google não resolveu: ${d.erro}`)
+  } catch (e: any) { console.error("[Geo] Google erro:", e?.message) }
+  return null
+}
+
 // Coordenada → endereço escrito. É o caminho inverso do buscador: o mapa sabe
 // dizer a rua, o bairro e a cidade daquele ponto.
-async function enderecoDoPonto(lat: number, lng: number): Promise<
+async function enderecoDoPonto(lat: number, lng: number, empresaId: string | null = null): Promise<
   { rua: string; bairro: string; cidade: string; estado: string; cep: string } | null
 > {
+  // Google primeiro — é ele que sabe o nome da rua em bairro novo.
+  const g = await googleEndereco(empresaId, { acao: "reverso", lat, lng })
+  if (g?.partes?.rua) {
+    console.log(`[Local] Google: ${g.formatado ?? ""}`)
+    return {
+      rua:    String(g.partes.rua ?? ""),
+      bairro: String(g.partes.bairro ?? ""),
+      cidade: String(g.partes.cidade ?? ""),
+      estado: String(g.partes.estado ?? ""),
+      cep:    String(g.partes.cep ?? ""),
+    }
+  }
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
@@ -595,7 +723,7 @@ async function handleLocalizacao(
   phone: string,
   coords: { lat: number; lng: number },
 ): Promise<{ resposta: string }> {
-  const a = await enderecoDoPonto(coords.lat, coords.lng)
+  const a = await enderecoDoPonto(coords.lat, coords.lng, empresaId)
 
   // O ponto vale mesmo quando o mapa não sabe dizer a rua: é ele que guia o
   // motoboy. O texto do endereço a gente pergunta.
@@ -777,7 +905,7 @@ async function handleLinkDoMapa(
   // esperando um endereço que estava ali, a uma consulta de distância.
   let endFinal = end
   if (!endFinal?.rua && ponto) {
-    const a = await enderecoDoPonto(ponto.lat, ponto.lng)
+    const a = await enderecoDoPonto(ponto.lat, ponto.lng, empresaId)
     if (a?.rua) {
       endFinal = { rua: a.rua, numero: "", bairro: a.bairro, cidade: a.cidade, estado: a.estado, cep: a.cep, lugar: end?.lugar ?? "" }
       console.log(`[Mapa] endereço veio do ponto: ${a.rua}, ${a.bairro}`)
@@ -2017,12 +2145,26 @@ function valorEmReais(txt: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-/** A resposta do cliente logo depois de o robô perguntar do troco. */
+/**
+ * O troco que a conversa deixa claro, quando o modelo esquece de mandar o
+ * campo na ação. Três caminhos, nesta ordem:
+ *
+ *   1. o robô perguntou do troco e o cliente respondeu;
+ *   2. o cliente disse por conta própria, sem ser perguntado;
+ *   3. a linha de troco no resumo que o próprio robô escreveu e o cliente
+ *      confirmou.
+ *
+ * O 2 e o 3 entraram em 25/10/2026. Só existia o 1 — e quem já sabe como paga
+ * não espera a pergunta: "dinheiro, troco pra 50" numa mensagem só. O robô
+ * repetia "Troco para: R$ 50,00" no resumo e o pedido nascia com troco vazio,
+ * então o entregador saía sem a volta.
+ */
 function trocoDaConversa(mensagens: any[]): number | null {
-  for (let i = (mensagens ?? []).length - 2; i >= 0; i--) {
-    const m = mensagens[i]
+  const lista = mensagens ?? []
+  for (let i = lista.length - 2; i >= 0; i--) {
+    const m = lista[i]
     if (m?.role !== "assistant" || !/troco/i.test(m.content ?? "")) continue
-    const resp = mensagens[i + 1]
+    const resp = lista[i + 1]
     if (resp?.role !== "user") continue
     // Número manda ("não tenho trocado, é nota de 100"); valor menor que o
     // total quem descarta é o fechamento.
@@ -2030,6 +2172,25 @@ function trocoDaConversa(mensagens: any[]): number | null {
     if (valor != null) return valor
     if (/\b(n[ãa]o|sem troco|trocado|certinho|exato)\b/i.test(resp.content ?? "")) return null
     // "sim" / "confirmo" depois do resumo: o valor foi dito antes, segue voltando.
+  }
+  // 2) O cliente falou do troco sozinho, em qualquer mensagem dele.
+  const DITO_PELO_CLIENTE = /\b(?:troco|nota)\b[^0-9]{0,12}(\d[\d.,]*)/i
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (lista[i]?.role !== "user") continue
+    const g = DITO_PELO_CLIENTE.exec(String(lista[i].content ?? ""))
+    if (g) {
+      const v = valorEmReais(g[1])
+      if (v != null) return v
+    }
+  }
+  // 3) A linha do resumo do robô ("💵 Troco para: R$ 50,00").
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (lista[i]?.role !== "assistant") continue
+    const g = /troco\s*(?:para|pra)?\s*:?\s*R?\$?\s*(\d[\d.,]*)/i.exec(String(lista[i].content ?? ""))
+    if (g) {
+      const v = valorEmReais(g[1])
+      if (v != null) return v
+    }
   }
   return null
 }
@@ -2097,8 +2258,12 @@ async function handleFecharPedido(
     // entregador jogava esse texto no Google — que, sem confiar no número,
     // larga o pino no meio da rua. Ordem: o que o cliente mandou agora, senão o
     // pino que ele já tinha apontado no cadastro.
-    const endLat = carrinhoEndereco.lat ?? cliente?.endereco_lat ?? null
-    const endLng = carrinhoEndereco.lng ?? cliente?.endereco_lng ?? null
+    // `let` porque há uma terceira fonte, lá embaixo: o ponto que o Google
+    // devolve ao calcular a taxa. Quem ESCREVEU o endereço (em vez de mandar a
+    // localização) não tem pino nenhum, e o pedido ia pra rua só com o texto —
+    // mesmo tendo acabado de achar o ponto exato pra cobrar a entrega.
+    let endLat = carrinhoEndereco.lat ?? cliente?.endereco_lat ?? null
+    let endLng = carrinhoEndereco.lng ?? cliente?.endereco_lng ?? null
 
     if (tipoEntrega === "entrega" && !endRua) {
       return {
@@ -2137,10 +2302,30 @@ async function handleFecharPedido(
         console.log(`[Taxa] bairro "${endBairro}" → R$${taxaFinal}`)
       } else {
         const enderecoFinal = [endRua, endNumero, endBairro, endCidade ?? empresa.cidade].filter(Boolean).join(", ")
-        const t = await calcularTaxaEntregaKm(empresa, enderecoFinal)
+        const achado = await taxaEPontoDoEndereco(empresa, enderecoFinal)
+        // Fora do raio da loja: não nasce pedido. Antes a última faixa da
+        // tabela valia pra qualquer distância, então o robô aceitava entrega a
+        // 9 km numa loja que só vai até 5 — e alguém ia ter que ligar pro
+        // cliente desmarcando.
+        if (achado.foraDoRaio) {
+          const km = achado.distKm != null ? `${achado.distKm.toFixed(1)} km` : "muito longe"
+          return {
+            mensagemExtra: "",
+            acaoPromise: Promise.resolve(),
+            bloqueioMensagem: `😕 Infelizmente a gente não entrega tão longe ainda — seu endereço fica a *${km}* da loja, e a entrega vai até *${Number(empresa.raio_entrega_km)} km*.\n\nMas dá pra *retirar na loja*, em ${empresa.endereco ? [empresa.endereco, empresa.numero, empresa.bairro].filter(Boolean).join(", ") : empresa.nome}. Quer assim? 🏪`,
+          }
+        }
         // Só troca quando a conta fecha: geocode que falhou não pode virar
         // frete grátis.
-        if (t != null) taxaFinal = t
+        if (achado.taxa != null) taxaFinal = achado.taxa
+        // O ponto do Google aproveitado: é o mesmo que decidiu a taxa, então
+        // está bom o bastante pro entregador. Nunca por cima do pino que o
+        // cliente apontou com o dedo — aquele é melhor que qualquer busca.
+        if (endLat == null && endLng == null && achado.ponto) {
+          endLat = achado.ponto.lat
+          endLng = achado.ponto.lng
+          console.log(`[Pedido] ponto aproveitado do cálculo da taxa: ${endLat},${endLng}`)
+        }
       }
     }
     const totalFinal     = totalCarrinho + taxaFinal
@@ -2435,9 +2620,16 @@ async function handleFecharPedido(
     // A taxa e o total saem daqui, do cálculo do sistema — não do resumo que o
     // modelo escreveu. Ele já chutou "R$ 15,00" de taxa numa conversa em que
     // endereço nenhum tinha sido calculado; o cliente tem que ver o valor real.
+    //
+    // Taxa zero é FRETE GRÁTIS, e é assim que tem que estar escrito: "Taxa de
+    // entrega: R$ 0.00" faz o cliente conferir duas vezes pra entender que não
+    // vai pagar nada. A Agv dá entrega grátis até 2,5 km — é a melhor notícia
+    // da mensagem e estava escondida num zero.
     const linhaValores = tipoEntrega === "entrega"
-      ? `\n🚚 Taxa de entrega: *R$ ${taxaFinal.toFixed(2)}*\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
-      : `\n💰 Total: *R$ ${totalFinal.toFixed(2)}*`
+      ? `\n🚚 ${taxaFinal > 0
+            ? `Taxa de entrega: *R$ ${taxaFinal.toFixed(2).replace(".", ",")}*`
+            : "Entrega *grátis*!"}\n💰 Total: *R$ ${totalFinal.toFixed(2).replace(".", ",")}*`
+      : `\n💰 Total: *R$ ${totalFinal.toFixed(2).replace(".", ",")}*`
     // PIX na entrega: a chave vai junto, pro cliente já deixar salvo e pagar
     // quando o pedido chegar.
     const pgLoja = pagamentosDaLoja(empresa)
@@ -2569,7 +2761,14 @@ async function umGeocode(consulta: string): Promise<{ lat: number; lng: number }
  * null e o pedido sai de graça. Então, se a busca completa falhar, tenta sem a
  * cidade e depois só pelo bairro.
  */
-async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lng: number } | null> {
+async function geocodificarEndereco(endereco: string, empresaId: string | null = null): Promise<{ lat: number; lng: number } | null> {
+  // Google primeiro (ver googleEndereco): uma consulta só, com o endereço
+  // inteiro, porque ele entende o texto do jeito que o cliente escreveu.
+  const g = await googleEndereco(empresaId, { rua: endereco })
+  if (g && Number.isFinite(Number(g.lat)) && Number.isFinite(Number(g.lng))) {
+    console.log(`[Geo] Google: "${endereco}" → ${g.formatado ?? ""} (${g.precisao ?? "?"})`)
+    return { lat: Number(g.lat), lng: Number(g.lng) }
+  }
   const partes = endereco.split(",").map(p => p.trim()).filter(Boolean)
   const tentativas = [endereco]
   if (partes.length >= 3) {
@@ -2633,26 +2832,58 @@ function acharBairroCfg(lista: any, bairroCliente: string | null): any {
     .sort((a: any, b: any) => a.nome.length - b.nome.length)[0]
   return contem ? contem.cfg : null
 }
-// Taxa (número) pela distância entre a loja e o endereço, ou null se não deu pra calcular.
-async function calcularTaxaEntregaKm(
+/**
+ * Taxa pela distância E o ponto que a conta usou.
+ *
+ * O ponto vai de volta porque ele não pode mais ser jogado no lixo: quem
+ * escreve o endereço em vez de mandar a localização não tem pino, e o pedido
+ * ia pra rua só com o texto. O Google acabou de dizer onde é — usar esse
+ * mesmo ponto no pedido não custa consulta nenhuma a mais.
+ */
+async function taxaEPontoDoEndereco(
   empresa: any,
   endStr: string,
   // Ponto que o cliente apontou (mig 0239). Quando existe, ele manda: veio do
   // celular dele, o geocode é chute em cima de texto.
   ponto: { lat: number; lng: number } | null = null,
-): Promise<number | null> {
+): Promise<{ taxa: number | null; ponto: { lat: number; lng: number } | null; distKm: number | null; foraDoRaio: boolean }> {
+  const vazio = { taxa: null, ponto, distKm: null, foraDoRaio: false }
   try {
-    if (!empresa?.latitude || !empresa?.longitude) return null
+    if (!empresa?.latitude || !empresa?.longitude) return vazio
     const faixas = Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : []
-    if (faixas.length === 0) return null
-    const coords = ponto ?? await geocodificarEndereco(endStr)
-    if (!coords) return null
+    if (faixas.length === 0) return vazio
+    const coords = ponto ?? await geocodificarEndereco(endStr, empresa?.id ?? null)
+    if (!coords) return { taxa: null, ponto: null, distKm: null, foraDoRaio: false }
     const dist = haversineKm(coords.lat, coords.lng, Number(empresa.latitude), Number(empresa.longitude))
+    // O RAIO DE ENTREGA DA LOJA (25/10/2026).
+    //
+    // A tabela de faixas acaba no último km cadastrado e o `?? último` fazia
+    // qualquer distância cair nele: a Agv entrega até 5 km e o robô ofereceu
+    // Ponta Negra, a 9 km, pela taxa de R$ 5,00 do fim da tabela. Com 30 km
+    // seria a mesma coisa. A Loja Online já barra por aqui (PortalLoja) —
+    // faltava no robô, que é quem mais fecha pedido.
+    const raio = Number(empresa.raio_entrega_km ?? 0)
+    if (raio > 0 && dist > raio) {
+      console.log(`[Taxa] ${dist.toFixed(1)}km FORA do raio de ${raio}km`)
+      return { taxa: null, ponto: coords, distKm: dist, foraDoRaio: true }
+    }
     const ordenadas = [...faixas].sort((a: any, b: any) => a.km - b.km)
     const faixa = ordenadas.find((f: any) => dist <= Number(f.km)) ?? ordenadas[ordenadas.length - 1]
     console.log(`[Taxa] ${dist.toFixed(1)}km → R$${faixa.taxa}`)
-    return Number(faixa.taxa) || 0
-  } catch (e: any) { console.error("[Taxa] erro:", e?.message); return null }
+    return { taxa: Number(faixa.taxa) || 0, ponto: coords, distKm: dist, foraDoRaio: false }
+  } catch (e: any) {
+    console.error("[Taxa] erro:", e?.message)
+    return { taxa: null, ponto: null, distKm: null, foraDoRaio: false }
+  }
+}
+
+// Só a taxa (número), ou null se não deu pra calcular.
+async function calcularTaxaEntregaKm(
+  empresa: any,
+  endStr: string,
+  ponto: { lat: number; lng: number } | null = null,
+): Promise<number | null> {
+  return (await taxaEPontoDoEndereco(empresa, endStr, ponto)).taxa
 }
 
 // ── transcribeAudio — Whisper OpenAI ────────────────────────────────────────
@@ -3058,7 +3289,7 @@ serve(async (req) => {
     {
       const { data: liga } = await supabase
         .from("whatsapp_config")
-        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, resposta_presencial_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, recado_dias, recado_hora_inicio, recado_hora_fim, recado_pula_feriado, empresas(nome, slug, agendamento_ativo, presencial_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
+        .select("empresa_id, ia_ativo, resposta_link_ativo, resposta_link_texto, resposta_produto_ativo, resposta_presencial_ativo, ouvir_audio_ativo, texto_fechado, recado_ativo, recado_texto, recado_palavras, recado_dias, recado_hora_inicio, recado_hora_fim, recado_pula_feriado, empresas(id, nome, slug, agendamento_ativo, presencial_ativo, delivery_ativo, delivery_fechado_por, feriados_fecha, horarios_funcionamento, horario_abertura, horario_fechamento, endereco, numero, bairro, cidade, estado, latitude, longitude, raio_entrega_km, aceita_entrega, aceita_retirada, taxa_entrega, taxas_entrega_bairro, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max)")
         .eq("instance_name", instanceName)
         .eq("ativo", true)
         .maybeSingle()
@@ -3500,7 +3731,7 @@ serve(async (req) => {
       }
     }
 
-    const [historicoRes, produtosRes, carrinhoRes, clienteRes] = await Promise.all([
+    const [historicoRes, produtosRes, carrinhoRes, clienteRes, soNaLojaRes] = await Promise.all([
       supabase.from("whatsapp_conversas")
         // `origem` diz quem escreveu do lado da loja: 'loja' é gente, o resto é
         // o robô. Serve pra busca de produto enxergar o nome CERTO que o
@@ -3535,7 +3766,29 @@ serve(async (req) => {
         .in("telefone", [...new Set([phone, phoneLocal, `0${phoneLocal}`, `55${phoneLocal}`, phoneLocalWith9, `55${phoneLocalWith9}`, phoneLocalNo9, `55${phoneLocalNo9}`])])
         .limit(1)
         .maybeSingle(),
+      // O QUE EXISTE NA LOJA MAS NÃO VENDE AQUI (mig 0384, `vende_online`).
+      //
+      // Sem esta lista o robô ficava MUDO: a cliente pediu "1 bobó, 1 batata
+      // frita 400g e 2 coca", e a batata — que a loja marcou como só no balcão
+      // — simplesmente desapareceu do pedido, sem uma palavra (teste da Agv,
+      // 25/10/2026). Calar é pior que dizer "essa só na loja": ela só descobre
+      // quando a comida chega sem a batata.
+      //
+      // Só os NOMES, pra não inflar o prompt, e no máximo 80.
+      supabase.from("produtos")
+        .select("nome")
+        .eq("empresa_id", empresaId)
+        .eq("ativo", true)
+        .eq("vende_online", false)
+        .is("arquivado_em", null)
+        .order("nome")
+        .limit(80),
     ])
+
+    // Nomes do que a loja vende só no balcão (pro robô não calar em cima do
+    // pedido). Cortado em 80 na consulta; aqui só tira o vazio.
+    const soNaLoja = ((soNaLojaRes?.data ?? []) as { nome: string }[])
+      .map(p => String(p?.nome ?? "").trim()).filter(Boolean)
 
     const mensagensRaw = (historicoRes.data ?? []).reverse()
     // Cliente que responde ENQUANTO o robô ainda responde a anterior: a resposta
@@ -3848,6 +4101,11 @@ serve(async (req) => {
     const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
     // Taxa de entrega: bairro (taxa fixa) > km (faixas por distância) > taxa fixa da loja.
     let taxaEntregaCalc = taxaEntrega
+    // Endereço além do raio que a loja cadastrou. O modelo precisa saber ANTES
+    // de montar a sacola, senão ele vende, promete a entrega e só na hora de
+    // fechar o sistema barra.
+    let foraDoRaioCliente = false
+    let distanciaCliente: number | null = null
     if (aceitaDelivery && bairroTaxaFixa) {
       taxaEntregaCalc = Number(cfgBairro.taxa) || 0
     } else if (aceitaDelivery && !bairroBloqueado) {
@@ -3863,8 +4121,12 @@ serve(async (req) => {
         ? { lat: Number(carrinhoEndereco.lat), lng: Number(carrinhoEndereco.lng) }
         : null
       if (endParaCalc || pontoCliente) {
-        const t = await calcularTaxaEntregaKm(empresa, endParaCalc, pontoCliente)
-        if (t != null) taxaEntregaCalc = t
+        const achado = await taxaEPontoDoEndereco(empresa, endParaCalc, pontoCliente)
+        if (achado.taxa != null) taxaEntregaCalc = achado.taxa
+        if (achado.foraDoRaio) {
+          foraDoRaioCliente = true
+          distanciaCliente = achado.distKm
+        }
       }
     }
 
@@ -3998,6 +4260,7 @@ CATÁLOGO: ${catalogoUrl}
 🚚 TAXA, DISTÂNCIA E CIDADE VIZINHA NUNCA SÃO MOTIVO PRA CHAMAR ATENDENTE. Quem calcula a taxa é o SISTEMA, pela distância do endereço. Cliente mandou a cidade/bairro que faltava → emita salvar_rua com rua + bairro + cidade na hora (mesmo que seja outra cidade, ex.: Natal) e o valor sai certo. Só diga que não entrega quando aparecer "ENTREGA BLOQUEADA" aqui.
 📍 "Vocês entregam em [cidade/bairro]?": NUNCA responda "sim" nem "não" de cabeça — a entrega vai até uma distância da loja e só o endereço diz. Responda que a loja fica em ${empresaEndereco || "—"}, e peça a localização ou rua, número e bairro pra conferir na hora.
 ⟦VAR⟧${aceitaDelivery ? (bairroBloqueado ? `⛔ ENTREGA BLOQUEADA NESTE BAIRRO: a loja NÃO entrega no bairro do cliente (${bairroCliente}). Avise educadamente que ainda não entregam nesse bairro e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
+  : foraDoRaioCliente ? `⛔ ENTREGA BLOQUEADA — LONGE DEMAIS: o endereço do cliente fica a ${distanciaCliente != null ? distanciaCliente.toFixed(1) : "mais de "} km da loja, e a entrega vai até ${Number(empresa.raio_entrega_km)} km. Avise educadamente que ainda não entregam nessa distância e ofereça RETIRADA no local. NUNCA feche um pedido de ENTREGA para este cliente — só retirada.`
   : enderecoCliente ? `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (já calculada pela distância do endereço do cliente)`
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}⟦/VAR⟧
@@ -4010,6 +4273,7 @@ ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${t
 • Categorias da loja: ${(catsHorario ?? []).map((c: any) => c.nome).join(", ") || "—"}
 ` : ""}PRODUTOS DISPONÍVEIS${totalProdutos > MENU_INTEIRO_ATE ? " (o que casou com o que ele pediu)" : ""}:
 ${cardapioPorCategoria(produtos) || (totalProdutos > MENU_INTEIRO_ATE ? "Nada casou com o que ele falou — peça a marca e o tamanho, ou ofereça o link do catálogo." : "Nenhum produto cadastrado")}
+${soNaLoja.length ? `\n🏪 EXISTE NA LOJA, MAS NÃO VENDE POR AQUI (só no balcão — NÃO adicione no carrinho de jeito nenhum):\n${soNaLoja.join(" · ")}\n⚠️ Se o cliente pedir um desses, NUNCA fique calado nem deixe o item de fora sem falar: diga que esse a gente vende *só na loja* e ofereça algo parecido da lista de cima. Silêncio aqui é o cliente descobrir a falta quando a comida chega.\n` : ""}
 ${complementosTexto ? `\nPRODUTOS QUE SÃO MONTADOS COM COMPLEMENTOS (o cliente escolhe dentro de cada categoria):\n${complementosTexto}\n${Object.keys(exigencias).length ? `⚠️ ESCOLHA OBRIGATÓRIA: nesses produtos, a categoria que tem PREÇO nas opções (borda, sabores da pizza) é obrigatória — pergunte junto com o resto e NÃO anote sem ela. "Sem borda" também é uma escolha: se o cliente disser que não quer, anote "Sem borda".\n` : ""}${familiasTamanho.length ? `📏 SABORES QUE MUDAM CONFORME O TAMANHO — nunca liste sabores desses produtos sem saber o tamanho. Se o cliente não disse o tamanho (nem antes na conversa), PERGUNTE primeiro qual tamanho, mostrando tamanhos e preços; depois mostre só os sabores DAQUELE tamanho:\n${familiasTamanho.map(f => `▸ ${f.nome}: ` + f.tamanhos.map(t => `${t.rotulo} (${t.sabores.length} sabores)`).join("; ")).join("\n")}\n` : ""}⚠️ Confira pelo [id:] qual produto o cliente pediu antes de mostrar opções. Produto cujo id NÃO aparece neste bloco não tem sabor/complemento pra escolher: adicione direto com atualizar_carrinho, sem perguntar sabor (ex.: açaí em caixa ou balde não é o mesmo produto que o sorvete de mesmo tamanho).\n🍦 SABOR NÃO ESCOLHIDO NÃO SE PERGUNTA: nos produtos em que só se escolhe o SABOR (picolé, sorvete, moreninha, pote), se o cliente disse produto + quantidade sem sabor, emita atualizar_carrinho NA HORA com a linha SEM "complementos" (nem "Misturado" — Misturado é só quando ele FALA misturado/sortido/menos X) — a loja manda sortido. Não liste sabores, não pergunte "qual sabor?" nem "prefere misturado?". Só use sabor quando ELE disser um.\n` : ""}
 ⟦VAR⟧CARRINHO ATUAL: ${carrinho.length === 0 ? "Vazio" : `\n${carrinho.map((i: any) => {
   const comps = Array.isArray(i.complementos) && i.complementos.length ? ` (${i.complementos.map((c: any) => c.nome).join(", ")})` : ""
@@ -4090,7 +4354,13 @@ Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
 "📋 *Resumo do pedido:*
 
 [liste cada item: • Nome x qtd — R$ valor]
-${aceitaDelivery ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só se for entrega — use EXATAMENTE este valor)` : ""}
+${aceitaDelivery
+  // Taxa zero é FRETE GRÁTIS, e é a melhor notícia da mensagem: escrever
+  // "R$ 0.00" faz o cliente ler duas vezes pra entender que não vai pagar.
+  ? (taxaEntregaCalc > 0
+      ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só se for entrega — use EXATAMENTE este valor)`
+      : "🚚 Entrega *grátis*! (só se for entrega — a entrega deste endereço não tem taxa, NUNCA escreva \"R$ 0,00\")")
+  : ""}
 💰 *Total: R$ [total]*
 
 📍 [Entrega em: endereço / Retirada em: endereço da loja]
@@ -4629,8 +4899,15 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             String(acao.nome), acao.email ? String(acao.email) : null,
             SUPABASE_URL, SUPABASE_KEY, indicadorProfileId
           )
-          // Após cadastro, coleta endereço — com a saída da retirada à vista
-          resposta = textoDepoisDoCadastro(aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes)
+          // Após cadastro, coleta endereço — com a saída da retirada à vista.
+          // Se ele já tinha mandado a localização, não pede de novo.
+          resposta = textoDepoisDoCadastro(
+            aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes,
+            // Quem disse que vai buscar não pode ouvir "entrega em".
+            tipoEntregaDaConversa(mensagens) === "retirada" ? null : enderecoCliente,
+            !(carrinhoEndereco.numero ?? cliente?.numero),
+            foraDoRaioCliente,
+          )
 
         } else if (acao.tipo === "pedir_cep") {
           // sem ação — Claude já pediu o CEP na resposta
@@ -4762,12 +5039,20 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // Safety net: Claude confirmou fechamento sem emitir fechar_pedido
     // Dispara mesmo com carrinho vazio no DB (Claude usa acao.items como fallback)
     if (!acaoMatch) {
-      const pareceFechar = /fechando\s+(?:o\s+)?(?:seu\s+)?pedido|pedido\s+(?:#\w+\s+)?(?:foi\s+)?(?:fechado|enviado|criado|registrado)|✅\s+Pedido\s+(?:fechado|criado|enviado)/i.test(resposta)
+      // "confirmado" e "recebido" entraram em 25/10/2026. O robô respondeu
+      // "✅ Pedido confirmado! 🎉 Agora é só fazer o PIX" e PEDIDO NENHUM foi
+      // criado: a palavra que ele usou não estava nesta lista, então a rede não
+      // fechou nada. O cliente senta pra esperar a comida e a loja não sabe que
+      // ele existe — é o pior defeito possível neste robô.
+      const pareceFechar = /fechando\s+(?:o\s+)?(?:seu\s+)?pedido|pedido\s+(?:#\w+\s+)?(?:foi\s+)?(?:fechado|enviado|criado|registrado|confirmad[oa]|recebido)|✅\s*Pedido\s+(?:fechado|criado|enviado|confirmad[oa]|recebido)/i.test(resposta)
       // Rede de segurança extra: o cliente confirmou o RESUMO com um "sim" curto e a IA não fechou.
       // Só dispara se a ÚLTIMA mensagem do bot foi o resumo do pedido ("Confirma?") — não pega o "Está correto?" do endereço.
       const ultimaBot = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "")
       const ultimaBotEhResumo = /resumo do pedido|confirma\?/i.test(ultimaBot)
-      const usuarioConfirmou = /^(sim|s|isso|isso mesmo|confirma|confirmar|confirmado|pode|pode fechar|pode confirmar|fechar|fecha|ok|claro|certo|t[áa]\b|perfeito|com certeza|manda|bora|positivo|fechado)\b/i.test(text.trim())
+      // `confirm\w*` no lugar de confirma/confirmar/confirmado: quem respondeu
+      // "confirmo" (e "confirmei", "confirmando") não era entendido — a lista
+      // tinha três formas do verbo e faltava justamente a mais natural.
+      const usuarioConfirmou = /^(sim|s|isso|isso mesmo|confirm\w*|pode|pode fechar|pode confirmar|fechar|fecha|ok|claro|certo|t[áa]\b|perfeito|com certeza|manda|bora|positivo|fechado|beleza|blz|uhum|aham|quero sim|[eé] isso)\b/i.test(text.trim())
       const confirmouResumo = ultimaBotEhResumo && usuarioConfirmou
       if (pareceFechar || confirmouResumo) {
         console.log("[SafeNet] fechar_pedido não emitido — auto-executando")
@@ -4923,14 +5208,32 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // Não depende só de o bot ter pedido: se o cliente mandou algo que É um
     // endereço ("Rua tal, 600, bairro"), grava do mesmo jeito. O modelo às
     // vezes desvia do assunto no meio e a mensagem boa do cliente se perdia.
-    const pareceEndereco = PREFIXO_RUA.test(limparRotuloEndereco(text)) && /\d/.test(text)
-    if (!salvarRuaJaExecutado && !carrinhoEndereco.rua && (botPediuEndereco || pareceEndereco)) {
-      const end = lerEnderecoEscrito(text)
+    const pareceEndereco = PREFIXO_RUA.test(limparRotuloEndereco(recortarEnderecoNoTexto(text))) && /\d/.test(text)
+    const endEscrito = lerEnderecoEscrito(text)
+    // ENDEREÇO NOVO SOBRE UM QUE JÁ EXISTIA. Esta rede exigia o carrinho sem
+    // endereço, então o SEGUNDO endereço era ignorado: o cliente dizia "hoje é
+    // em outro lugar: rua X 250", o robô respondia "✅ endereço confirmado" com
+    // a rua nova escrita na tela — e seguia com a antiga guardada. O pedido
+    // sairia pro lugar errado, ou (como no teste da Agv, 25/10/2026) era barrado
+    // pela distância de um endereço que o cliente já tinha trocado.
+    const trocouEndereco = !!carrinhoEndereco.rua && pareceEndereco && !!endEscrito
+      && normNomeSafe(endEscrito.rua) !== normNomeSafe(String(carrinhoEndereco.rua))
+    const precisaSalvarRua = carrinhoEndereco.rua ? trocouEndereco : (botPediuEndereco || pareceEndereco)
+    if (!salvarRuaJaExecutado && precisaSalvarRua) {
+      const end = endEscrito
       if (end) {
+        if (trocouEndereco) {
+          // O que estava em memória valia pro endereço velho.
+          carrinhoEndereco.rua    = end.rua
+          carrinhoEndereco.numero = end.numero ?? null
+          carrinhoEndereco.bairro = end.bairro ?? null
+          carrinhoEndereco.lat    = null
+          carrinhoEndereco.lng    = null
+        }
         console.log(`[Endereco] safety net: rua="${end.rua}" num=${end.numero ?? "-"} bairro="${end.bairro ?? "-"}"`)
         // Cidade da LOJA quando ele não disse: sem cidade o mapa procura a rua
         // no Brasil inteiro e a taxa sai de qualquer lugar.
-        const cidadeReal = await descobrirCidade(end.rua, end.bairro, empresa.estado ?? null, empresa.cidade ?? null)
+        const cidadeReal = await descobrirCidade(end.rua, end.bairro, empresa.estado ?? null, empresa.cidade ?? null, empresa.id ?? null)
         const r = await handleSalvarRua(
           supabase, empresaId, phone, end.rua, end.bairro,
           cidadeReal, empresa.estado ?? null,
@@ -5057,7 +5360,12 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       if (!cliente?.nome && carrinho.length > 0 && /seu\s*\*?nome/i.test(ultimaBotAntes) && !tipoAcao && pareceNome) {
         await handleCadastrarCliente(supabase, empresaId, phone, phoneLocal, nomeDigitado, null, SUPABASE_URL, SUPABASE_KEY, indicadorProfileId)
         cliente = { ...(cliente ?? {}), nome: nomeDigitado }
-        resposta = textoDepoisDoCadastro(aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes)
+        resposta = textoDepoisDoCadastro(
+          aceitaDelivery, empresaEndereco || empresaNome, pgtoOpcoes,
+          tipoEntregaDaConversa(mensagens) === "retirada" ? null : enderecoCliente,
+          !(carrinhoEndereco.numero ?? cliente?.numero),
+          foraDoRaioCliente,
+        )
         console.log(`[SafeNet] nome respondido sem cadastrar_cliente — cadastrei "${nomeDigitado}"`)
       }
     }
@@ -5119,16 +5427,27 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             linhaTaxa = `😕 No bairro *${e.endereco_bairro}* a gente não está entregando.`
           } else {
             let taxa: number | null = cfg ? Number(cfg.taxa) || 0 : null
+            let foraDoRaio = false
+            let distKm: number | null = null
             if (taxa == null) {
               const ponto = e.endereco_lat != null && e.endereco_lng != null ? { lat: Number(e.endereco_lat), lng: Number(e.endereco_lng) } : null
               const endStr = [e.endereco_rua, e.endereco_numero, e.endereco_bairro, e.endereco_cidade].filter(Boolean).join(", ")
-              taxa = await calcularTaxaEntregaKm(empresa, endStr, ponto)
+              const achado = await taxaEPontoDoEndereco(empresa, endStr, ponto)
+              taxa = achado.taxa
+              foraDoRaio = achado.foraDoRaio
+              distKm = achado.distKm
+            }
+            // Fora do raio: a hora de dizer é AGORA, com o endereço na mão, e
+            // não depois de montar a sacola inteira.
+            if (foraDoRaio) {
+              const km = distKm != null ? `${distKm.toFixed(1)} km` : "longe"
+              linhaTaxa = `😕 Esse endereço fica a *${km}* da loja e a gente entrega até *${Number(empresa.raio_entrega_km)} km* — não dá pra entregar aí ainda. Mas você pode *retirar na loja*! 🏪`
             }
             // Taxa fixa só pra loja sem tabela: com tabela, mapa que não achou a
             // rua prometeria R$ 5 pra quem mora a 20 km.
             const temTabela = (empresa.taxas_entrega_km ?? []).length || (empresa.taxas_entrega_bairro ?? []).length
             if (taxa == null && !temTabela) taxa = taxaEntrega
-            if (taxa != null) linhaTaxa = taxa > 0 ? `🚚 Taxa de entrega: *R$ ${taxa.toFixed(2).replace(".", ",")}*` : "🚚 Entrega *grátis*!"
+            if (!foraDoRaio && taxa != null) linhaTaxa = taxa > 0 ? `🚚 Taxa de entrega: *R$ ${taxa.toFixed(2).replace(".", ",")}*` : "🚚 Entrega *grátis*!"
           }
           if (linhaTaxa) {
             const corte = resposta.lastIndexOf("\n\n")
