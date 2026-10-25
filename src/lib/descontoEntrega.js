@@ -35,6 +35,9 @@ export function rotuloValorEntregador(pedido) {
   const rs = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`
   const sistema = calc != null ? ` (sistema calculou ${rs(calc)})` : ' (o sistema não conseguiu calcular)'
   switch (pedido.valor_entregador_origem) {
+    // 'taxa' (mig 0393): o valor E a taxa que o cliente pagou. E o caso normal
+    // desde que a tabela de km virou reserva — nao e edicao de ninguem.
+    case 'taxa':      return { texto: '💵 taxa paga pelo cliente', editado: false }
     case 'calculado': return { texto: '📍 calculada pelo sistema', editado: false }
     case 'motoboy':   return { texto: `✏️ editada pelo motoboy${sistema}`, editado: true }
     case 'dono':      return { texto: `✏️ editada pelo dono${sistema}`, editado: true }

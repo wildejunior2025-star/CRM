@@ -812,6 +812,21 @@ function CardEntrega({ pedido, mine, onAceitar, onSair, onConfirmar, onConfirmar
         )
       )}
 
+      {/* O QUE O CLIENTE PAGOU, SEMPRE A VISTA (25/10/2026)
+          Pedido do dono: se o valor estiver errado o motoboy edita, mas ele
+          precisa ver contra o que esta comparando. Sem esta linha, o #1177 do
+          Mickey mostrava R$ 4,00 (tabela de km) numa entrega em que o cliente
+          tinha pago R$ 5,00 — e sem a referencia ninguem percebe a diferenca. */}
+      {exigeValor && mine && (pedido.tipo_entrega || 'entrega') !== 'retirada'
+        && Number(pedido.taxa_entrega) > 0 && (
+        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-muted)', margin: '-6px 0 10px' }}>
+          Cliente pagou <strong style={{ color: 'var(--text)' }}>{fmt(pedido.taxa_entrega)}</strong> de entrega
+          {valorMostrado != null && Math.abs(Number(valorMostrado) - Number(pedido.taxa_entrega)) >= 0.005 && (
+            <span style={{ color: '#f59e0b', fontWeight: 700 }}> · não bate</span>
+          )}
+        </div>
+      )}
+
       {/* Ação principal */}
       {!mine ? (
         onAceitar ? (

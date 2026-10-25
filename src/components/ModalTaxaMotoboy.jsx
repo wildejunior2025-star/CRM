@@ -54,9 +54,14 @@ export default function ModalTaxaMotoboy({ pedido, onFechar, onSalvo }) {
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, marginBottom: 12 }}>
+          {/* A taxa paga vem primeiro: e contra ela que se julga o resto. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Cliente pagou de entrega</span>
+            <strong>{fmt(pedido.taxa_entrega)}</strong>
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-muted)' }}>Valor agora</span>
-            <strong>{atual != null ? fmt(atual) : '—'}{pedido.valor_entregador_origem === 'motoboy' ? ' (editado pelo motoboy)' : pedido.valor_entregador_origem === 'dono' ? ' (editado pelo dono)' : atual != null ? ' (calculado)' : ''}</strong>
+            <strong>{atual != null ? fmt(atual) : '—'}{pedido.valor_entregador_origem === 'motoboy' ? ' (editado pelo motoboy)' : pedido.valor_entregador_origem === 'dono' ? ' (editado pelo dono)' : pedido.valor_entregador_origem === 'taxa' ? ' (taxa do cliente)' : atual != null ? ' (calculado)' : ''}</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-muted)' }}>O sistema calcula</span>
