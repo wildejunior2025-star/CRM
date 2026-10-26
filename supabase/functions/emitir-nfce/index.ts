@@ -365,6 +365,13 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   const csosn = fis.csosn_padrao || "102"
   const origem = fis.origem_padrao || "0"
 
+  // TRIBUTOS APROXIMADOS (Lei 12.741/2012, 26/10/2026)
+  // Toda nota ao consumidor tem que dizer quanto de imposto vai no preço. O
+  // percentual é o aproximado do IBPT pro NCM padrão da loja (alimentos prontos
+  // ficam perto de 31,5% somando federal + estadual); a loja pode ajustar em
+  // `aliquota_tributos_aprox` na empresa_fiscal quando houver a coluna.
+  const aliqTrib = Number(fis.aliquota_tributos_aprox) || 31.5
+
   const itensPed: any[] = Array.isArray(ped.itens) ? ped.itens : []
   if (!itensPed.length) return { ok: false, error: "pedido sem itens" }
 
@@ -387,8 +394,10 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       valor_bruto: Number(bruto.toFixed(2)),
       icms_origem: origem,
       icms_situacao_tributaria: csosn,
+      valor_total_tributos: Number((bruto * aliqTrib / 100).toFixed(2)),
     }
   })
+  const tribTotal = Number(items.reduce((s, i) => s + (i.valor_total_tributos as number), 0).toFixed(2))
 
   const total = Number(ped.total ?? ped.subtotal ?? 0) || items.reduce((s, i) => s + i.valor_bruto, 0)
   // Pagamento em duas formas (mig 0274): cada parte sai como uma forma na nota.
@@ -411,6 +420,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     local_destino: "1",
     items,
     formas_pagamento: formasNota,
+    informacoes_adicionais_contribuinte:
+      `Valor aproximado dos tributos: R$ ${tribTotal.toFixed(2).replace(".", ",")} (${aliqTrib.toString().replace(".", ",")}%). Fonte: IBPT`,
   }
   // NOME DE CLIENTE SO EXISTE SE TIVER CPF (24/10/2026)
   //
@@ -459,6 +470,14 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   for (let tentativa = 2; tentativa <= 3 && patch.status === "rejeitada"
        && /duplicidade|539/i.test(String(patch.motivo_rejeicao ?? "")); tentativa++) {
     refUsada = `${ref}-${tentativa}`
+    patch = await enviar(refUsada)
+  }
+  // Se a SEFAZ/emissor recusar por causa do valor de tributos (ex.: 685, total
+  // diferente da soma dos itens), reenvia sem o campo item a item: a frase em
+  // informacoes_adicionais continua cobrindo a exigência e a venda não trava.
+  if (patch.status === "rejeitada" && /tribut|685|vTotTrib/i.test(String(patch.motivo_rejeicao ?? ""))) {
+    for (const it of items) delete (it as Record<string, unknown>).valor_total_tributos
+    refUsada = `${refUsada}-t`
     patch = await enviar(refUsada)
   }
   // A consulta e o cancelamento acham a nota pela referencia: tem que ser a que valeu.
