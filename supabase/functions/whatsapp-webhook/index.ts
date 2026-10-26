@@ -658,6 +658,16 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
       rua = sepRua.limpo
     }
   }
+  // E pode estar DEPOIS do bairro, numa vírgula só dele: "Rua X 450, Barro
+  // Vermelho, apto 302". O apartamento é a última coisa que a pessoa escreve,
+  // e era a única que o robô não olhava.
+  if (!complemento) {
+    for (const p of partes.slice(1)) {
+      if (p === bairro) continue
+      const s = separarComplemento(p)
+      if (s.complemento && !s.limpo) { complemento = s.complemento; break }
+    }
+  }
 
   // O predio e o apartamento viajam juntos: "Ed. Esmeralda apto 901" e o
   // endereco inteiro pro entregador.
