@@ -3991,6 +3991,8 @@ serve(async (req) => {
     // loja aberta, porque não sabia nem que horas eram.
     let horarioLojaTexto = ""
     let agoraTexto = ""
+    // Precisa sair deste bloco: o histórico é limpo lá embaixo com base nisto.
+    let lojaFechadaAgora = false
 
     // Verifica horário de funcionamento — responde "fechado" e retorna sem chamar Claude.
     // Fonte: grade semanal nova (horarios_funcionamento). Sem grade, cai no horário único legado.
@@ -4053,6 +4055,7 @@ serve(async (req) => {
         horarioTexto = ""
       }
 
+      lojaFechadaAgora = lojaFechada
       if (lojaFechada && !forcarIa) {
         // Só avisa uma vez — se a última mensagem do bot já foi "fechado", ignora
         const { data: ultimaBotMsg } = await supabase
@@ -4165,6 +4168,30 @@ serve(async (req) => {
         console.log("[rajada] resposta anterior chegou depois desta mensagem — histórico reordenado")
       }
     }
+    // ── O "ESTAMOS FECHADOS" DE ONTEM ENVENENA O ATENDIMENTO DE HOJE ─────────
+    //
+    // Agv, 26/10 às 14:36, com a loja ABERTA até as 15:00: o cliente disse
+    // "boa tarde" e o robô respondeu "a gente está fechado agora, voltamos
+    // segunda" — numa segunda-feira. Ele copiou o aviso de sábado, que estava
+    // ali no histórico. Depois, achando a loja fechada, passou a chamar
+    // atendente pra tudo: três vezes seguidas pra "quanto está a quentinha?",
+    // uma pergunta que ele responde de olhos fechados.
+    //
+    // O prompt já mandava ignorar ("aquilo era de antes") e não bastou. Pedir
+    // pro modelo não olhar uma coisa que está na frente dele nunca é tão bom
+    // quanto tirar a coisa da frente dele.
+    if (!lojaFechadaAgora) {
+      const RE_AVISO_FECHADO = /estamos fechad|a gente est[áa] fechad|t[áa] fechad|no momento.{0,20}fechad|voltamos (segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)/i
+      let limpas = 0
+      for (const m of mensagensRaw) {
+        if (m?.role === "assistant" && RE_AVISO_FECHADO.test(String(m.content ?? ""))) {
+          m.content = "(aviso de loja fechada de outro dia — a loja está ABERTA agora)"
+          limpas++
+        }
+      }
+      if (limpas) console.log(`[horario] ${limpas} aviso(s) de "fechado" tirados do histórico — a loja está aberta`)
+    }
+
     // Mescla mensagens consecutivas do mesmo role (evita 400 da API do Claude)
     const mensagens = mensagensRaw.reduce((acc: any[], m: any) => {
       const last = acc[acc.length - 1]
@@ -5381,12 +5408,28 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           }
 
         } else if (acao.tipo === "chamar_atendente") {
-          // O sino do gestor (mig 0228), o mesmo do robô do link. Diferente do
-          // pausar_bot: aqui a pausa acaba quando alguém atende, e a loja pode
-          // devolver a conversa pro robô continuar de onde parou.
-          await abrirChamado(supabase, empresaId, phone, String(acao.motivo ?? text).slice(0, 300))
-          resposta = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
-          console.log("[chamado] a IA pediu ajuda:", acao.motivo ?? "")
+          // PERGUNTA DE PREÇO NÃO É SOCORRO (26/10/2026).
+          //
+          // "Quanto está a quentinha?" virou chamado TRÊS vezes seguidas na
+          // Agv. A loja atendia, o cliente perguntava de novo, e o robô
+          // chamava de novo — um laço, com o preço na tela dele o tempo todo.
+          // É a pergunta mais fácil que existe nesta casa.
+          const soPreco = /^(quanto|qual)\b[^?]{0,60}(custa|valor|pre[çc]o|est[áa]|sai|ta|t[áa])\b|^(quanto|qual o pre[çc]o|qual valor)/i.test(text.trim())
+            && !/\b(entrega|taxa|frete|demora|atraso|cancel|reclam|errad|falt)\b/i.test(text)
+          if (soPreco && produtos.length) {
+            console.log(`[chamado] recusado: "${text.slice(0, 40)}" é pergunta de preço, o robô responde`)
+            resposta = `Olha os nossos preços: 😊\n\n` +
+              produtos.slice(0, 8).map((p: any) =>
+                `• *${p.nome}* — R$ ${Number(p.preco_venda).toFixed(2).replace(".", ",")}`).join("\n") +
+              `\n\nQuer que eu anote algum? 🍽️`
+          } else {
+            // O sino do gestor (mig 0228), o mesmo do robô do link. Diferente da
+            // pausar_bot: aqui a pausa acaba quando alguém atende, e a loja pode
+            // devolver a conversa pro robô continuar de onde parou.
+            await abrirChamado(supabase, empresaId, phone, String(acao.motivo ?? text).slice(0, 300))
+            resposta = "Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!"
+            console.log("[chamado] a IA pediu ajuda:", acao.motivo ?? "")
+          }
 
         } else if (acao.tipo === "escalar_humano" && adminPhone) {
           const resumoConversa = mensagens.slice(-10).map((m: any) =>
