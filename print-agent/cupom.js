@@ -425,6 +425,12 @@ function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
   parts.push(kv('Qtd. total de itens', String(lista.length)))
   parts.push(BOLD(1), SIZE(0x01), kv('VALOR TOTAL', money(n.valor_total)), SIZE(0), BOLD(0))
   if (n.forma_pagamento) parts.push(kv('Forma de pagamento', String(n.forma_pagamento)))
+  // Lei 12.741/2012: o consumidor tem que ver quanto de imposto vai no que pagou.
+  if (n.tributos_valor != null) {
+    parts.push(linha('Tributos totais incidentes (Lei 12.741/12):'))
+    parts.push(kv('Valor aproximado', money(n.tributos_valor)))
+    if (n.tributos_fonte) parts.push(linha('Fonte: ' + n.tributos_fonte))
+  }
 
   parts.push(divisor(), ALIGN(1))
   parts.push(linha('Consulte pela Chave de Acesso em'))

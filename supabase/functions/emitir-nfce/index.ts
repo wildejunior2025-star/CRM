@@ -548,6 +548,9 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   // A consulta e o cancelamento acham a nota pela referencia: tem que ser a que valeu.
   patch.ref = refUsada
 
+  // O cupom impresso pelo app da impressora lê daqui (Lei 12.741).
+  patch.tributos_valor = tribTotal
+  patch.tributos_fonte = ["IBPT", ...fontesIbpt].join(" ")
   if (notaId) await sb.from("nfce_notas").update(patch).eq("id", notaId)
   const { data: nota } = await sb.from("nfce_notas").select("*").eq("id", notaId).maybeSingle()
 
