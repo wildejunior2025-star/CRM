@@ -5176,6 +5176,9 @@ const relogioDoPedido = (p) => {
 
 function pedidoAtrasado(pedido) {
   if (!['confirmado', 'em_preparo', 'pronto'].includes(pedido.status)) return false
+  // Venda de balcao e entregue na hora, na frente do cliente: ninguem clica
+  // "Pronto", e o cartao ficava vermelho "em atraso ha 1h" sem atraso nenhum.
+  if (pedido.origem === 'balcao') return false
   if (pedido.pronto_previsto_at) return Date.now() > new Date(pedido.pronto_previsto_at).getTime()
   const m = minutosDesde(relogioDoPedido(pedido))
   return m != null && m > ATRASO_PADRAO_MIN
@@ -7587,6 +7590,11 @@ export default function PainelPedidos() {
   }
 
   async function autoImprimirPedido(pedido) {
+    // Pedido ainda nao aceito nao vira papel (26/10/2026). Mesma regra do
+    // app FWC: se a loja pode recusar, a cozinha nao pode ter comecado.
+    // Quem usa aceite automatico confirma em um segundo e cai aqui de novo
+    // ja como 'confirmado'. Balcao nasce confirmado e nem passa por isto.
+    if (pedido?.status === 'aguardando') return
     try {
       const mod = await import('../utils/imprimirBluetooth')
       if (mod.estaConectada() || await mod.reconectarSilencioso()) {
