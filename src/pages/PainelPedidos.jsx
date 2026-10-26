@@ -1618,6 +1618,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
   const [buscandoCepVenda, setBuscandoCepVenda] = useState(false)
   const [rua, setRua]           = useState(draft?.rua ?? prefill?.rua ?? (pedidoEdicao && pedidoEdicao.endereco_rua !== 'Retirada na loja' ? (pedidoEdicao.endereco_rua ?? '') : ''))
   const [numero, setNumero]     = useState(draft?.numero ?? prefill?.numero ?? pedidoEdicao?.endereco_numero ?? '')
+  const [complemento, setComplemento] = useState(draft?.complemento ?? prefill?.complemento ?? pedidoEdicao?.endereco_complemento ?? '')
   const [bairro, setBairro]     = useState(draft?.bairro ?? prefill?.bairro ?? pedidoEdicao?.endereco_bairro ?? '')
   const [cidade, setCidade]     = useState(draft?.cidade ?? prefill?.cidade ?? (pedidoEdicao?.endereco_cidade && pedidoEdicao.endereco_cidade !== 'Retirada' ? pedidoEdicao.endereco_cidade : ''))
   const [taxa, setTaxa]         = useState(draft?.taxa ?? (pedidoEdicao?.taxa_entrega ? String(pedidoEdicao.taxa_entrega) : ''))
@@ -1766,7 +1767,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
     setNome(c.nome || '')
     setTelefone(c.telefone || '')
     if (c.endereco || c.bairro || c.cidade) {
-      setRua(c.endereco || ''); setNumero(c.numero || '')
+      setRua(c.endereco || ''); setNumero(c.numero || ''); setComplemento(c.complemento || '')
       setBairro(c.bairro || ''); setCidade(c.cidade || '')
       if (c.cep) setCep(c.cep)
     }
@@ -1822,9 +1823,9 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
     if (editando || !draftKey) return
     const temConteudo = Object.keys(cart).length > 0 || nome.trim() || telefone.trim() || obs.trim()
     if (!temConteudo) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } return }
-    const d = { cart, nome, telefone, tipo, cep, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId }
+    const d = { cart, nome, telefone, tipo, cep, rua, numero, complemento, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId }
     try { localStorage.setItem(draftKey, JSON.stringify(d)) } catch { /* ignore */ }
-  }, [editando, draftKey, cart, nome, telefone, tipo, cep, rua, numero, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId])
+  }, [editando, draftKey, cart, nome, telefone, tipo, cep, rua, numero, complemento, bairro, cidade, taxa, pagamento, troco, obs, clienteSelId])
 
   // Limpa o rascunho e fecha (usado ao concluir a venda ou cancelar de propósito)
   function limparDraft() { if (draftKey) { try { localStorage.removeItem(draftKey) } catch { /* ignore */ } } }
@@ -2368,7 +2369,7 @@ ${url}
         const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
           p_empresa_id: empresa.id, p_nome: nome.trim() || 'Cliente', p_telefone: telefone.trim(),
           p_email: '', p_cep: cep.trim(), p_endereco: rua.trim(), p_numero: numero.trim(),
-          p_complemento: '', p_bairro: bairro.trim(), p_cidade: cidade.trim(), p_estado: '',
+          p_complemento: complemento.trim(), p_bairro: bairro.trim(), p_cidade: cidade.trim(), p_estado: '',
         })
         clienteId = cid ?? null
       } catch { /* não bloqueia a venda */ }
@@ -2413,6 +2414,7 @@ ${url}
     if (tipo === 'entrega') {
       payload.endereco_rua = rua.trim()
       payload.endereco_numero = numero.trim()
+      payload.endereco_complemento = complemento.trim() || null
       payload.endereco_bairro = bairro.trim()
       payload.endereco_cidade = cidade.trim()
       payload.endereco_cep = cep.trim() || null
@@ -2428,7 +2430,7 @@ ${url}
       const upd = { ...payload }
       delete upd.empresa_id; delete upd.origem; delete upd.status
       if (tipo !== 'entrega') {
-        upd.endereco_rua = 'Retirada na loja'; upd.endereco_numero = null
+        upd.endereco_rua = 'Retirada na loja'; upd.endereco_numero = null; upd.endereco_complemento = null
         upd.endereco_bairro = null; upd.endereco_cidade = 'Retirada'
       }
       ;({ error } = await supabase.from('pedidos_delivery').update(upd).eq('id', pedidoEdicao.id))
@@ -2539,6 +2541,7 @@ ${url}
         const e = d.endereco || {}
         if (e.rua) setRua(e.rua)
         if (e.numero) setNumero(String(e.numero))
+        if (e.complemento) setComplemento(String(e.complemento))
         if (e.bairro) setBairro(e.bairro)
         if (e.cidade) setCidade(e.cidade)
         if (e.cep) setCep(String(e.cep))
@@ -2981,6 +2984,8 @@ ${url}
               </div>
               <input value={numero} onChange={e => setNumero(e.target.value)} placeholder="Nº" style={{ ...inputSt, maxWidth: 90 }} />
             </div>
+            <input value={complemento} onChange={e => setComplemento(e.target.value)}
+              placeholder="Complemento / apartamento (ex.: Apto 302, Bloco B)" style={inputSt} />
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={bairro} onChange={e => setBairro(e.target.value)} placeholder="Bairro" style={inputSt} />
               <input value={cidade} onChange={e => setCidade(e.target.value)} placeholder="Cidade" style={inputSt} />
@@ -6625,6 +6630,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
   const [cep, setCep] = useState('')
   const [rua, setRua] = useState('')
   const [numero, setNumero] = useState('')
+  const [complemento, setComplemento] = useState('')
   const [bairro, setBairro] = useState('')
   const [cidade, setCidade] = useState('')
   const [taxa, setTaxa] = useState('')
@@ -6683,7 +6689,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
     if (!empresa?.id || chave.length < 8) return
     ;(async () => {
       const { data } = await supabase.from('clientes')
-        .select('id, telefone, nome, endereco, numero, bairro, cidade, cep, endereco_lat, endereco_lng, endereco_pin_manual, endereco_pin_ref')
+        .select('id, telefone, nome, endereco, numero, complemento, bairro, cidade, cep, endereco_lat, endereco_lng, endereco_pin_manual, endereco_pin_ref')
         .eq('empresa_id', empresa.id).ilike('telefone', `%${chave}`)
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!vivo || !data) return
@@ -6699,6 +6705,7 @@ function FecharPedidoNoChat({ empresa, telefone, nomeThread, itens, onFinalizar,
       if (ruaDaConversa.current) return
       if (data.endereco) setRua(data.endereco)
       if (data.numero) setNumero(data.numero)
+      if (data.complemento) setComplemento(c => c || data.complemento)
       if (data.bairro) setBairro(data.bairro)
       if (data.cidade) setCidade(data.cidade)
       if (data.cep) setCep(data.cep)
@@ -6912,6 +6919,8 @@ ${url}
             <input value={numero} onChange={e => setNumero(e.target.value)}
               placeholder="Nº" style={{ ...inp, width: 80, flexShrink: 0 }} />
           </div>
+          <input value={complemento} onChange={e => setComplemento(e.target.value)}
+            placeholder="Complemento / apartamento (ex.: Apto 302)" style={inp} />
           {/* Digitar o nome da rua e escolher da lista: vem com bairro, cidade
               e CEP juntos, e sem risco de escrever errado o que veio de ouvido. */}
           <div style={{ position: 'relative' }}>
@@ -7066,7 +7075,7 @@ ${url}
 
       <button type="button" disabled={salvando || faltaEndereco || !itens.length || divisaoIncompleta}
         onClick={() => onFinalizar({
-          tipo, nome, cep, rua, numero, bairro, cidade, taxa: taxaNum,
+          tipo, nome, cep, rua, numero, complemento, bairro, cidade, taxa: taxaNum,
           pagamento, partes, troco: temDinheiro ? troco : '', obs, subtotal, acrescimo, total, cadastro, pinToken,
           // O pino da conversa vem na frente: é o ponto que o cliente apontou
           // agora, e vale mesmo que quem atende tenha corrigido a rua depois.
@@ -8543,7 +8552,7 @@ export default function PainelPedidos() {
         const { data: cid } = await supabase.rpc('upsert_cliente_loja', {
           p_empresa_id: empresa.id, p_nome: nomeCliente, p_telefone: telParaCadastro,
           p_email: '', p_cep: d.cep?.trim() ?? '', p_endereco: d.rua?.trim() ?? '',
-          p_numero: d.numero?.trim() ?? '', p_complemento: '',
+          p_numero: d.numero?.trim() ?? '', p_complemento: d.complemento?.trim() ?? '',
           p_bairro: d.bairro?.trim() ?? '', p_cidade: d.cidade?.trim() ?? '', p_estado: '',
         })
         if (cid) clienteId = cid
@@ -8605,6 +8614,7 @@ export default function PainelPedidos() {
     if (d.tipo === 'entrega') {
       payload.endereco_rua = d.rua?.trim() || null
       payload.endereco_numero = d.numero?.trim() || null
+      payload.endereco_complemento = d.complemento?.trim() || null
       payload.endereco_bairro = d.bairro?.trim() || null
       payload.endereco_cidade = d.cidade?.trim() || null
       payload.endereco_cep = d.cep?.trim() || null
