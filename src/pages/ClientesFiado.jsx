@@ -78,6 +78,7 @@ function canalDaVenda(obs) {
   if (!o) return null
   if (o.startsWith('balcao')) return 'Balcão'
   if (o.startsWith('delivery')) return 'Delivery'
+  if (o.startsWith('mesa')) return 'Mesa'
   const mesa = /mesa\s*(\S+)/.exec(o)
   if (o.startsWith('presencial') && mesa) return `Mesa ${mesa[1]}`
   const com = /comanda\s*(\S+)/.exec(o)
