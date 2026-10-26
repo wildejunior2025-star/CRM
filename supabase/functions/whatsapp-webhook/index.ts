@@ -2354,6 +2354,110 @@ function trocoDaConversa(mensagens: any[]): number | null {
   return null
 }
 
+/**
+ * TROCAR A FORMA DE PAGAMENTO DE UM PEDIDO JÁ FEITO (26/10/2026).
+ *
+ * O Allan fechou o #6 em dinheiro, a loja confirmou, e um minuto depois ele
+ * escreveu "só corrigindo, o pagamento será em cartão". O robô respondeu que
+ * estava feito e NÃO MUDOU NADA — o entregador ia na porta sem a maquininha.
+ *
+ * No gestor isso é um botão ("Como o cliente pagou?"), e por baixo é um update
+ * só. Então o robô passa a fazer o mesmo — com duas diferenças de peso:
+ *
+ *  1. A LOJA É AVISADA NA HORA, no WhatsApp do dono. Trocar o campo no banco
+ *     não serve de nada se quem vai à porta não ficar sabendo. Se o pedido já
+ *     saiu pra entrega, o aviso diz isso com todas as letras: aí alguém tem que
+ *     ligar pro motoboy.
+ *  2. Só formas que a loja aceita, e nunca `fiado` (fiado é dívida: quem abre é
+ *     a loja, olhando o cliente).
+ */
+async function handleTrocarPagamento(
+  supabase: ReturnType<typeof createClient>,
+  empresaId: string,
+  pedido: { numero_pedido: number; status: string; total: number },
+  formaPedida: string,
+  pagamentos: Pagamentos,
+  instanceName: string,
+  adminPhone: string,
+  empresaNome: string,
+  clienteNome: string | null,
+  mensagensHist: any[] = [],
+  trocoDaAcao: unknown = null,
+): Promise<string> {
+  const forma = normalizarFormaPgto(formaPedida, pagamentos)
+  if (forma === "fiado") {
+    return "Fiado quem libera é a loja, olhando o cadastro — não posso mudar pra fiado por aqui. Já chamo alguém pra te atender! 🙋"
+  }
+  // ── UMA PERGUNTA ANTES DE TROCAR ─────────────────────────────────────────
+  //
+  // "Vai ser no cartão" não diz tudo: a loja cobra crédito e débito separado, e
+  // é o que vai no caixa. "Vai ser dinheiro" também não: sem saber o troco, o
+  // entregador sai sem a nota certa. O atendente de balcão pergunta — aqui
+  // também, ANTES de mexer no pedido.
+  const ultimaBot = String([...(mensagensHist ?? [])].reverse()
+    .find((m: any) => m?.role === "assistant")?.content ?? "")
+  if (forma === "cartao" && pagamentos.credito && pagamentos.debito) {
+    return `Claro! No cartão: *crédito* ou *débito*? 💳`
+  }
+  let trocoNovo: number | null = null
+  if (forma === "dinheiro") {
+    const jaPerguntou = /troco/i.test(ultimaBot)
+    if (!jaPerguntou) {
+      return `Fechado, muda pra *dinheiro*! 💵\n\nVai precisar de troco? Se sim, pra quanto?\n_(se não precisar, é só dizer "não")_`
+    }
+    const bruto = trocoDaAcao != null && trocoDaAcao !== ""
+      ? valorEmReais(String(trocoDaAcao))
+      : trocoDaConversa(mensagensHist)
+    if (bruto != null && bruto > Number(pedido.total)) trocoNovo = bruto
+  }
+  const { data: antes } = await supabase.from("pedidos_delivery")
+    .select("id, forma_pagamento, status")
+    .eq("empresa_id", empresaId).eq("numero_pedido", pedido.numero_pedido)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle()
+  if (!antes?.id) return `Não achei o pedido #${pedido.numero_pedido} pra mudar. Vou chamar a loja. 🙋`
+  // Entregue ou cancelado não se mexe: o dinheiro já trocou de mão.
+  if (["entregue", "cancelado"].includes(String(antes.status))) {
+    return `O pedido *#${pedido.numero_pedido}* já foi finalizado — não dá mais pra mudar a forma de pagamento por aqui. Vou chamar a loja pra te ajudar. 🙋`
+  }
+  const { error } = await supabase.from("pedidos_delivery").update({
+    forma_pagamento: forma,
+    // Pagamento dividido deixa de existir quando se escolhe uma forma única —
+    // senão o caixa somaria as partes antigas E a nova (mesma regra do gestor).
+    pagamentos: null,
+    troco_para: trocoNovo,
+  }).eq("id", antes.id)
+  if (error) {
+    console.error("[TrocaPgto] update:", error.message)
+    return `Não consegui mudar agora. Vou chamar alguém da loja pra ajustar o *#${pedido.numero_pedido}*. 🙋`
+  }
+
+  const jaSaiu = String(antes.status) === "saiu_entrega"
+  if (adminPhone) {
+    const aviso = `💳 *MUDOU A FORMA DE PAGAMENTO — ${empresaNome}*\n\n` +
+      `Pedido *#${pedido.numero_pedido}*${clienteNome ? ` · ${clienteNome}` : ""} — R$ ${Number(pedido.total).toFixed(2).replace(".", ",")}\n` +
+      `De *${rotuloPgto(String(antes.forma_pagamento))}* para *${rotuloPgto(forma)}*.\n` +
+      (trocoNovo ? `Troco para *R$ ${trocoNovo.toFixed(2).replace(".", ",")}*.\n` : "") +
+      `_O cliente pediu pelo WhatsApp; eu já mudei no sistema._\n\n` +
+      (jaSaiu
+        ? `🛵 *ATENÇÃO: o pedido JÁ SAIU PRA ENTREGA.* Avise o entregador — ele pode estar indo sem a maquininha.`
+        : `${aceitaCartao(pagamentos) && /cartao|credito|debito/.test(forma) ? "Não esqueça a *maquininha* na entrega." : "Confira antes de despachar."}`)
+    fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      body: JSON.stringify({ number: `55${adminPhone}`, text: aviso }),
+    }).catch(e => console.error("[TrocaPgto] aviso à loja:", e))
+  } else {
+    console.warn(`[TrocaPgto] loja sem admin_phone — ninguém foi avisado do #${pedido.numero_pedido}`)
+  }
+  console.log(`[TrocaPgto] #${pedido.numero_pedido}: ${antes.forma_pagamento} → ${forma}`)
+
+  return `✅ Mudei pra *${rotuloPgto(forma)}* no pedido *#${pedido.numero_pedido}*` +
+    (/cartao|credito|debito/.test(forma) ? ` — o entregador leva a maquininha.` : `.`) +
+    (trocoNovo ? ` Troco para *R$ ${trocoNovo.toFixed(2).replace(".", ",")}* (volta R$ ${(trocoNovo - Number(pedido.total)).toFixed(2).replace(".", ",")}).` : "") +
+    `\n\nJá avisei a loja. 😊` +
+    (jaSaiu ? `\n\n_Como o pedido já saiu, me diz se o entregador chegar sem a maquininha que eu chamo a loja na hora._` : "")
+}
+
 // ── handleFecharPedido ───────────────────────────────────────────────────────
 async function handleFecharPedido(
   supabase: ReturnType<typeof createClient>,
@@ -4297,6 +4401,24 @@ serve(async (req) => {
     // taxaEntregaCalc cai nesse zero e o robô prometia FRETE GRÁTIS pra quem só
     // perguntou "quanto é a entrega?". Com a faixa em mãos ele responde a
     // realidade ("de R$ 5 a R$ 15, depende de onde você está") e pede o endereço.
+    // ── O PEDIDO QUE JÁ ESTÁ NA MÃO DA LOJA ─────────────────────────────────
+    //
+    // O Allan fechou o #6, a loja confirmou, e um minuto depois ele escreveu
+    // "só corrigindo, o pagamento será em cartão". O robô respondeu "seu
+    // pedido está confirmado com pagamento em cartão, o entregador leva a
+    // maquininha" — e NÃO MUDOU NADA: o pedido seguiu como dinheiro. O
+    // entregador ia bater na porta sem máquina.
+    //
+    // O robô não tinha como saber que existia um pedido fechado: nada disso
+    // chegava no prompt. Agora chega — com o aviso de que mudar pedido fechado
+    // não é com ele.
+    let pedidoAberto: { numero_pedido: number; status: string; total: number } | null = null
+    try {
+      const { data: pd } = await supabase.rpc("pedido_do_cliente", { p_empresa: empresaId, p_phone: phone })
+      const linha = Array.isArray(pd) ? pd[0] : pd
+      if (linha && !["entregue", "cancelado"].includes(String(linha.status))) pedidoAberto = linha
+    } catch (e) { console.error("[pedido aberto]", e) }
+
     const taxasCadastradas: number[] = [
       ...(Array.isArray(empresa.taxas_entrega_km) ? empresa.taxas_entrega_km : [])
         .map((f: any) => Number(f?.taxa)),
@@ -4427,6 +4549,20 @@ CATÁLOGO: ${catalogoUrl}
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}⟦/VAR⟧
 FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
+${pedidoAberto ? `
+⚠️ ESTE CLIENTE JÁ TEM UM PEDIDO NA MÃO DA LOJA: *#${pedidoAberto.numero_pedido}*, R$ ${Number(pedidoAberto.total).toFixed(2)}, situação atual: *${pedidoAberto.status}*.
+💳 A FORMA DE PAGAMENTO DESSE PEDIDO VOCÊ PODE TROCAR — e SÓ ela. Mas primeiro pergunte o que falta, numa frase curta, e só emita a ação com a resposta:
+• Ele disse "cartão"${pagamentos.credito && pagamentos.debito ? ` → pergunte "crédito ou débito?" e espere a resposta` : ""}.
+• Ele disse "dinheiro" → pergunte "vai precisar de troco? pra quanto?" e espere a resposta (se disser que não precisa, mande sem troco).
+Com a resposta na mão:
+ACAO: {"tipo": "trocar_pagamento", "forma": "${[pagamentos.dinheiro && "dinheiro", pagamentos.pixOnline && "pix", pagamentos.pixEntrega && "pix_entrega", pagamentos.credito && "credito", pagamentos.debito && "debito"].filter(Boolean).join('" | "')}"}
+[dinheiro com troco: acrescente "troco_para": 50]
+Não escreva o resultado você mesmo — o sistema confirma e avisa a loja. ⛔ NUNCA diga "já mudei" sem emitir a ação.
+
+⛔ O RESTO DO PEDIDO VOCÊ NÃO MUDA: endereço, item, quantidade ou cancelar — a comida já pode estar na chapa e quem decide é a loja. Se ele pedir isso, NUNCA responda que está feito; diga que vai chamar alguém da loja e emita na MESMA mensagem:
+ACAO: {"tipo": "chamar_atendente", "motivo": "quer mudar o pedido #${pedidoAberto.numero_pedido}"}
+Pedido NOVO é outra coisa: se ele quiser pedir mais alguma coisa, monte normalmente.
+` : ""}
 ${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz o PIX pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, e manda o COMPROVANTE aqui na conversa pra concluir o pedido — igual à Loja Online. NÃO usa maquininha e não tem QR. NUNCA diga pra pagar só quando o pedido chegar. O sistema manda a chave junto da confirmação do pedido; você nunca confirma que o pagamento caiu (quem confere é a loja).${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
 
 ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${totalProdutos} produtos e eles NÃO cabem aqui. A lista abaixo é só o que casou com o que o cliente falou até agora — NÃO é o catálogo inteiro.
@@ -5071,6 +5207,13 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
             foraDoRaioCliente,
           )
 
+        } else if (acao.tipo === "trocar_pagamento" && acao.forma && pedidoAberto) {
+          resposta = await handleTrocarPagamento(
+            supabase, empresaId, pedidoAberto, String(acao.forma), pagamentos,
+            instanceName, adminPhone, empresaNome, clienteNome ?? null,
+            mensagens, acao.troco_para,
+          )
+
         } else if (acao.tipo === "pedir_cep") {
           // sem ação — Claude já pediu o CEP na resposta
 
@@ -5317,6 +5460,83 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     if (prometeuVerificar && !chamouAtendente && !ehResumoOuFechamento) {
       await abrirChamado(supabase, empresaId, phone, text)
       console.log("[chamado] SafeNet: o robô prometeu retorno, chamado aberto")
+    }
+
+    // ── SafeNet: MUDANÇA EM PEDIDO JÁ FECHADO ────────────────────────────────
+    //
+    // O Allan escreveu "só corrigindo, o pagamento será em cartão" um minuto
+    // depois de a loja confirmar o #6. O robô respondeu "seu pedido está
+    // confirmado com pagamento em cartão, o entregador leva a maquininha" — e
+    // não mudou nada, porque ele não TEM como mudar: não existe ação pra isso.
+    // O entregador ia na porta sem máquina.
+    //
+    // O prompt já avisa. Esta rede é pro dia em que o modelo prometer mesmo
+    // assim: a resposta é trocada e a loja é chamada. Uma promessa dessas
+    // custa a venda e a cara da loja.
+    const trocouPagamento = acaoMatch !== null && (() => {
+      try { return JSON.parse(acaoMatch![1])?.tipo === "trocar_pagamento" } catch { return false }
+    })()
+    // Primeiro: ele DISSE que trocou o pagamento e não emitiu a ação? Então
+    // faz de verdade, do mesmo jeito que a rede do fechar_pedido faz. Olhar a
+    // frase do CLIENTE não bastava: o pedido veio na mensagem anterior e a
+    // resposta dele foi só "debito" — uma palavra, sem verbo de mudança.
+    // A PERGUNTA QUE NÓS FIZEMOS É QUEM FECHA A TROCA.
+    //
+    // Quando a troca precisa de um detalhe (crédito ou débito? troco pra
+    // quanto?), quem pergunta é o nosso texto fixo — e aí a resposta do cliente
+    // tem que cair AQUI, não na prosa do modelo. Tentei antes caçar o "alterei"
+    // na resposta dele e não dá: ele escreve "Alterado!", "agora é", "pronto",
+    // de um jeito diferente a cada vez, e quando a peneira falha o cliente ouve
+    // que mudou e o pedido continua como estava.
+    const ultimaDoRobo = String([...mensagens].reverse()
+      .find((m: any) => m?.role === "assistant")?.content ?? "")
+    if (pedidoAberto && !trocouPagamento && !/^\s*(n[ãa]o|nao|deixa|esquece)\b/i.test(text)) {
+      const esperandoCartao = /No cart[ãa]o: \*cr[ée]dito\* ou \*d[ée]bito\*\?/i.test(ultimaDoRobo)
+      const esperandoTroco = /muda pra \*dinheiro\*/i.test(ultimaDoRobo)
+      const escolha = esperandoCartao
+        ? (/d[ée]bito/i.test(text) ? "debito" : /cr[ée]dito/i.test(text) ? "credito" : "")
+        : esperandoTroco ? "dinheiro" : ""
+      if (escolha) {
+        console.log(`[TrocaPgto] resposta à pergunta da troca: "${text.slice(0, 30)}" → ${escolha}`)
+        resposta = await handleTrocarPagamento(
+          supabase, empresaId, pedidoAberto, escolha, pagamentos,
+          instanceName, adminPhone, empresaNome, clienteNome ?? null, mensagens, null,
+        )
+      }
+    }
+    if (pedidoAberto && !trocouPagamento && !/Mudei pra \*/.test(resposta)) {
+      const afirmaTroca = /(pagamento|forma de pagamento)[^.!?\n]{0,40}(alterad|trocad|mudad|atualizad|foi para|agora [ée])/i.test(resposta)
+        || /\balterado\b[^.!?\n]{0,60}(pagamento|cart[ãa]o|pix|dinheiro|troco)/i.test(resposta)
+        || /(alterei|troquei|mudei|atualizei)[^.!?\n]{0,30}(pagamento|cart[ãa]o|pix|dinheiro)/i.test(resposta)
+      const dito = /d[ée]bito/i.test(resposta) ? "debito"
+        : /cr[ée]dito/i.test(resposta) ? "credito"
+        : /cart[ãa]o|maquinin/i.test(resposta) ? "cartao"
+        : /pix/i.test(resposta) ? "pix"
+        : /dinheiro|esp[ée]cie/i.test(resposta) ? "dinheiro"
+        : ""
+      if (afirmaTroca && dito) {
+        console.log(`[TrocaPgto] SafeNet: o robô disse que trocou pra "${dito}" sem emitir a ação — trocando de verdade`)
+        resposta = await handleTrocarPagamento(
+          supabase, empresaId, pedidoAberto, dito, pagamentos,
+          instanceName, adminPhone, empresaNome, clienteNome ?? null, mensagens, null,
+        )
+      }
+    }
+    if (pedidoAberto && !chamouAtendente && !trocouPagamento) {
+      const pedeMudanca = /\b(corrigind|corrigir|corre[çc][aã]o|na verdade|mudar?|muda|troca(r)?|alterar?|cancelar?|retirar?|tirar?|acrescent|adicionar?)\b/i.test(text)
+        && /\b(endere[çc]o|entrega|item|quantidade|cancelar|tirar|acrescentar)\b/i.test(text)
+      // O robô falou como quem já resolveu? Pergunta não conta: quando ele
+      // responde "crédito ou débito?" ele está trabalhando certo, e trocar
+      // isso por um chamado seria atrapalhar.
+      const estaPerguntando = /\?\s*$/.test(resposta.trim()) || /\?/.test(resposta.split("\n").slice(-3).join(" "))
+      const prometeuFeito = !estaPerguntando
+        && /\b(est[aá] confirmad|j[aá] (ajustei|mudei|troquei|alterei|atualizei|corrigi)|pronto|feito|anotad|atualizad|alterad|registrad)\b/i.test(resposta)
+      if (pedeMudanca && prometeuFeito) {
+        console.log(`[chamado] SafeNet: prometeu mudar o pedido #${pedidoAberto.numero_pedido} — chamado aberto`)
+        await abrirChamado(supabase, empresaId, phone, text)
+        resposta = `Entendi! 🙋 Só que o pedido *#${pedidoAberto.numero_pedido}* já está com a loja (${pedidoAberto.status.replace(/_/g, " ")}), e mudança nele quem faz é alguém de lá — eu não mexo em pedido que já foi pra cozinha.\n\n` +
+          `Já chamei a loja pra te atender aqui mesmo. É rapidinho! 😊`
+      }
     }
 
     // Safety net: o robô se perdeu e inventou. Foi na CDBom em 14/09/2026, com
