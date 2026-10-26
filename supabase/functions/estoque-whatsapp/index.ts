@@ -108,6 +108,43 @@ const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curren
 const qtdTxt = (n: number) => String(Math.round(n * 1000) / 1000).replace(".", ",")
 const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
 
+/**
+ * A frase é ASSUNTO NOVO, e não a resposta à pergunta que está pendente?
+ *
+ * Enquanto um rascunho espera a data, tudo que é escrito no grupo era lido
+ * como resposta — e quem lançasse outro gasto ouvia "ainda falta a data" até
+ * cancelar. Conservador de propósito: só sai da pergunta quando a mensagem tem
+ * cara de lançamento inteiro (verbo de dinheiro + um valor que não é dia do
+ * mês), porque "paguei hoje" e "a pagar dia 30" SÃO respostas.
+ */
+/**
+ * Cancela a pergunta que estava pendente e devolve o aviso do que foi deixado
+ * pra trás (string vazia quando não havia nada, ou quando o que havia não era
+ * uma despesa esperando resposta).
+ *
+ * Só cabe UMA pergunta por vez no grupo — com duas, ninguém sabe qual o
+ * "paguei hoje" está respondendo. Mas a que sai de cena não pode sair calada:
+ * ela é uma despesa de verdade, que ninguém vai lançar se for esquecida. Era o
+ * que acontecia: chegava papel novo (ou qualquer outro comando), o rascunho
+ * anterior virava "cancelada" no banco e nunca mais ninguém ouvia falar dele.
+ */
+async function cancelarPendentes(empresaId: string, jid: string): Promise<string> {
+  const { data: antes } = await sb.from("assistente_acoes").select("params")
+    .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+    .eq("tipo", "conta_criar").order("created_at", { ascending: false }).limit(1).maybeSingle()
+  const p = antes?.params as Record<string, unknown> | undefined
+  await sb.from("assistente_acoes").update({ status: "cancelada" })
+    .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  if (!p?.rascunho) return ""
+  return `\n\n⚠️ Deixei de lado a pergunta anterior (*${p.descricao}* — ${brl(Number(p.valor))}): ela *não foi lançada*. Manda a foto dela de novo quando puder.`
+}
+
+function pareceOutroAssunto(t: string): boolean {
+  if (!/\b(paguei|pagamos|recebi|recebemos|a pagar|a receber|comprei|gastei)\b/.test(t)) return false
+  const semDia = t.replace(/\bdia\s+\d{1,2}\b/g, " ")
+  return /\d/.test(semDia)
+}
+
 // Modo de teste (cabeçalho x-teste, só com a chave interna): as respostas voltam no HTTP em vez de ir pro WhatsApp.
 const capturaTeste = new AsyncLocalStorage<string[]>()
 
@@ -677,8 +714,7 @@ async function rascunhoDaNota(empresaId: string, jid: string, nota: NonNullable<
   const temFornecedor = !!String(nota.fornecedor ?? "").trim()
   const numero = nota.numero ? ` (NF ${nota.numero})` : ""
 
-  await sb.from("assistente_acoes").update({ status: "cancelada" })
-    .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const deixadaPraTras = await cancelarPendentes(empresaId, jid)
   const { error } = await sb.from("assistente_acoes").insert({
     empresa_id: empresaId, grupo_jid: jid, tipo: "conta_criar",
     params: {
@@ -707,14 +743,14 @@ async function rascunhoDaNota(empresaId: string, jid: string, nota: NonNullable<
   if (!temFornecedor) {
     return `${cabeca}\n\n` +
       `Não achei de *quem* é essa compra no papel.\n` +
-      `Me diz o nome do fornecedor (ex.: *Mar Vermelho*), ou *NÃO* pra cancelar.`
+      `Me diz o nome do fornecedor (ex.: *Mar Vermelho*), ou *NÃO* pra cancelar.` + deixadaPraTras
   }
   return `${cabeca}\n\n` +
     `Falta saber se já pagou. Me responde uma dessas:\n` +
     `• *paguei hoje*\n` +
     `• *paguei dia 20* (ou "ontem")\n` +
     `• *a pagar dia 30* — se for pra pagar depois\n\n` +
-    `Ou *NÃO* pra cancelar.`
+    `Ou *NÃO* pra cancelar.` + deixadaPraTras
 }
 
 // SIM OU NÃO SEM NADA ESPERANDO (23/10/2026)
@@ -1169,10 +1205,10 @@ async function propostaFixa(t: string, empresaId: string, jid: string): Promise<
   } else {
     return null
   }
-  await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const deixadaPraTras = await cancelarPendentes(empresaId, jid)
   const { error } = await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo, params, resumo: resumoTxt })
   if (error) { console.error("[estoque-wpp] proposta:", error.message); return { cobrar: false, texto: "Não consegui preparar a mudança agora. Tenta de novo em instantes." } }
-  return `${resumoTxt}\n\nResponda *SIM* para aplicar ou *NÃO* para cancelar.`
+  return `${resumoTxt}\n\nResponda *SIM* para aplicar ou *NÃO* para cancelar.${deixadaPraTras}`
 }
 
 // ── Contas a pagar e a receber pelo WhatsApp (frases fixas, sem IA) ─────────
@@ -1371,10 +1407,10 @@ async function comandoContas(t: string, empresaId: string, jid: string, modo: "a
     resumoTxt = `Lançar conta *${tipo === "pagar" ? "A PAGAR" : "A RECEBER"}*: *${cmd.descricao}*${cmd.pessoa ? ` (${cmd.pessoa})` : ""} — *${brl(cmd.valor)}*, vence ${ddmmBR(cmd.vencimento!)}${cmd.recorrencia ? ` e repete ${cmd.recorrencia === "mensal" ? "todo mês" : cmd.recorrencia}` : ""}${cmd.categoria ? ` · categoria ${cmd.categoria}` : ""}.`
   }
 
-  await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+  const deixadaPraTras = await cancelarPendentes(empresaId, jid)
   const { error } = await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo: tipoAcao, params, resumo: resumoTxt })
   if (error) { console.error("[estoque-wpp] conta:", error.message); return { cobrar: false, texto: "Não consegui preparar agora. Tenta de novo em instantes." } }
-  return { cobrar: true, texto: `${resumoTxt}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.` }
+  return { cobrar: true, texto: `${resumoTxt}\n\nResponda *SIM* para confirmar ou *NÃO* para cancelar.${deixadaPraTras}` }
 }
 const somaDiasBR = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
 
@@ -1497,20 +1533,45 @@ async function tratar(req: Request): Promise<Response> {
     // O que o dono confirma é sempre a coisa mais RECENTE que o robô mostrou.
     const acaoMaisNova = !!pendAcao && (!pend || pendAcao.created_at > pend.created_at)
 
+    // FOTO NOVA NÃO É RESPOSTA À PERGUNTA ANTERIOR (26/10/2026)
+    //
+    // Agv, 26/10: tinha um rascunho esperando a data de uma compra, e o dono
+    // mandou a FOTO de outra nota — um cupom fiscal que dizia tudo (fornecedor,
+    // total, PIX, pago). O robô leu a foto como se fosse a resposta da
+    // pergunta, não entendeu, repetiu "ainda falta a data" e JOGOU A FOTO FORA.
+    // A nota nova nunca foi lida.
+    //
+    // Papel é sempre assunto novo. A pergunta pendente continua viva e é
+    // lembrada no fim da resposta.
+    const tipoAgora: string = msg.messageType ?? ""
+    const docAgora = msg.message?.documentMessage ?? msg.message?.documentWithCaptionMessage?.message?.documentMessage
+    const ehPapelNovo = tipoAgora === "imageMessage" || (!!docAgora && String(docAgora.mimetype ?? "").includes("pdf"))
+    // Áudio que responde ("paguei hoje") só vira texto lá embaixo — aqui ele
+    // chegava vazio e caía no mesmo buraco da foto. Transcreve antes.
+    let faladoAntes: string | null = null
+
     // ── Resposta ao rascunho de despesa ("paguei hoje", "a pagar dia 30") ──
     // O rascunho guarda o que a frase já tinha (descrição e valor) e espera só
     // o que faltava. Completar aqui evita obrigar a pessoa a escrever a frase
     // inteira de novo, que é o que faz ela desistir e deixar de lançar.
-    if (pendAcao?.tipo === "conta_criar" && pendAcao?.params?.rascunho) {
+    if (pendAcao?.tipo === "conta_criar" && pendAcao?.params?.rascunho && !ehPapelNovo) {
+      // A resposta pode vir falada. Sem isto o áudio chegava aqui vazio e o
+      // robô repetia a pergunta pra quem tinha acabado de respondê-la.
+      let tResp = t, textoResp = texto
+      if (tipoAgora === "audioMessage") {
+        const midia = await baixarMidia(instance, msg)
+        faladoAntes = midia ? await transcrever(midia.base64, midia.mimetype) : null
+        if (faladoAntes) { tResp = norm(faladoAntes); textoResp = faladoAntes }
+      }
       // Primeiro degrau: o papel não trazia o fornecedor. A resposta é o nome
       // dele — não é data nem "paguei", então não pode cair no completar.
       if (pendAcao.params.falta_fornecedor) {
-        if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(t)) {
+        if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(tResp)) {
           await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
           await enviar(instance, jid, "Cancelado. Não registrei nada.")
           return ok()
         }
-        const nome = (texto || "").trim().slice(0, 120)
+        const nome = (textoResp || "").trim().slice(0, 120)
         if (nome.replace(/[^a-zA-ZÀ-ÿ]/g, "").length < 2) {
           await enviar(instance, jid, "Não entendi o nome. Escreve só o nome do fornecedor, ex.: *Mar Vermelho*. Ou *NÃO* pra cancelar.")
           return ok()
@@ -1527,27 +1588,38 @@ async function tratar(req: Request): Promise<Response> {
           `Ou *NÃO* pra cancelar.`)
         return ok()
       }
-      const r = completarRascunho(t, pendAcao.params, hojeBRT())
-      if (r.cancelar) {
-        await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
-        await enviar(instance, jid, "Cancelado. Não registrei nada.")
-        return ok()
-      }
-      if (r.params) {
-        await sb.from("assistente_acoes").update({ params: r.params }).eq("id", pendAcao.id)
-        try {
-          await enviar(instance, jid, await executarAcao(empresaId, { ...pendAcao, params: r.params }))
-        } catch (e: any) {
-          console.error("[estoque-wpp] rascunho:", e)
-          await enviar(instance, jid, "❌ Não consegui registrar agora. Nada foi alterado — tente de novo.")
+      // FRASE QUE JÁ É UM LANÇAMENTO INTEIRO NÃO É RESPOSTA (26/10/2026)
+      //
+      // "paguei 80 de gás" tem "paguei" dentro, então o completarRascunho
+      // mordia: dava baixa na compra de R$ 120,47 que estava esperando — com a
+      // data de hoje, que ninguém confirmou — e os R$ 80 do gás nunca entravam.
+      // Dois erros no financeiro com uma frase só, e os dois calados.
+      //
+      // A regra: pergunta pendente só come o que é RESPOSTA ("paguei hoje",
+      // "a pagar dia 30"). O resto segue o caminho normal lá embaixo.
+      if (!pareceOutroAssunto(tResp)) {
+        const r = completarRascunho(tResp, pendAcao.params, hojeBRT())
+        if (r.cancelar) {
+          await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
+          await enviar(instance, jid, "Cancelado. Não registrei nada.")
+          return ok()
         }
+        if (r.params) {
+          await sb.from("assistente_acoes").update({ params: r.params }).eq("id", pendAcao.id)
+          try {
+            await enviar(instance, jid, await executarAcao(empresaId, { ...pendAcao, params: r.params }))
+          } catch (e: any) {
+            console.error("[estoque-wpp] rascunho:", e)
+            await enviar(instance, jid, "❌ Não consegui registrar agora. Nada foi alterado — tente de novo.")
+          }
+          return ok()
+        }
+        // Não entendi a resposta: repete a pergunta em vez de registrar torto.
+        await enviar(instance, jid,
+          `Ainda falta a data de *${pendAcao.params.descricao}* (${brl(Number(pendAcao.params.valor))}).\n\n` +
+          `• *paguei hoje*\n• *paguei dia 20*\n• *a pagar dia 30*\n• ou *NÃO* pra cancelar`)
         return ok()
       }
-      // Não entendi a resposta: repete a pergunta em vez de registrar torto.
-      await enviar(instance, jid,
-        `Ainda falta a data de *${pendAcao.params.descricao}* (${brl(Number(pendAcao.params.valor))}).\n\n` +
-        `• *paguei hoje*\n• *paguei dia 20*\n• *a pagar dia 30*\n• ou *NÃO* pra cancelar`)
-      return ok()
     }
 
 
@@ -1884,7 +1956,22 @@ async function tratar(req: Request): Promise<Response> {
       }
       const cartao = await contaDaNota(empresaId, jid, n, origem)
       const avisoC = await cobrarUso(cartao)
-      await enviar(instance, jid, cartao + avisoC)
+      // A pergunta que ficou pendente de uma nota anterior não pode sumir de
+      // vista só porque chegou papel novo: sem este lembrete, a despesa antiga
+      // morre esperando uma resposta que ninguém lembra mais que deve.
+      // (Relê do banco: se esta nota virou rascunho, ela própria cancelou a
+      // anterior, e aí não há o que lembrar.)
+      let lembrete = ""
+      const { data: aindaPend } = await sb.from("assistente_acoes").select("params")
+        .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+        .eq("tipo", "conta_criar").gte("created_at", desde)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()
+      const pp = aindaPend?.params as Record<string, unknown> | undefined
+      if (pp?.rascunho && pendAcao && pp.descricao === pendAcao.params?.descricao) {
+        lembrete = `\n\n⏳ Ainda está esperando: *${pp.descricao}* (${brl(Number(pp.valor))}).\n` +
+          `Responda *paguei hoje*, *paguei dia 20*, *a pagar dia 30* — ou *NÃO* pra cancelar.`
+      }
+      await enviar(instance, jid, cartao + avisoC + lembrete)
       return ok()
     }
     // Texto/áudio de estoque: o lugar disso agora é o sistema, que já avisa o
@@ -1909,12 +1996,12 @@ async function tratar(req: Request): Promise<Response> {
         itensMin.push({ tipo: m.tipo, id: m.id, nome: m.nome, de: Number(atual?.estoque_minimo ?? 0), para: m.minimo })
       }
       const resumoMin = `Definir estoque mínimo: ${itensMin.map((i) => `*${i.nome}* de ${qtdTxt(i.de)} para ${qtdTxt(i.para)}`).join(", ")}.`
-      await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+      const deixadaPraTras = await cancelarPendentes(empresaId, jid)
       await sb.from("assistente_acoes").insert({ empresa_id: empresaId, grupo_jid: jid, tipo: "definir_minimo", resumo: resumoMin, params: { itens: itensMin } })
       const aviso = await cobrarUso(resumoMin)
       await enviar(instance, jid, `${resumoMin}
 
-Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
+Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}${deixadaPraTras}`)
       return ok()
     }
     // Cadastro de produto novo (só preço de venda é obrigatório). Vira uma proposta; o SIM aplica.
@@ -1936,13 +2023,13 @@ Responda *SIM* para aplicar ou *NÃO* para cancelar.${aviso}`)
         return ok()
       }
       const resumoCad = `Cadastrar produto *${pn.nome}* por ${brl(pn.preco_venda)} na categoria ${categoria}${pn.preco_custo ? ` (custo ${brl(pn.preco_custo)})` : ""}${pn.quantidade_inicial ? `, com ${qtdTxt(pn.quantidade_inicial)} em estoque` : ""}${pn.estoque_minimo ? `, mínimo ${qtdTxt(pn.estoque_minimo)}` : ""}${existentes.includes(categoria) ? "" : " — categoria nova"}.`
-      await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+      const deixadaPraTras = await cancelarPendentes(empresaId, jid)
       await sb.from("assistente_acoes").insert({
         empresa_id: empresaId, grupo_jid: jid, tipo: "cadastrar_produto", resumo: resumoCad,
         params: { nome: pn.nome, preco_venda: pn.preco_venda, categoria, preco_custo: pn.preco_custo, quantidade_inicial: pn.quantidade_inicial, estoque_minimo: pn.estoque_minimo },
       })
       const aviso = await cobrarUso(resumoCad)
-      await enviar(instance, jid, `${resumoCad}\n\nResponda *SIM* para cadastrar ou *NÃO* para cancelar.${aviso}`)
+      await enviar(instance, jid, `${resumoCad}\n\nResponda *SIM* para cadastrar ou *NÃO* para cancelar.${aviso}${deixadaPraTras}`)
       return ok()
     }
     // Pergunta ou decisão do dono: não é aqui. Não cobra nada.
@@ -2057,9 +2144,99 @@ async function ehChaveDeServico(token: string): Promise<boolean> {
   return false
 }
 
+/**
+ * RESGATE DAS NOTAS QUE O ROBÔ ENGOLIU (26/10/2026)
+ *
+ * Enquanto uma pergunta ficava pendente, QUALQUER mensagem do grupo era lida
+ * como resposta dela — foto inclusive. A nota era descartada sem uma palavra, e
+ * quem mandou achava que tinha lançado. Já está consertado pra frente; isto
+ * é pra trás: relê o histórico do grupo no WhatsApp e registra o que ficou.
+ *
+ * Seguro de rodar duas vezes: `contaDaNota` recusa nota repetida (mesmo
+ * fornecedor + total + data). E não cria rascunho: no resgate ninguém está ali
+ * pra responder "já pagou?", então o que falta dado entra só no relatório.
+ *
+ * Não cobra crédito — o erro foi nosso.
+ */
+async function resgatarNotas(empresaId: string, instance: string, jid: string, desdeTs: number, cru = false) {
+  const r = await fetch(`${EVOLUTION_API_URL}/chat/findMessages/${instance}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+    // Versões diferentes do Evolution filtram de jeitos diferentes; sem filtro
+    // volta tudo e a gente separa aqui, que é o que sempre funciona.
+    body: JSON.stringify({ where: {}, limit: 500 }),
+  }).catch(() => null)
+  if (!r?.ok) return { erro: `findMessages falhou (${r?.status ?? "sem resposta"})`, corpo: (await r?.text().catch(() => ""))?.slice(0, 600) }
+  const corpo = await r.json().catch(() => null)
+  if (cru) {
+    return {
+      chaves: corpo && typeof corpo === "object" ? Object.keys(corpo) : typeof corpo,
+      amostra: JSON.stringify(corpo).slice(0, 1500),
+    }
+  }
+  // Evolution v2 devolve { messages: { records: [...] } }; v1, um array solto.
+  const lista: any[] = Array.isArray(corpo) ? corpo
+    : (corpo?.messages?.records ?? corpo?.messages ?? corpo?.records ?? [])
+
+  const relatorio: Record<string, unknown>[] = []
+  for (const m of lista) {
+    const ts = Number(m?.messageTimestamp ?? 0)
+    if (!ts || ts * 1000 < desdeTs) continue
+    const mm = m?.message ?? {}
+    const doc = mm.documentMessage ?? mm.documentWithCaptionMessage?.message?.documentMessage
+    const ehImg = !!mm.imageMessage
+    const ehPdf = !!doc && String(doc.mimetype ?? "").includes("pdf")
+    if (!ehImg && !ehPdf) continue
+    const quando = new Date(ts * 1000).toISOString()
+    const midia = await baixarMidia(instance, m)
+    if (!midia) { relatorio.push({ quando, resultado: "não consegui baixar a mídia" }); continue }
+    const cat = await carregarCatalogo(empresaId)
+    const lida = await lerNota(midia.base64, midia.mimetype, cat, empresaId)
+    if ("erro" in lida) { relatorio.push({ quando, resultado: `não li: ${lida.erro}` }); continue }
+    const n = lida.nota
+    if (!n?.fornecedor || !(Number(n.valor_total) > 0)) {
+      relatorio.push({ quando, resultado: "sem fornecedor/total — não dá pra registrar sozinho" })
+      continue
+    }
+    if (typeof n.pago !== "boolean" || (n.pago === false && !n.vencimento)) {
+      relatorio.push({ quando, fornecedor: n.fornecedor, valor: n.valor_total, resultado: "falta saber se foi paga — precisa de alguém pra responder" })
+      continue
+    }
+    const texto = await contaDaNota(empresaId, jid, n, ehPdf ? "pdf" : "foto")
+    relatorio.push({
+      quando, fornecedor: n.fornecedor, valor: n.valor_total,
+      resultado: texto.startsWith("🚨") ? "já estava registrada" : texto.startsWith("❌") ? "falhou" : "REGISTRADA AGORA",
+    })
+  }
+  return { total_mensagens: lista.length, notas: relatorio }
+}
+
 serve(async (req) => {
   const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
   if (!(await ehChaveDeServico(token))) return new Response("forbidden", { status: 403 })
+  if (req.headers.get("x-resgate") === "1") {
+    const b = await req.json().catch(() => ({}))
+    // Foto entregue na mão (o print que sobrou de uma nota engolida). Mesmo
+    // caminho do grupo, mesma trava de nota repetida — só não cobra crédito.
+    if (b.imagem_base64) {
+      const empresaId = String(b.empresa_id)
+      const cat = await carregarCatalogo(empresaId)
+      const lida = await lerNota(String(b.imagem_base64), String(b.mimetype ?? "image/jpeg"), cat, empresaId)
+      if ("erro" in lida) return new Response(JSON.stringify({ erro: lida.erro }), { headers: { "Content-Type": "application/json" } })
+      const n = lida.nota
+      if (!n?.fornecedor || !(Number(n.valor_total) > 0)) {
+        return new Response(JSON.stringify({ erro: "sem fornecedor/total", nota: n }, null, 2), { headers: { "Content-Type": "application/json" } })
+      }
+      if (b.so_ler === true) {
+        return new Response(JSON.stringify({ nota: n }, null, 2), { headers: { "Content-Type": "application/json" } })
+      }
+      const texto = await contaDaNota(empresaId, String(b.grupo_jid), n, "foto")
+      return new Response(JSON.stringify({ nota: n, resposta: texto }, null, 2), { headers: { "Content-Type": "application/json" } })
+    }
+    const desde = Date.parse(String(b.desde ?? "")) || (Date.now() - 48 * 3600_000)
+    const out = await resgatarNotas(String(b.empresa_id), String(b.instance), String(b.grupo_jid), desde, b.cru === true)
+    return new Response(JSON.stringify(out, null, 2), { headers: { "Content-Type": "application/json" } })
+  }
   if (req.headers.get("x-teste") === "1") {
     const captura: string[] = []
     await capturaTeste.run(captura, () => tratar(req))
