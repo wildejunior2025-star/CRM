@@ -4192,6 +4192,30 @@ serve(async (req) => {
       if (limpas) console.log(`[horario] ${limpas} aviso(s) de "fechado" tirados do histórico — a loja está aberta`)
     }
 
+    // ── E O "JÁ CHAMEI ALGUÉM" TAMBÉM ENVENENA ───────────────────────────────
+    //
+    // Mesma conversa, dez minutos depois: o robô tinha chamado atendente três
+    // vezes (pelo defeito do "fechado"), a loja atendeu as três, e quando o
+    // cliente finalmente montou o pedido inteiro numa frase só — "arroz com
+    // cenoura, feijão preto, espaguete, farofa e baião de dois, na salada
+    // alfaça, batata doce e pepino, e carne assada, não, quero frango e
+    // fígado" — o robô respondeu "já chamei alguém" OUTRA VEZ. A mesma frase,
+    // testada com o histórico limpo, ele monta inteira e sem errar nada.
+    //
+    // Chamado já atendido é assunto encerrado: fica no histórico e o modelo
+    // copia. Se ainda houvesse chamado ABERTO, o robô nem teria chegado aqui
+    // (ele cala antes).
+    {
+      let pedidosDeSocorro = 0
+      for (const m of mensagensRaw) {
+        if (m?.role === "assistant" && /j[áa] chamei algu[ée]m/i.test(String(m.content ?? ""))) {
+          m.content = "(já chamei a loja uma vez; aquilo foi resolvido — siga atendendo normalmente)"
+          pedidosDeSocorro++
+        }
+      }
+      if (pedidosDeSocorro) console.log(`[chamado] ${pedidosDeSocorro} "já chamei alguém" tirados do histórico (todos já atendidos)`)
+    }
+
     // Mescla mensagens consecutivas do mesmo role (evita 400 da API do Claude)
     const mensagens = mensagensRaw.reduce((acc: any[], m: any) => {
       const last = acc[acc.length - 1]
@@ -5416,7 +5440,22 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           // É a pergunta mais fácil que existe nesta casa.
           const soPreco = /^(quanto|qual)\b[^?]{0,60}(custa|valor|pre[çc]o|est[áa]|sai|ta|t[áa])\b|^(quanto|qual o pre[çc]o|qual valor)/i.test(text.trim())
             && !/\b(entrega|taxa|frete|demora|atraso|cancel|reclam|errad|falt)\b/i.test(text)
-          if (soPreco && produtos.length) {
+          // MONTANDO PEDIDO NÃO SE PEDE SOCORRO.
+          //
+          // O cliente listou dez itens numa frase só, com um "não, quero" no
+          // meio, e o robô respondeu "já chamei alguém". Frase comprida é o
+          // jeito normal de pedir quentinha por aqui — é trabalho dele, não
+          // motivo pra passar pra frente. Sem reclamação nem problema dentro,
+          // ele tenta; se entender errado, o cliente corrige na hora.
+          const montandoPedido = /\b(quero|queria|vou querer|me v[eê]|manda|bota|coloca|p[õo]e)\b/i.test(text)
+            && !/\b(reclam|problema|errad|falt|atras|cancel|demora|horr[íi]vel|p[ée]ssim|atendente|humano|pessoa)\b/i.test(text)
+          if (montandoPedido && !soPreco) {
+            console.log(`[chamado] recusado: o cliente está montando o pedido — "${text.slice(0, 50)}"`)
+            resposta = resposta.replace(/J[áa] chamei algu[ée]m[^\n]*\n?/gi, "").trim()
+            if (!resposta || resposta.length < 15) {
+              resposta = `Deixa eu conferir pra anotar certinho: me repete o que você quer de *proteína*, *acompanhamento* e *salada*? 😊`
+            }
+          } else if (soPreco && produtos.length) {
             console.log(`[chamado] recusado: "${text.slice(0, 40)}" é pergunta de preço, o robô responde`)
             resposta = `Olha os nossos preços: 😊\n\n` +
               produtos.slice(0, 8).map((p: any) =>
