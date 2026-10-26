@@ -2289,7 +2289,23 @@ function normalizarFormaPgto(forma: any, p: Pagamentos): string {
   if (/debito/.test(f)) return p.debito ? "debito" : cartaoPadrao
   if (/cart|maquin/.test(f)) return cartaoPadrao
   if (/dinh|especie/.test(f)) return "dinheiro"
-  return f || "dinheiro"
+  // NADA DE FORMA INVENTADA SAI DAQUI (26/10/2026).
+  //
+  // O fim desta função devolvia o texto cru. Bastava o modelo escrever
+  // "fiado" — porque o cliente pediu fiado — pro pedido nascer com
+  // forma_pagamento 'fiado' e NENHUMA dívida em `vendas`: a comida saía e
+  // ninguém devia nada a ninguém. O CHECK do banco aceita 'fiado' (ele existe
+  // pro balcão), então nem o banco segurava.
+  //
+  // Fiado é só com o dono da loja, pelo gestor (decisão do Wilde, 26/10).
+  // Aqui só passa forma que a loja aceita no WhatsApp.
+  const aceitas = [
+    p.dinheiro && "dinheiro", p.pixOnline && "pix", p.pixEntrega && "pix_entrega",
+    p.credito && "credito", p.debito && "debito", p.cartao && "cartao",
+  ].filter(Boolean) as string[]
+  if (aceitas.includes(f)) return f
+  if (f) console.warn(`[Pgto] forma "${f}" não é aceita nesta loja — virou ${aceitas[0] ?? "dinheiro"}`)
+  return aceitas[0] ?? "dinheiro"
 }
 
 function rotuloPgto(forma: string): string {
@@ -3811,6 +3827,54 @@ serve(async (req) => {
     // ── CHAMADO ABERTO: tem gente da loja indo responder ────────────────────
     // O robô cala e guarda a mensagem. Falar por cima de quem foi chamado é
     // exatamente o que o cliente não quer quando pede uma pessoa.
+    // ── RECLAMAÇÃO DA COMIDA NÃO É PEDIDO (26/10/2026) ───────────────────────
+    //
+    // A Ruth escreveu "Macaxeira está dura" depois de receber a quentinha. O
+    // robô leu como edição de pedido e respondeu oferecendo TROCAR o
+    // acompanhamento — com a comida já na mesa dela. É o tipo de resposta que
+    // transforma um aborrecimento pequeno num cliente perdido.
+    //
+    // Reclamação não se responde com catálogo: se desculpa, chama gente, e
+    // sai da frente. O que oferecer (refazer, descontar, nada) é decisão da
+    // loja, não do robô.
+    //
+    // Vem ANTES da IA: não gasta crédito e não corre o risco de o modelo
+    // improvisar. E só vale pra quem pediu de verdade nas últimas horas —
+    // senão "tá frio hoje" viraria reclamação.
+    {
+      const RE_RECLAMACAO = /\b(dur[ao]s?|fri[ao]s?|cru[as]?|salgad\w*|queimad\w*|estragad\w*|azed\w*|vencid\w*|sem sal|veio errad\w*|veio sem|n[ãa]o veio|faltou|faltando|p[ée]ssim\w*|horr[íi]vel|nojent\w*|intoxica\w*|passando mal|cabelo|mosca|barata|estava ruim|muito ruim|veio ruim)\b/i
+      const RE_SO_PERGUNTA = /\?\s*$/
+      if (text && RE_RECLAMACAO.test(text) && !RE_SO_PERGUNTA.test(text.trim())) {
+        const desde6h = new Date(Date.now() - 6 * 3600_000).toISOString()
+        const { data: recente } = await supabase.from("pedidos_delivery")
+          .select("numero_pedido").eq("empresa_id", empresaId)
+          .like("cliente_telefone", `%${phone.slice(-8)}`)
+          .gte("created_at", desde6h).order("created_at", { ascending: false }).limit(1).maybeSingle()
+        if (recente?.numero_pedido) {
+          const msgRec = `Poxa, sinto muito mesmo. 😔 Isso não é o padrão daqui.\n\n` +
+            `Já avisei a loja sobre o seu pedido *#${recente.numero_pedido}* e alguém vem falar com você agora pra resolver. 🙏`
+          await abrirChamado(supabase, empresaId, phone, `RECLAMAÇÃO no pedido #${recente.numero_pedido}: ${text.slice(0, 200)}`)
+          await supabase.from("whatsapp_conversas").insert([
+            { empresa_id: empresaId, phone, role: "user", content: text },
+            { empresa_id: empresaId, phone, role: "assistant", content: msgRec },
+          ])
+          await espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat)
+          await espelharNoChat(supabase, empresaId, phone, msgRec, "loja", true)
+          console.log(`[chamado] reclamação no #${recente.numero_pedido}: "${text.slice(0, 50)}"`)
+          if (isTest) {
+            return new Response(JSON.stringify({ ok: true, resposta: msgRec }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+          }
+          await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify({ number: phone, text: msgRec }),
+          }).catch(e => console.error("[reclamação] sendText:", e))
+          return new Response("ok", { headers: corsHeaders })
+        }
+      }
+    }
+
     if (await chamadoAberto(supabase, empresaId, phone)) {
       console.log("[chamado] aberto, robô calado:", phone)
       if (!retomada) {
@@ -4580,6 +4644,9 @@ CATÁLOGO: ${catalogoUrl}
   : taxaMin != null ? `ENTREGA: a taxa depende do endereço — vai de R$ ${taxaMin.toFixed(2)} a R$ ${taxaMax!.toFixed(2)}. ⛔ NUNCA diga um valor exato, e MUITO MENOS "R$ 0,00" ou frete grátis, enquanto não souber o endereço: diga a faixa e peça a rua, o número e o bairro — o sistema calcula a taxa certa na hora de fechar.`
   : `ENTREGA: taxa R$ ${taxaEntregaCalc.toFixed(2)} (taxa base — pode mudar conforme a distância do endereço)`) : "ENTREGA: somente retirada no local"}⟦/VAR⟧
 FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
+📒 FIADO NÃO PASSA POR VOCÊ. Se o cliente pedir fiado ("na conta", "anota aí", "pendura", "deixa pra semana", "pago depois"), NUNCA aceite nem feche o pedido assim — fiado é dívida, e quem libera é o dono da loja, olhando o cadastro. Responda exatamente nesta linha:
+"Fiado é só com o dono da loja. 😊 Faça o pedido escolhendo uma forma de pagamento normal, e depois é só falar com a loja que eles acertam o fiado por lá."
+Em seguida siga normalmente perguntando ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}.
 ${pedidoAberto ? `
 ⚠️ ESTE CLIENTE JÁ TEM UM PEDIDO NA MÃO DA LOJA: *#${pedidoAberto.numero_pedido}*, R$ ${Number(pedidoAberto.total).toFixed(2)}, situação atual: *${pedidoAberto.status}*.
 💳 A FORMA DE PAGAMENTO DESSE PEDIDO VOCÊ PODE TROCAR — e SÓ ela, e SÓ se ele ainda NÃO PAGOU. Quem já pagou (PIX confirmado, ou já mandou o comprovante aqui) não troca de forma: aí é cancelar e refazer, e quem faz isso é a loja — chame um atendente. Mas primeiro pergunte o que falta, numa frase curta, e só emita a ação com a resposta:
@@ -5675,6 +5742,121 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         if (end.numero) {
           const n = await handleSalvarNumero(supabase, empresaId, phone, phoneLocal, end.numero, aceitaDelivery, pgtoOpcoes)
           resposta = n.resposta
+        }
+      }
+    }
+
+    // ── O ENDEREÇO É UM LUGAR, NÃO UMA RUA (26/10/2026) ──────────────────────
+    //
+    // A Ruth respondeu "Bee Christian school" quando o robô pediu o endereço —
+    // e completou: "q vcs sempre deixam". É assim que meio mundo manda o
+    // endereço: o nome da escola, da igreja, do posto, do prédio. O robô pedia
+    // rua, número e bairro de volta, e quem está com fome não quer procurar
+    // CEP.
+    //
+    // O Google que a gente já paga acha lugar por NOME (foi o exemplo do
+    // próprio dono quando montamos isso: "escola hipócrates"). Busca perto da
+    // loja, pega o primeiro, confirma com o cliente — a confirmação importa,
+    // porque "Bee" pode existir em duas cidades.
+    if (aceitaDelivery && !carrinhoEndereco.rua && !salvarRuaJaExecutado) {
+      const ultimaBotLugar = (mensagens.filter((m: any) => m.role === "assistant").pop()?.content ?? "").toLowerCase()
+      // Larga de propósito: o modelo pede o endereço com as palavras dele
+      // ("me manda a *rua, o número e o bairro*", "onde você está?"), e uma
+      // peneira literal demais deixa passar justamente a mensagem que importa.
+      const pediuEndereco = /endere[çc]o|nome da rua|localiza[çc]|\brua\b.{0,20}\bbairro\b|onde voc[êe]/.test(ultimaBotLugar)
+      const t = text.trim()
+      // Depois de o robô pedir o endereço, o cliente ainda manda MUITA coisa
+      // que não é endereço: "só isso, pode fechar", "obrigada", o próprio nome.
+      // Sem esta peneira o robô foi procurar "Só Isso Igarapé" a 1.866 km e
+      // "Tv. Ruth Maria" — e respondia sobre elas com cara de quem entendeu.
+      const CONVERSA_SOLTA = /^(sim|nao|n[ãa]o|ok|certo|oi|ol[áa]|obrigad|valeu|blz|beleza|t[áa]|pode (fechar|ser|mandar)|s[óo] isso|e s[óo]|isso mesmo|fechad|perfeito|bom dia|boa (tarde|noite)|manda|quero|tem |qual|quanto|como)/i
+      const pareceLugar = pediuEndereco
+        && t.length >= 5 && t.length <= 70
+        && !/\d/.test(t)                                  // com número já é rua, e o caminho de cima resolve
+        && t.split(/\s+/).length <= 7
+        && !PREFIXO_RUA.test(t)
+        && !RE_RETIRADA.test(t)
+        && !CONVERSA_SOLTA.test(t)
+      if (pareceLugar) {
+        const sug = await googleEndereco(empresaId, {
+          acao: "sugerir", texto: t,
+          lat: empresa.latitude ?? null, lng: empresa.longitude ?? null,
+        })
+        // O PRIMEIRO PALPITE PODE ESTAR A 10 KM (26/10/2026).
+        //
+        // "Bee Christian school" devolveu uma escola em PARNAMIRIM; a da Ruth
+        // fica na Rua Almirante Nelson Fernandes, Barro Vermelho, do lado da
+        // loja. Na mensagem do robô os dois palpites são idênticos — e quem
+        // está com fome responde "sim" sem ler a cidade.
+        //
+        // Então o nome só vale quando o lugar cai DENTRO da área de entrega:
+        // a loja não entrega a 10 km, logo não é aquele. Fora do raio, volta a
+        // pedir a rua, que é o caminho seguro.
+        const raioKm = Number(empresa.raio_entrega_km ?? 0) || 0
+        const temPonto = Number.isFinite(Number(empresa.latitude)) && Number.isFinite(Number(empresa.longitude))
+        let achado: { g: any; p: any; titulo: string; dist: number } | null = null
+        let longe: { titulo: string; cidade: string; dist: number } | null = null
+        for (const s of (sug?.sugestoes ?? []).slice(0, 3)) {
+          if (!s?.place_id) continue
+          const g = await googleEndereco(empresaId, { place_id: s.place_id })
+          const p = g?.partes
+          if (!p?.rua) continue
+          const dist = temPonto
+            ? haversineKm(Number(g.lat), Number(g.lng), Number(empresa.latitude), Number(empresa.longitude))
+            : 0
+          if (raioKm > 0 && dist > raioKm) {
+            console.log(`[Lugar] "${s.titulo}" descartado: ${dist.toFixed(1)}km (raio ${raioKm}km)`)
+            if (!longe) longe = { titulo: s.titulo || t, cidade: p.cidade || "", dist }
+            continue
+          }
+          achado = { g, p, titulo: s.titulo || t, dist }
+          break
+        }
+        // Achou com esse nome, mas longe demais: quase certo que é OUTRO lugar
+        // de mesmo nome. Dizer "não entregamos aí" seria mentira — ela mora
+        // perto. Mostra o que achou e pede a rua.
+        //
+        // Só fala do que achou quando o achado faz algum sentido: um LUGAR (se
+        // o Google devolveu uma rua, o caminho normal do endereço resolve) e
+        // perto o bastante pra ser confundível. "Achei uma Só Isso Igarapé a
+        // 1.866 km" não ajuda ninguém — isso é o robô não ter entendido, e
+        // quem diz isso melhor é o modelo.
+        const ehNomeDeRua = longe ? PREFIXO_RUA.test(longe.titulo) || /^(tv|trav)\b/i.test(longe.titulo) : false
+        const longeDemais = longe ? longe.dist > Math.max(30, raioKm * 3) : false
+        if (!achado && longe && !ehNomeDeRua && !longeDemais) {
+          resposta = `Achei uma *${longe.titulo}*${longe.cidade ? ` em ${longe.cidade}` : ""}, mas fica a ${longe.dist.toFixed(0)} km daqui — acho que não é essa. 🤔\n\n` +
+            `Me diz a *rua* e o *bairro*, ou manda sua *localização* 📍 que eu acho certinho.`
+        }
+        {
+          const primeiro = achado ? { titulo: achado.titulo } : null
+          const g = achado?.g
+          const p = achado?.p
+          if (p?.rua) {
+            console.log(`[Lugar] "${t}" → ${g.formatado}`)
+            await salvarEnderecoNoCarrinho(empresaId, phone, {
+              endereco_rua: p.rua,
+              endereco_numero: p.numero || null,
+              endereco_bairro: p.bairro || null,
+              endereco_cidade: p.cidade || empresa.cidade || null,
+              endereco_estado: p.estado || empresa.estado || null,
+              endereco_lat: g.lat, endereco_lng: g.lng,
+              // O nome do lugar é o que o entregador procura na rua.
+              endereco_complemento: primeiro.titulo || t,
+            })
+            carrinhoEndereco.rua = p.rua
+            carrinhoEndereco.numero = p.numero || null
+            carrinhoEndereco.bairro = p.bairro || null
+            carrinhoEndereco.cidade = p.cidade || null
+            carrinhoEndereco.lat = g.lat
+            carrinhoEndereco.lng = g.lng
+            const linhaEnd = [p.rua, p.numero].filter(Boolean).join(", ")
+            // A distância vai escrita: é o que denuncia o palpite errado antes
+            // de a comida sair. "Fica a 9 km daqui" o cliente lê e corrige.
+            const linhaDist = achado!.dist > 0 ? `\n_(a ${achado!.dist.toFixed(1)} km da loja)_` : ""
+            resposta = `📍 Achei: *${primeiro!.titulo}*\n${linhaEnd}${p.bairro ? ` — ${p.bairro}` : ""}${p.cidade ? `, ${p.cidade}` : ""}${linhaDist}\n\n` +
+              `É aí mesmo? Responde *sim* que eu sigo${p.numero ? "" : " — e me diz o número, se tiver"}. 😊\n` +
+              `_Se não for esse, me manda a rua e o bairro._`
+          }
         }
       }
     }
