@@ -433,10 +433,10 @@ export default function Produtos() {
     })
   }
   // Grupos dentro de cada quentinha vêm recolhidos; clicar no cabeçalho abre as opções.
-  const [grupoAberto, setGrupoAberto] = useState(() => new Set())
+  const [gruposListaAbertos, setGruposListaAbertos] = useState(() => new Set())
   function toggleAbrirGrupo(produtoId, grupoId) {
     const k = `${produtoId}:${grupoId}`
-    setGrupoAberto(prev => {
+    setGruposListaAbertos(prev => {
       const n = new Set(prev)
       n.has(k) ? n.delete(k) : n.add(k)
       return n
@@ -2148,7 +2148,7 @@ export default function Produtos() {
                           const gPausado = g.disponivel === false
                           const gIdx = compProd[p.id].findIndex(x => x.id === g.id)
                           // buscando, abre tudo pra mostrar o que casou
-                          const gAberto = !!nt || grupoAberto.has(`${p.id}:${g.id}`)
+                          const gAberto = !!nt || gruposListaAbertos.has(`${p.id}:${g.id}`)
                           const qtd = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? 'obrigatório' : 'opcional')
                           return (
                             <div key={g.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)', opacity: gPausado ? 0.6 : 1 }}>
