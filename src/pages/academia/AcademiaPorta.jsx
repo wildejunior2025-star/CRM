@@ -141,7 +141,13 @@ export default function AcademiaPorta() {
         </div>
       )}
 
-      <Link to="/" className="ac-muted">← Alunos</Link>
+      {/* A tela da catraca fica fora do menu de proposito (nao e coisa do dia
+          a dia), mas quem precisa dela esta sempre nesta aqui — e sem atalho
+          era preciso decorar o endereco. */}
+      <div className="ac-form-botoes" style={{ justifyContent: 'space-between', marginTop: 16 }}>
+        <Link to="/" className="ac-muted">← Alunos</Link>
+        <Link to="/catraca" className="ac-muted">Configurar a catraca (porta e tempo destravada) →</Link>
+      </div>
     </div>
   )
 }

@@ -20,21 +20,30 @@ export default function ConsumoFuncionario({ empresaId }) {
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [salvando, setSalvando] = useState(false)
+  // Consumo FIXO: a refeicao que a loja libera todo dia (mig 0397). O que o
+  // funcionario comprar alem disso nao e consumo — e venda com fiado no nome
+  // dele, que o sistema ja faz por outro caminho.
+  const [fixos, setFixos] = useState([])
+  const [modalFixo, setModalFixo] = useState(false)
+  const [formFixo, setFormFixo] = useState({ funcionario_id: '', produto_id: '', quantidade: '1' })
 
   async function load() {
     if (!empresaId) return
     setLoading(true)
     const iniMes = new Date(); iniMes.setDate(1); iniMes.setHours(0, 0, 0, 0)
-    const [co, prc, fn, us] = await Promise.all([
+    const [co, prc, fn, us, fx] = await Promise.all([
       supabase.from('consumo_funcionario').select('*').eq('empresa_id', empresaId).gte('created_at', iniMes.toISOString()).order('created_at', { ascending: false }),
       fetchAll(() => supabase.from('produtos').select('id, nome, preco_venda, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
       supabase.from('funcionarios').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       supabase.from('profiles').select('id, nome, perfil').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      supabase.from('consumo_fixo').select('*, funcionarios(nome), produtos(nome, preco_venda, custo_pct_venda)')
+        .eq('empresa_id', empresaId).eq('ativo', true),
     ])
     setConsumos(co.data || [])
     setProdutos(prc.data || [])
     setFuncionarios(fn.data || [])
     setUsuarios(us.error ? [] : (us.data || []))
+    setFixos(fx.error ? [] : (fx.data || []))
     setLoading(false)
   }
   useEffect(() => { load() }, [empresaId])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,6 +103,41 @@ export default function ConsumoFuncionario({ empresaId }) {
 
   const vazioStyle = { padding: '18px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }
 
+  async function salvarFixo(e) {
+    e.preventDefault()
+    const prod = produtos.find(x => String(x.id) === String(formFixo.produto_id))
+    if (!formFixo.funcionario_id || !prod) return
+    setSalvando(true)
+    const { error } = await supabase.from('consumo_fixo').insert({
+      empresa_id: empresaId,
+      funcionario_id: formFixo.funcionario_id,
+      produto_id: prod.id,
+      descricao: prod.nome,
+      quantidade: num(formFixo.quantidade) || 1,
+    })
+    setSalvando(false)
+    if (error) { alert(recadoDeErro(error)) ; return }
+    setModalFixo(false)
+    setFormFixo({ funcionario_id: '', produto_id: '', quantidade: '1' })
+    load()
+  }
+
+  async function removerFixo(f) {
+    if (!window.confirm(`Parar de lancar ${f.descricao} todo dia para ${f.funcionarios?.nome || 'essa pessoa'}?`)) return
+    await supabase.from('consumo_fixo').delete().eq('id', f.id)
+    load()
+  }
+
+  // O que ele VAI custar por dia: o custo da comida, nao o preco de venda.
+  const custoDoFixo = (f) => {
+    const p = f.produtos
+    if (!p) return 0
+    const unit = p.custo_pct_venda != null
+      ? Number(p.preco_venda || 0) * Number(p.custo_pct_venda) / 100
+      : Number(p.preco_venda || 0)
+    return unit * Number(f.quantidade || 1)
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -121,6 +165,79 @@ export default function ConsumoFuncionario({ empresaId }) {
       {consumos.length > 0 && (
         <div style={{ textAlign: 'right', fontSize: 13, color: 'var(--text-muted)', marginTop: 8, paddingRight: 4 }}>
           Gasto com alimentação no mês <strong>{brl(total)}</strong> · não entra no lucro
+        </div>
+      )}
+
+      {/* REFEIÇÃO DE TODO DIA (mig 0397)
+          "todo dia um funcionário vai almoçar e todo dia eu tenho que lançar de
+          novo". Lançamento que depende de alguém lembrar é lançamento que some —
+          e o que some aqui é comida saindo do estoque sem registro. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '22px 0 10px' }}>
+        <strong style={{ fontSize: 15 }}>🔁 Refeição fixa de todo dia</strong>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setModalFixo(true)}>+ Cadastrar</button>
+      </div>
+
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 16px' }}>
+        {fixos.length === 0 ? (
+          <div style={vazioStyle}>
+            Ninguém cadastrado. Cadastre aqui a refeição que a loja libera todo dia e o
+            sistema lança sozinho — só nos dias em que a loja abrir o caixa.
+          </div>
+        ) : fixos.map(f => (
+          <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {Number(f.quantidade) > 1 ? `${f.quantidade}× ` : ''}{f.descricao}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {f.funcionarios?.nome || 'sem funcionário'} · todo dia que a loja abrir
+              </div>
+            </div>
+            <strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{brl(custoDoFixo(f))}/dia</strong>
+            <button className="btn btn-danger btn-sm" onClick={() => removerFixo(f)}>✕</button>
+          </div>
+        ))}
+      </div>
+
+      {fixos.length > 0 && (
+        <div style={{ textAlign: 'right', fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8, paddingRight: 4 }}>
+          Lançado automaticamente às 17h. No dia que a pessoa faltar, é só apagar o lançamento lá em cima.
+        </div>
+      )}
+
+      {modalFixo && (
+        <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setModalFixo(false) }} style={{ zIndex: 1200 }}>
+          <form className="modal" onSubmit={salvarFixo}>
+            <h2>Refeição fixa de todo dia</h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0 }}>
+              O que a loja libera. O que o funcionário comprar além disso é venda, com fiado no nome dele.
+            </p>
+
+            <label className="form-label">Funcionário</label>
+            <select className="form-input" value={formFixo.funcionario_id}
+              onChange={e => setFormFixo(f => ({ ...f, funcionario_id: e.target.value }))} required>
+              <option value="">Escolha</option>
+              {funcionarios.map(fn => <option key={fn.id} value={fn.id}>{fn.nome}</option>)}
+            </select>
+
+            <label className="form-label" style={{ marginTop: 10 }}>O que ele come</label>
+            <select className="form-input" value={formFixo.produto_id}
+              onChange={e => setFormFixo(f => ({ ...f, produto_id: e.target.value }))} required>
+              <option value="">Escolha o produto</option>
+              {produtos.map(pr => <option key={pr.id} value={pr.id}>{pr.nome}</option>)}
+            </select>
+
+            <label className="form-label" style={{ marginTop: 10 }}>Quantidade por dia</label>
+            <input className="form-input" value={formFixo.quantidade} inputMode="decimal"
+              onChange={e => setFormFixo(f => ({ ...f, quantidade: e.target.value }))} />
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setModalFixo(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-primary" style={{ flex: 1 }} disabled={salvando}>
+                {salvando ? 'Salvando…' : 'Cadastrar'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

@@ -29,6 +29,10 @@ const CATEGORIAS = [
   ['internet', '🌐 Internet'], ['gas', '🔥 Gás'], ['outros', '📦 Outros'],
 ]
 const catLabel = (c) => (CATEGORIAS.find(([k]) => k === c)?.[1]) || '📦 Outros'
+// Como cada forma aparece na lista de sangrias/suprimentos (mesma legenda do Caixa).
+const rotuloForma = (f) => (f === 'pix' ? '📱 PIX' : f === 'cartao' ? '💳 Cartão' : '💵 Dinheiro')
+const hhmm = (ts) => (ts ? new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '')
+
 const PERFIL_LABEL = { admin: 'Gerente/Admin', vendedor: 'Vendedor', garcom: 'Garçom', cozinheiro: 'Cozinheiro', entregador: 'Entregador' }
 
 // ── Vigência: o que valia num dia passado ────────────────────────────
@@ -133,6 +137,9 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const [excecoes, setExcecoes] = useState({})
   const [fechaFeriado, setFechaFeriado] = useState(false)
   const [receitaDia, setReceitaDia] = useState({ proprios: 0, salao: 0, ifood: 0 })
+  // O dinheiro de verdade do dia: por onde entrou e pra quem saiu.
+  const [caixaDia, setCaixaDia] = useState(null)   // resumo por forma (a RPC do Caixa)
+  const [movsCaixa, setMovsCaixa] = useState([])   // sangrias e suprimentos, linha a linha
   // Quantos pedidos do iFood entraram pelo valor REAL do financeiro e quantos
   // ainda pela estimativa (o real só chega no dia seguinte, ~6h).
   const [ifoodFonte, setIfoodFonte] = useState({ real: 0, estimado: 0 })
@@ -164,7 +171,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
       // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc, ccp] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc, ccp, cxr, cxm] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
@@ -200,6 +207,15 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
         // Adicional também custa: o queijo do lanche sai da geladeira igual. Só
         // entra quem tem custo digitado no cadastro do complemento (mig 0247).
         supabase.rpc('custo_complementos_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString(), p_empresa_id: empresaId }),
+        // CAIXA DO DIA: a mesma funcao que a tela do Caixa usa, pra os dois
+        // lugares nunca discordarem. Ela trabalha por DATA, entao serve tanto
+        // pra loja que abre e fecha caixa quanto pra que nunca abriu nenhum.
+        supabase.rpc('caixa_resumo_do_dia', { p_data: dia }),
+        // Sangria e suprimento linha a linha: e aqui que aparece o pagamento
+        // do motoqueiro, que ate hoje nao tinha lugar nenhum nesta tela.
+        supabase.from('caixa_movimentos').select('*').eq('empresa_id', empresaId)
+          .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
+          .order('created_at'),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -269,6 +285,8 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
       const salao = (vd.error ? [] : (vd.data || [])).reduce((s, v) => s + Number(v.total || 0), 0)
       setReceitaDia({ proprios, salao, ifood: ifoodReal + Number(ifoodLiq.voceRecebe || 0) })
       setIfoodFonte({ real: comReal.length, estimado: semReal.length })
+      setCaixaDia(Array.isArray(cxr.data) ? (cxr.data[0] ?? null) : (cxr.data ?? null))
+      setMovsCaixa(cxm.error ? [] : (cxm.data || []))
     } catch (e) {
       setError(e.message || 'Erro ao carregar')
     } finally {
@@ -331,6 +349,39 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   // lojista edita e apaga à mão, e o fechar-o-dia limpa a tabela inteira. Uma
   // linha automática ali seria apagada por engano na primeira semana e ninguém
   // entenderia por que o lucro subiu. Calculada do extrato, é sempre certa.
+  // ── O CAIXA DO DIA ───────────────────────────────
+  // O lucro acima responde "sobrou quanto". Isto aqui responde a outra
+  // pergunta, a que se faz quando a gaveta não bate: o dinheiro entrou por
+  // ONDE e saiu PRA QUEM.
+  //
+  // Cada forma vem em duas partes de propósito — mesa/balcão (`pagamentos`) e
+  // delivery (`caixa_delivery_partes`). Quando falta dinheiro na gaveta, saber
+  // que o PIX de R$ 200 era do delivery e não do salão é o que diz onde olhar.
+  const entradasCaixa = useMemo(() => {
+    const c = caixaDia
+    if (!c) return []
+    const n = (x) => Number(x || 0)
+    return [
+      { id: 'dinheiro', rotulo: '💵 Dinheiro', casa: n(c.recebimentos_dinheiro), del: n(c.delivery_dinheiro) },
+      { id: 'pix', rotulo: '📱 PIX', casa: n(c.recebimentos_pix), del: n(c.delivery_pix) },
+      { id: 'credito', rotulo: '💳 Cartão de crédito', casa: n(c.recebimentos_credito), del: n(c.delivery_credito) },
+      { id: 'debito', rotulo: '💳 Cartão de débito', casa: n(c.recebimentos_debito), del: n(c.delivery_debito) },
+      { id: 'cartao', rotulo: '💳 Cartão (sem dizer qual)', casa: n(c.recebimentos_cartao_generico), del: n(c.delivery_cartao_generico) },
+      { id: 'vale', rotulo: '🎟️ Vale-refeição', casa: n(c.recebimentos_vale), del: n(c.delivery_vale) },
+      { id: 'transf', rotulo: '🏦 Transferência', casa: n(c.recebimentos_transferencia), del: 0 },
+      { id: 'online', rotulo: '🌐 Pago online (site/app)', casa: 0, del: n(c.delivery_online) },
+      { id: 'ifood', rotulo: '🛵 Pago no app do iFood', casa: 0, del: n(c.delivery_ifood) },
+      { id: 'outros', rotulo: '❓ Outras formas', casa: 0, del: n(c.delivery_outros) },
+    ].map(l => ({ ...l, total: l.casa + l.del })).filter(l => l.total > 0.005)
+  }, [caixaDia])
+
+  const entrouCaixa  = useMemo(() => entradasCaixa.reduce((t, l) => t + l.total, 0), [entradasCaixa])
+  const sangrias     = useMemo(() => movsCaixa.filter(m => m.tipo === 'sangria'), [movsCaixa])
+  const suprimentos  = useMemo(() => movsCaixa.filter(m => m.tipo === 'suprimento'), [movsCaixa])
+  const saiuCaixa    = useMemo(() => sangrias.reduce((t, m) => t + Number(m.valor || 0), 0), [sangrias])
+  const entrouSuprim = useMemo(() => suprimentos.reduce((t, m) => t + Number(m.valor || 0), 0), [suprimentos])
+  const nomeDe = (id) => usuarios.find(u => u.id === id)?.nome || 'alguém'
+
   const custosDia = fixoPorDia + funcPorDia + custoProducaoDia + imprevistoHoje + cashbackHoje
   const lucroDia = receita - custosDia
 
@@ -759,6 +810,69 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
               <span style={{ fontSize: 26, fontWeight: 900, color: v.lucro >= 0 ? '#16a34a' : '#ef4444' }}>{brl(v.lucro)}</span>
             </div>
           </div>
+
+          {/* CAIXA DO DIA (26/10/2026)
+              "tem que ta tudo detalhado la no portal financeiro do dia": de
+              onde veio cada real e pra quem saiu. O custo do motoqueiro, que
+              nao aparecia em canto nenhum da tela, e justamente uma das
+              sangrias — e agora da pra ver o nome e a hora.
+
+              Os numeros saem da MESMA funcao da tela do Caixa. Se um dia os
+              dois mostrarem valores diferentes, e porque alguem somou duas
+              vezes, nao porque cada tela tem a sua regra. */}
+          <Secao titulo={`💵 Caixa ${rotuloDia} (${ddmm(dia)})`}
+            rodape={(entradasCaixa.length > 0 || movsCaixa.length > 0) && (
+              <>Entrou <strong>{brl(entrouCaixa + entrouSuprim)}</strong>
+                {' · saiu '}<strong>{brl(saiuCaixa)}</strong>
+                {' · sobrou na gaveta '}<strong>{brl(entrouCaixa + entrouSuprim - saiuCaixa)}</strong></>
+            )}>
+            {entradasCaixa.length === 0 && movsCaixa.length === 0 ? (
+              <Vazio texto={`Nenhum movimento de caixa ${rotuloDia}.`} />
+            ) : (<>
+              {entradasCaixa.length > 0 && (
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .8, padding: '12px 0 2px' }}>
+                  ⬇️ Entrou
+                </div>
+              )}
+              {entradasCaixa.map(l => (
+                <ItemLinha key={l.id} titulo={l.rotulo}
+                  sub={l.casa > 0 && l.del > 0
+                    ? `mesa/balcão ${brl(l.casa)} · delivery ${brl(l.del)}`
+                    : l.del > 0 ? 'delivery' : 'mesa/balcão'}
+                  valor={brl(l.total)} />
+              ))}
+
+              {suprimentos.map(m => (
+                <ItemLinha key={m.id} titulo={`➕ ${m.observacao || 'Suprimento'}`}
+                  sub={`${hhmm(m.created_at)} · ${rotuloForma(m.forma)} · posto por ${nomeDe(m.created_by)}`}
+                  valor={brl(m.valor)} />
+              ))}
+
+              {sangrias.length > 0 && (
+                <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--danger)', textTransform: 'uppercase', letterSpacing: .8, padding: '14px 0 2px' }}>
+                  ⬆️ Saiu da gaveta
+                </div>
+              )}
+              {sangrias.map(m => (
+                <ItemLinha key={m.id} titulo={m.observacao || 'Sangria sem descrição'}
+                  sub={`${hhmm(m.created_at)} · ${rotuloForma(m.forma)} · tirado por ${nomeDe(m.created_by)}`}
+                  valor={`− ${brl(m.valor)}`} />
+              ))}
+
+              {Number(caixaDia?.vendas_fiado || 0) > 0 && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0 10px', lineHeight: 1.5 }}>
+                  🤝 Vendeu <strong>{brl(caixaDia.vendas_fiado)}</strong> fiado {rotuloDia} — esse dinheiro
+                  não entrou na gaveta, entra no dia em que o cliente pagar.
+                </div>
+              )}
+              {Number(caixaDia?.recebimentos_cashback || 0) > 0 && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '0 0 10px', lineHeight: 1.5 }}>
+                  🎁 <strong>{brl(caixaDia.recebimentos_cashback)}</strong> foram pagos com cashback —
+                  desconto da loja, não dinheiro que entrou.
+                </div>
+              )}
+            </>)}
+          </Secao>
 
           {/* PRODUÇÃO DO DIA (com botão fechar o dia) */}
           <Secao titulo={`🍲 Custo de produção ${rotuloDia} (${ddmm(dia)})`}
