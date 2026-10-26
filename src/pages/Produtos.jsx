@@ -432,6 +432,36 @@ export default function Produtos() {
       return n
     })
   }
+  // Grupos dentro de cada quentinha vêm recolhidos; clicar no cabeçalho abre as opções.
+  const [grupoAberto, setGrupoAberto] = useState(() => new Set())
+  function toggleAbrirGrupo(produtoId, grupoId) {
+    const k = `${produtoId}:${grupoId}`
+    setGrupoAberto(prev => {
+      const n = new Set(prev)
+      n.has(k) ? n.delete(k) : n.add(k)
+      return n
+    })
+  }
+  // Sobe/desce o grupo (ex.: jogar "Proteínas" pro fim). Renumera tudo 1..n pra não
+  // sobrar empate de ordem, e grava só o que mudou.
+  async function moverGrupoLista(produtoId, grupoId, delta) {
+    const lista = compProd[produtoId] ?? []
+    const i = lista.findIndex(g => g.id === grupoId)
+    const j = i + delta
+    if (i < 0 || j < 0 || j >= lista.length) return
+    const nova = [...lista]
+    ;[nova[i], nova[j]] = [nova[j], nova[i]]
+    const renum = nova.map((g, k) => ({ ...g, ordem: k + 1 }))
+    setCompProd(prev => ({ ...prev, [produtoId]: renum }))
+    const res = await Promise.all(renum
+      .filter((g, k) => g.ordem !== lista.find(x => x.id === g.id)?.ordem)
+      .map(g => supabase.from('produto_complemento_grupos')
+        .update({ ordem: g.ordem }).eq('produto_id', produtoId).eq('grupo_id', g.id)))
+    if (res.some(r => r.error)) {
+      setCompProd(prev => ({ ...prev, [produtoId]: lista }))
+      alert('Não consegui salvar a nova ordem. Tente de novo.')
+    }
+  }
   async function togglePausarGrupoLista(produtoId, grupo) {
     const novo = grupo.disponivel === false
     setPausandoComp(grupo.id)
@@ -2113,19 +2143,40 @@ export default function Produtos() {
                             }).filter(Boolean)
                             if (filtrados.length) gruposMostrar = filtrados
                           }
+                          const totalGrupos = compProd[p.id].length
                           return gruposMostrar.map(g => {
                           const gPausado = g.disponivel === false
+                          const gIdx = compProd[p.id].findIndex(x => x.id === g.id)
+                          // buscando, abre tudo pra mostrar o que casou
+                          const gAberto = !!nt || grupoAberto.has(`${p.id}:${g.id}`)
                           const qtd = g.max > 1 ? `escolha até ${g.max}` : (g.min > 0 ? 'obrigatório' : 'opcional')
                           return (
                             <div key={g.id} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', background: 'var(--surface)', opacity: gPausado ? 0.6 : 1 }}>
                               {/* Cabeçalho do grupo (subcategoria) */}
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '8px 12px', background: 'var(--bg)' }}>
-                                <div>
-                                  <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
-                                    {g.nome}
-                                    {gPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                                  {!nt && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+                                      <button type="button" title="Subir grupo" disabled={gIdx <= 0}
+                                        onClick={() => moverGrupoLista(p.id, g.id, -1)}
+                                        style={{ border: 'none', background: 'none', cursor: gIdx <= 0 ? 'default' : 'pointer', padding: 0, lineHeight: 1, fontSize: 13, opacity: gIdx <= 0 ? 0.25 : 1, color: 'var(--text)' }}>↑</button>
+                                      <button type="button" title="Descer grupo" disabled={gIdx >= totalGrupos - 1}
+                                        onClick={() => moverGrupoLista(p.id, g.id, 1)}
+                                        style={{ border: 'none', background: 'none', cursor: gIdx >= totalGrupos - 1 ? 'default' : 'pointer', padding: 0, lineHeight: 1, fontSize: 13, opacity: gIdx >= totalGrupos - 1 ? 0.25 : 1, color: 'var(--text)' }}>↓</button>
+                                    </div>
+                                  )}
+                                  <div
+                                    onClick={() => toggleAbrirGrupo(p.id, g.id)}
+                                    style={{ cursor: 'pointer', flex: 1, userSelect: 'none' }}
+                                    title={gAberto ? 'Recolher' : 'Ver opções'}
+                                  >
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>
+                                      <span style={{ display: 'inline-block', fontSize: 10, marginRight: 6, transition: 'transform .15s', transform: gAberto ? 'rotate(180deg)' : 'none' }}>▼</span>
+                                      {g.nome}
+                                      {gPausado && <span style={{ color: '#dc2626', fontWeight: 700 }}> · Pausado</span>}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{qtd} · {g.opcoes.length} {g.opcoes.length === 1 ? 'opção' : 'opções'}</div>
                                   </div>
-                                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{qtd} · {g.opcoes.length} {g.opcoes.length === 1 ? 'opção' : 'opções'}</div>
                                 </div>
                                 <button
                                   type="button"
@@ -2143,7 +2194,7 @@ export default function Produtos() {
                                 </button>
                               </div>
                               {/* Opções do grupo */}
-                              {blocosDeOpcoes(g.opcoes).map(bloco => (
+                              {gAberto && blocosDeOpcoes(g.opcoes).map(bloco => (
                               <React.Fragment key={bloco.titulo ?? 'unico'}>
                                 {/* Bloco ("(Promoção)", "(Doce)"...): faixa colorida pra dar pra ver
                                     onde um acaba e o outro começa, inclusive no celular. */}
