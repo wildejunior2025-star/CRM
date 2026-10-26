@@ -70,6 +70,65 @@ const soDia = iso => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit',
 // juntaria a compra do ano passado com a de agora.
 const chaveDia = iso => new Date(iso).toLocaleDateString('pt-BR')
 
+// De onde veio a venda. Não existe coluna de canal: quem grava escreve na
+// observação ("Balcao - Pedido #12", "Presencial · Mesa 4 · Garçom: X"), então
+// o rótulo sai dela. Sem pista, não mostra nada em vez de chutar.
+function canalDaVenda(obs) {
+  const o = semAcento(obs)
+  if (!o) return null
+  if (o.startsWith('balcao')) return 'Balcão'
+  const mesa = /mesa\s*(\S+)/.exec(o)
+  if (o.startsWith('presencial') && mesa) return `Mesa ${mesa[1]}`
+  const com = /comanda\s*(\S+)/.exec(o)
+  if (o.startsWith('presencial') && com) return `Comanda ${com[1]}`
+  if (o.startsWith('presencial')) return 'Salão'
+  return null
+}
+
+const PERIODOS = [
+  { id: 'tudo', label: 'Todo o período' },
+  { id: '7', label: 'Últimos 7 dias' },
+  { id: '30', label: 'Últimos 30 dias' },
+  { id: 'mes', label: 'Este mês' },
+]
+function desdeDoPeriodo(id) {
+  const agora = new Date()
+  if (id === 'mes') return new Date(agora.getFullYear(), agora.getMonth(), 1)
+  if (id === '7' || id === '30') return new Date(agora.getTime() - Number(id) * 86400000)
+  return null
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const nomeDoItem = i => i.produtos?.nome ?? i.nome_produto ?? 'item'
+
+// Extrato pra imprimir ou salvar em PDF: cada compra com seus itens e preços,
+// os pagamentos e o saldo — o papel que o cliente pede pra conferir a conta.
+function imprimirExtrato({ cliente, nomeLoja, periodoLabel, vendas, pagamentos, saldo }) {
+  const fiados = vendas.filter(v => v.forma_pagamento !== 'a_vista')
+  const totalCompras = fiados.reduce((s, v) => s + Number(v.total || 0), 0)
+  const blocos = [...fiados].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(v => `
+    <div class="v">
+      <div class="h"><b>${esc(canalDaVenda(v.observacoes) ?? 'Fiado')}</b><span>${esc(dataHora(v.created_at))}</span></div>
+      ${(v.venda_itens ?? []).map(i => `<div class="i"><span>${esc(Number(i.quantidade))}× ${esc(nomeDoItem(i))}</span><span>${fmtBRL(i.preco_unitario)}${Number(i.quantidade) !== 1 ? ' un · ' + fmtBRL(i.subtotal) : ''}</span></div>`).join('')}
+      <div class="t"><span>Total</span><span>${fmtBRL(v.total)}</span></div>
+    </div>`).join('')
+  const pag = pagamentos.map(p => `<div class="i"><span>${esc(dataHora(p.created_at))} · ${esc(FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento)}</span><span>${fmtBRL(p.valor)}</span></div>`).join('')
+  const w = window.open('', '_blank')
+  if (!w) { window.alert('O navegador bloqueou a janela. Libere pop-ups e tente de novo.'); return }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Extrato — ${esc(cliente)}</title>
+    <style>body{font-family:Arial,sans-serif;max-width:640px;margin:20px auto;padding:0 14px;color:#111;font-size:14px}
+    h1{font-size:18px;margin:0}.s{color:#555;margin:2px 0 14px}.v{border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin-bottom:8px;break-inside:avoid}
+    .h,.i,.t{display:flex;justify-content:space-between;gap:8px;padding:2px 0}.h{border-bottom:1px solid #eee;margin-bottom:4px}.t{border-top:1px solid #eee;margin-top:4px;font-weight:700}
+    .r{margin-top:14px;font-size:15px}.r div{display:flex;justify-content:space-between;padding:2px 0}h2{font-size:13px;margin:16px 0 4px;color:#555}</style></head><body>
+    <h1>${esc(nomeLoja)}</h1><div class="s">Extrato de fiado · <b>${esc(cliente)}</b><br>${esc(periodoLabel)} · emitido em ${esc(dataHora(new Date().toISOString()))}</div>
+    ${blocos || '<p>Nenhuma compra no período.</p>'}
+    ${pag ? `<h2>PAGAMENTOS</h2>${pag}` : ''}
+    <div class="r"><div><span>Compras no período</span><b>${fmtBRL(totalCompras)}</b></div>
+    <div><span>Saldo devedor atual</span><b>${fmtBRL(saldo)}</b></div></div>
+    <script>window.onload=function(){window.print()}<\/script></body></html>`)
+  w.document.close()
+}
+
 // Quanto falta em cada fiado, por id. Quem não aparece no mapa já foi pago.
 // Mesma reconstrução do pedidosEmAberto — é o que permite escrever "pago" na
 // linha, já que o banco não guarda qual pedido cada recebimento cobriu.
@@ -165,6 +224,8 @@ export default function ClientesFiado({ empresaId }) {
   const [salvandoTel, setSalvandoTel] = useState(false)
   // Recebimento com a forma trocada na hora do aperto: id do pagamento em edição.
   const [formaEdit, setFormaEdit] = useState(null)
+  // Filtro de período do histórico de compras (vale pra todos os clientes abertos).
+  const [periodo, setPeriodo] = useState('tudo')
 
   // Grava o telefone de quem foi cadastrado sem ele.
   async function salvarTelefone(clienteId) {
@@ -223,7 +284,7 @@ export default function ClientesFiado({ empresaId }) {
     // em tela nenhuma: pra saber, tinha que abrir o banco.
     const [vd, pg] = await Promise.all([
       supabase.from('vendas')
-        .select('id, total, forma_pagamento, created_at, venda_itens(quantidade, preco_unitario, nome_produto, produtos(nome))')
+        .select('id, total, forma_pagamento, created_at, observacoes, venda_itens(quantidade, preco_unitario, subtotal, nome_produto, produtos(nome))')
         .eq('empresa_id', empresaId)
         .eq('cliente_id', clienteId)
         .neq('status', 'cancelado')
@@ -555,6 +616,10 @@ export default function ClientesFiado({ empresaId }) {
                                   .reduce((s, v) => s + Number(v.total || 0), 0)
                                 const lista = pagos[l.cliente_id] ?? []
                                 const pagou = lista.reduce((s, p) => s + Number(p.valor || 0), 0)
+                                const desde = desdeDoPeriodo(periodo)
+                                const noPeriodo = compras[l.cliente_id].filter(v => !desde || new Date(v.created_at) >= desde)
+                                const totalPeriodo = noPeriodo.filter(v => v.forma_pagamento !== 'a_vista')
+                                  .reduce((s, v) => s + Number(v.total || 0), 0)
                                 return (
                                   <>
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '8px 0 10px',
@@ -582,14 +647,33 @@ export default function ClientesFiado({ empresaId }) {
                                       ))}
                                     </div>
 
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', margin: '10px 0 2px' }}>
-                                      COMPRAS
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '10px 0 2px' }}>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)' }}>COMPRAS</span>
+                                      <select value={periodo} onChange={e => setPeriodo(e.target.value)}
+                                        style={{ padding: '4px 8px', borderRadius: 7, fontSize: 12.5, border: '1px solid var(--border)',
+                                          background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}>
+                                        {PERIODOS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                                      </select>
+                                      <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                        {noPeriodo.length} {noPeriodo.length === 1 ? 'compra' : 'compras'} · <strong>{fmtBRL(totalPeriodo)}</strong>
+                                      </span>
+                                      <button type="button"
+                                        onClick={() => imprimirExtrato({
+                                          cliente: l.cliente_nome, nomeLoja, saldo: l.saldo_fiado,
+                                          periodoLabel: PERIODOS.find(p => p.id === periodo)?.label ?? '',
+                                          vendas: noPeriodo, pagamentos: lista,
+                                        })}
+                                        style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5,
+                                          fontWeight: 700, border: '1px solid var(--primary)', background: 'transparent', color: 'var(--primary)' }}>
+                                        🖨️ Extrato
+                                      </button>
                                     </div>
                                   </>
                                 )
                               })()}
 
-                              {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); return compras[l.cliente_id].map(v => {
+                              {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); const desde = desdeDoPeriodo(periodo); return compras[l.cliente_id].filter(v => !desde || new Date(v.created_at) >= desde).map(v => {
+                                const canal = canalDaVenda(v.observacoes)
                                 const emAberto = falta.get(v.id)                       // undefined = quitado
                                 const ehFiado  = v.forma_pagamento !== 'a_vista'
                                 const parcial  = emAberto !== undefined && emAberto < Number(v.total) - 0.005
@@ -598,6 +682,7 @@ export default function ClientesFiado({ empresaId }) {
                                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13 }}>
                                     <span style={{ color: 'var(--text-muted)' }}>
                                       {dataHora(v.created_at)}
+                                      {canal && <span style={{ fontWeight: 600 }}> · {canal}</span>}
                                       {ehFiado && (
                                         emAberto === undefined
                                           ? <span style={{ color: 'var(--success, #16a34a)', fontWeight: 700 }}> · fiado pago</span>
@@ -622,7 +707,12 @@ export default function ClientesFiado({ empresaId }) {
                                   {(v.venda_itens ?? []).length > 0 && (
                                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
                                       {v.venda_itens.map((it, i) => (
-                                        <span key={i}>{i > 0 ? ' · ' : ''}{it.quantidade}× {it.produtos?.nome ?? it.nome_produto ?? 'item'}</span>
+                                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                          <span>{Number(it.quantidade)}× {nomeDoItem(it)}</span>
+                                          <span style={{ whiteSpace: 'nowrap' }}>
+                                            {Number(it.quantidade) !== 1 && <>{fmtBRL(it.preco_unitario)} un · </>}{fmtBRL(it.subtotal ?? it.preco_unitario * it.quantidade)}
+                                          </span>
+                                        </div>
                                       ))}
                                     </div>
                                   )}
