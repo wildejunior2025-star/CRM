@@ -438,7 +438,11 @@ function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
   parts.push(linha(grupos.slice(0, 6).join(' ')))
   parts.push(linha(grupos.slice(6).join(' ')))
   parts.push(divisor())
-  parts.push(linha('CONSUMIDOR ' + (n.cpf_destinatario ? ('CPF ' + n.cpf_destinatario) : 'NAO IDENTIFICADO')))
+  // Documento do consumidor: CPF (11) ou CNPJ (14). `destinatario_doc` vem da
+  // linha da nota; `cpf_destinatario` e o nome antigo do campo.
+  const docCliente = String(n.destinatario_doc || n.cpf_destinatario || '').replace(/\D/g, '')
+  parts.push(linha('CONSUMIDOR ' + (docCliente.length === 14 ? ('CNPJ ' + docCliente)
+    : docCliente.length === 11 ? ('CPF ' + docCliente) : 'NAO IDENTIFICADO')))
   parts.push(divisor())
   parts.push(linha('NFC-e no ' + (n.numero ?? '-') + '  Serie ' + (n.serie ?? '-')))
   if (n.emitida_em) parts.push(linha('Emissao: ' + n.emitida_em))

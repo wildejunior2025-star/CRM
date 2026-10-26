@@ -434,6 +434,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     empresa_id: ped.empresa_id, pedido_id: comandaId ? null : pedidoId,
     comanda_id: comandaId ?? null, status: "processando",
     ambiente, ref, valor_total: Number(total.toFixed(2)),
+    destinatario_doc: (cpfLimpo.length === 11 || cpfLimpo.length === 14) ? cpfLimpo : null,
   }).select("id").maybeSingle()
   const notaId = rascunho?.id
 
