@@ -631,6 +631,8 @@ export default function Produtos() {
   const [savingCateg, setSavingCateg] = useState(false)
   const [categError, setCategError] = useState(null)
   const [duplicandoCatId, setDuplicandoCatId] = useState(null)  // categoria sendo duplicada
+  const [pausaCat, setPausaCat] = useState({})                   // nome -> { total, pausados }
+  const [pausandoCatId, setPausandoCatId] = useState(null)
   const [editandoCatId, setEditandoCatId] = useState(null)      // categoria em edição de nome
   const [editandoCatNome, setEditandoCatNome] = useState('')
   const [salvandoRenome, setSalvandoRenome] = useState(false)
@@ -676,6 +678,48 @@ export default function Produtos() {
     return !error
   }
 
+  // PAUSAR A CATEGORIA INTEIRA (26/10): nao existe flag na categoria — pausa e
+  // reativa os PRODUTOS dela com o mesmo estado unico do togglePausar (ativo +
+  // disponivel_delivery), entao vale em todos os canais e espelha no iFood
+  // pelos gatilhos de sempre. Categoria "pausada" = todos os itens pausados.
+  async function carregarPausaCategorias() {
+    const { data } = await supabase.from('produtos').select('categoria, ativo, disponivel_delivery')
+      .eq('empresa_id', profile.empresa_id).is('arquivado_em', null).limit(5000)
+    const m = {}
+    for (const p of data ?? []) {
+      const r = m[p.categoria] ??= { total: 0, pausados: 0 }
+      r.total++
+      if (p.ativo === false || p.disponivel_delivery === false) r.pausados++
+    }
+    setPausaCat(m)
+  }
+
+  async function handlePausarCategoria(c) {
+    const r = pausaCat[c.nome] ?? { total: 0, pausados: 0 }
+    if (!r.total) { setCategError('Esta categoria não tem produtos.'); return }
+    const reativar = r.pausados === r.total
+    const ok = await confirmar({
+      titulo: reativar ? `Reativar a categoria “${c.nome}”?` : `Pausar a categoria “${c.nome}”?`,
+      texto: reativar
+        ? `Volta a vender os ${r.total} produto${r.total === 1 ? '' : 's'} dela.`
+        : `Pausa os ${r.total} produto${r.total === 1 ? '' : 's'} dela de uma vez (balcão, mesa, app, Loja Online e iFood). Dá pra reativar com um clique.`,
+      textoOk: reativar ? 'Reativar' : 'Pausar',
+      perigo: false,
+      icone: reativar ? '▶' : '⏸',
+    })
+    if (!ok) return
+    setPausandoCatId(c.id); setCategError(null)
+    let q = supabase.from('produtos').update({ ativo: reativar, disponivel_delivery: reativar })
+      .eq('empresa_id', profile.empresa_id).eq('categoria', c.nome).is('arquivado_em', null)
+    // Item sem estoque continua pausado pelo proprio estoque.
+    if (reativar) q = q.not('pausado_por_estoque', 'is', true)
+    const { error } = await q
+    setPausandoCatId(null)
+    if (error) { setCategError('Não consegui pausar: ' + error.message); return }
+    await carregarPausaCategorias()
+    await loadProdutos(search, categoriaFiltro)
+  }
+
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
@@ -687,6 +731,7 @@ export default function Produtos() {
       .order('nome', { ascending: true })
     const lista = data ?? []
     setCategorias(lista)
+    carregarPausaCategorias()
     if (await criarCategoriasOrfas(lista)) { await loadCategorias(); return }
     // Conserta lista antiga com ordem 0 ou empatada (categoria criada antes do
     // fix). Renumera 1..n mantendo a ordem que já está aparecendo na tela.
@@ -1697,6 +1742,23 @@ export default function Produtos() {
                     )}
                   </div>
                   <span style={{ whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const r = pausaCat[c.nome]
+                      const toda = !!r && r.total > 0 && r.pausados === r.total
+                      return (
+                        <>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handlePausarCategoria(c)}
+                            disabled={pausandoCatId === c.id || !r?.total}
+                            title={toda ? 'Voltar a vender todos os produtos desta categoria' : 'Pausar todos os produtos desta categoria de uma vez'}
+                            style={toda ? { borderColor: '#16a34a', color: '#16a34a' } : { borderColor: '#f59e0b', color: '#b45309' }}
+                          >
+                            {pausandoCatId === c.id ? '...' : toda ? '▶ Reativar' : '⏸ Pausar'}
+                          </button>{' '}
+                        </>
+                      )
+                    })()}
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => handleDuplicarCategoria(c)}
