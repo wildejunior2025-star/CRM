@@ -1309,6 +1309,10 @@ function precoPorQuantidade(prod: any, qtd: number): number {
 // pergunta ao cliente.
 type SaboresPorProduto = Record<string, { disponiveis: string[]; pausadas: string[] }>
 
+// Sem acento e em minúscula, pra peneirar o que o cliente escreveu.
+const norm8 = (s: unknown) => String(s ?? "")
+  .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
+
 const normSabor = (s: unknown) => String(s ?? "")
   .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
   .replace(/\bcom\b|\+|&/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
@@ -2374,6 +2378,7 @@ function trocoDaConversa(mensagens: any[]): number | null {
 async function handleTrocarPagamento(
   supabase: ReturnType<typeof createClient>,
   empresaId: string,
+  phone: string,
   pedido: { numero_pedido: number; status: string; total: number },
   formaPedida: string,
   pagamentos: Pagamentos,
@@ -2387,6 +2392,41 @@ async function handleTrocarPagamento(
   const forma = normalizarFormaPgto(formaPedida, pagamentos)
   if (forma === "fiado") {
     return "Fiado quem libera é a loja, olhando o cadastro — não posso mudar pra fiado por aqui. Já chamo alguém pra te atender! 🙋"
+  }
+  const { data: antes } = await supabase.from("pedidos_delivery")
+    .select("id, forma_pagamento, status, pix_status, created_at")
+    .eq("empresa_id", empresaId).eq("numero_pedido", pedido.numero_pedido)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle()
+  if (!antes?.id) return `Não achei o pedido #${pedido.numero_pedido} pra mudar. Vou chamar a loja. 🙋`
+  // Entregue ou cancelado não se mexe: o dinheiro já trocou de mão.
+  if (["entregue", "cancelado"].includes(String(antes.status))) {
+    return `O pedido *#${pedido.numero_pedido}* já foi finalizado — não dá mais pra mudar a forma de pagamento por aqui. Vou chamar a loja pra te ajudar. 🙋`
+  }
+
+  // ── QUEM JÁ PAGOU NÃO TROCA A FORMA ──────────────────────────────────────
+  //
+  // Observação do dono (26/10/2026), e ela está certa: ninguém que já pagou
+  // pede pra trocar a forma de pagamento. O máximo que pede é pra CANCELAR e
+  // fazer de novo. Trocar o campo aqui criaria um pedido escrito "dinheiro"
+  // com o PIX já caído na conta da loja — e o entregador cobrando de novo.
+  //
+  // Já pago é: PIX online (o pedido só nasce depois que o pagamento confirma)
+  // ou PIX na entrega com o comprovante já mandado aqui na conversa.
+  const pagoOnline = String(antes.forma_pagamento) === "pix" || String(antes.pix_status) === "pago"
+  let mandouComprovante = false
+  if (!pagoOnline && String(antes.forma_pagamento).startsWith("pix")) {
+    const { data: comp } = await supabase.from("whatsapp_conversas")
+      .select("id").eq("empresa_id", empresaId).eq("phone", phone).eq("role", "user")
+      .gte("created_at", String(antes.created_at))
+      .or("content.ilike.%[imagem]%,content.ilike.%comprovante%,content.ilike.%📷%")
+      .limit(1)
+    mandouComprovante = !!comp?.length
+  }
+  if (pagoOnline || mandouComprovante) {
+    await abrirChamado(supabase, empresaId, phone,
+      `quer mudar o pagamento do #${pedido.numero_pedido}, que já está pago`)
+    return `Esse pedido *#${pedido.numero_pedido}* já está *pago* ${pagoOnline ? "(PIX confirmado)" : "(recebi seu comprovante aqui)"} — então não dá pra simplesmente trocar a forma. 😅\n\n` +
+      `Se precisar mesmo mudar, a loja cancela e a gente refaz. Já chamei alguém de lá pra resolver com você. 🙋`
   }
   // ── UMA PERGUNTA ANTES DE TROCAR ─────────────────────────────────────────
   //
@@ -2409,15 +2449,6 @@ async function handleTrocarPagamento(
       ? valorEmReais(String(trocoDaAcao))
       : trocoDaConversa(mensagensHist)
     if (bruto != null && bruto > Number(pedido.total)) trocoNovo = bruto
-  }
-  const { data: antes } = await supabase.from("pedidos_delivery")
-    .select("id, forma_pagamento, status")
-    .eq("empresa_id", empresaId).eq("numero_pedido", pedido.numero_pedido)
-    .order("created_at", { ascending: false }).limit(1).maybeSingle()
-  if (!antes?.id) return `Não achei o pedido #${pedido.numero_pedido} pra mudar. Vou chamar a loja. 🙋`
-  // Entregue ou cancelado não se mexe: o dinheiro já trocou de mão.
-  if (["entregue", "cancelado"].includes(String(antes.status))) {
-    return `O pedido *#${pedido.numero_pedido}* já foi finalizado — não dá mais pra mudar a forma de pagamento por aqui. Vou chamar a loja pra te ajudar. 🙋`
   }
   const { error } = await supabase.from("pedidos_delivery").update({
     forma_pagamento: forma,
@@ -4551,7 +4582,7 @@ CATÁLOGO: ${catalogoUrl}
 FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}
 ${pedidoAberto ? `
 ⚠️ ESTE CLIENTE JÁ TEM UM PEDIDO NA MÃO DA LOJA: *#${pedidoAberto.numero_pedido}*, R$ ${Number(pedidoAberto.total).toFixed(2)}, situação atual: *${pedidoAberto.status}*.
-💳 A FORMA DE PAGAMENTO DESSE PEDIDO VOCÊ PODE TROCAR — e SÓ ela. Mas primeiro pergunte o que falta, numa frase curta, e só emita a ação com a resposta:
+💳 A FORMA DE PAGAMENTO DESSE PEDIDO VOCÊ PODE TROCAR — e SÓ ela, e SÓ se ele ainda NÃO PAGOU. Quem já pagou (PIX confirmado, ou já mandou o comprovante aqui) não troca de forma: aí é cancelar e refazer, e quem faz isso é a loja — chame um atendente. Mas primeiro pergunte o que falta, numa frase curta, e só emita a ação com a resposta:
 • Ele disse "cartão"${pagamentos.credito && pagamentos.debito ? ` → pergunte "crédito ou débito?" e espere a resposta` : ""}.
 • Ele disse "dinheiro" → pergunte "vai precisar de troco? pra quanto?" e espere a resposta (se disser que não precisa, mande sem troco).
 Com a resposta na mão:
@@ -5209,7 +5240,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
 
         } else if (acao.tipo === "trocar_pagamento" && acao.forma && pedidoAberto) {
           resposta = await handleTrocarPagamento(
-            supabase, empresaId, pedidoAberto, String(acao.forma), pagamentos,
+            supabase, empresaId, phone, pedidoAberto, String(acao.forma), pagamentos,
             instanceName, adminPhone, empresaNome, clienteNome ?? null,
             mensagens, acao.troco_para,
           )
@@ -5490,16 +5521,36 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     // que mudou e o pedido continua como estava.
     const ultimaDoRobo = String([...mensagens].reverse()
       .find((m: any) => m?.role === "assistant")?.content ?? "")
+    //
+    // Quem manda aqui é a FRASE DO CLIENTE, não o texto do modelo. Tentei duas
+    // vezes caçar o "alterei" na resposta dele e as duas falharam: ele escreve
+    // "Alterado!", "agora é", "Já mudei pra *débito*" — de um jeito diferente a
+    // cada vez. E quando a peneira falha o cliente ouve que mudou e o pedido
+    // fica como estava, que é o defeito original.
+    //
+    // A trava: só vale com a SACOLA VAZIA. Com itens dentro ele está montando
+    // um pedido NOVO, e aí "dinheiro" é a forma do novo — não um pedido pra
+    // mexer no antigo.
+    const tPgto = norm8(text)
+    const formaNaFala = /\bd[eé]bito\b/.test(tPgto) ? "debito"
+      : /\bcr[eé]dito\b/.test(tPgto) ? "credito"
+      : /\bcart[aã]o\b|maquinin/.test(tPgto) ? "cartao"
+      : /\bpix\b/.test(tPgto) ? "pix"
+      : /\bdinheiro\b|\besp[eé]cie\b/.test(tPgto) ? "dinheiro" : ""
+    const pedeTroca = /\b(troca|trocar|troco de|muda|mudar|mudei|altera|alterar|na verdade|corrigind|corrige|vou pagar|prefiro|pode ser|sera|ser[aá]|fica|desculpa)\b/.test(tPgto)
     if (pedidoAberto && !trocouPagamento && !/^\s*(n[ãa]o|nao|deixa|esquece)\b/i.test(text)) {
       const esperandoCartao = /No cart[ãa]o: \*cr[ée]dito\* ou \*d[ée]bito\*\?/i.test(ultimaDoRobo)
       const esperandoTroco = /muda pra \*dinheiro\*/i.test(ultimaDoRobo)
       const escolha = esperandoCartao
         ? (/d[ée]bito/i.test(text) ? "debito" : /cr[ée]dito/i.test(text) ? "credito" : "")
-        : esperandoTroco ? "dinheiro" : ""
+        : esperandoTroco ? "dinheiro"
+        // O cliente disse a forma nova com todas as letras, de sacola vazia.
+        : (formaNaFala && pedeTroca && carrinho.length === 0) ? formaNaFala
+        : ""
       if (escolha) {
         console.log(`[TrocaPgto] resposta à pergunta da troca: "${text.slice(0, 30)}" → ${escolha}`)
         resposta = await handleTrocarPagamento(
-          supabase, empresaId, pedidoAberto, escolha, pagamentos,
+          supabase, empresaId, phone, pedidoAberto, escolha, pagamentos,
           instanceName, adminPhone, empresaNome, clienteNome ?? null, mensagens, null,
         )
       }
@@ -5517,7 +5568,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       if (afirmaTroca && dito) {
         console.log(`[TrocaPgto] SafeNet: o robô disse que trocou pra "${dito}" sem emitir a ação — trocando de verdade`)
         resposta = await handleTrocarPagamento(
-          supabase, empresaId, pedidoAberto, dito, pagamentos,
+          supabase, empresaId, phone, pedidoAberto, dito, pagamentos,
           instanceName, adminPhone, empresaNome, clienteNome ?? null, mensagens, null,
         )
       }
