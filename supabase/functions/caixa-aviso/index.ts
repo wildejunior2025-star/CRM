@@ -40,15 +40,24 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const caixaId = String(body?.caixa_id ?? "")
     const momento = String(body?.momento ?? "")
-    if (!caixaId || !["abertura", "fechamento"].includes(momento)) {
-      return json({ ok: false, erro: "informe caixa_id e momento" }, 400)
+    // SAO DOIS FECHAMENTOS NO SISTEMA (26/10/2026).
+    //
+    // `caixas` e a gaveta que abre e fecha. `caixa_dia` e a conferencia do DIA,
+    // o botao "Conferir o dia" — e e por ela que a Agv trabalha. A loja fechou
+    // R$ 2.692,45 com o aviso LIGADO e ninguem recebeu nada, porque o aviso so
+    // conhecia a primeira.
+    const diaId = String(body?.caixa_dia_id ?? "")
+    if (!diaId && (!caixaId || !["abertura", "fechamento"].includes(momento))) {
+      return json({ ok: false, erro: "informe caixa_id + momento, ou caixa_dia_id" }, 400)
     }
 
     // `?seco=1` devolve o texto sem enviar — pra conferir a mensagem (e a conta
     // do esperado) antes de soltar numa loja de verdade.
     const seco = new URL(req.url).searchParams.get("seco") === "1"
 
-    const { data: aviso, error } = await sb.rpc("caixa_aviso", { p_caixa_id: caixaId, p_momento: momento })
+    const { data: aviso, error } = diaId
+      ? await sb.rpc("caixa_dia_aviso", { p_id: diaId })
+      : await sb.rpc("caixa_aviso", { p_caixa_id: caixaId, p_momento: momento })
     if (error) return json({ ok: false, erro: error.message }, 500)
     // null = loja com o aviso desligado, sem número, ou caixa que não existe.
     if (!aviso?.texto) return json({ ok: true, enviado: false, motivo: "desligado ou sem numero" })
@@ -59,21 +68,35 @@ serve(async (req) => {
       return json({ ok: false, erro: "sem_evolution", ...aviso })
     }
 
-    let numero = String(aviso.telefone ?? "").replace(/\D/g, "")
-    if (!numero) return json({ ok: false, erro: "sem telefone" }, 400)
-    if (!numero.startsWith("55")) numero = "55" + numero
+    // LOJA COM MAIS DE UM DONO (26/10/2026). Antes so dava pra escolher um, e
+    // quem tem socio tinha que decidir qual dos dois ia saber do caixa.
+    const lista: string[] = Array.isArray(aviso.telefones) && aviso.telefones.length
+      ? aviso.telefones.map(String)
+      : [String(aviso.telefone ?? "")]
+    const numeros = [...new Set(lista
+      .map((t) => t.replace(/\D/g, ""))
+      .filter((t) => t.length >= 10)
+      .map((t) => (t.startsWith("55") ? t : "55" + t)))]
+    if (!numeros.length) return json({ ok: false, erro: "sem telefone" }, 400)
 
-    const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${aviso.instancia}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-      body: JSON.stringify({ number: numero, text: aviso.texto }),
-    })
-    if (!r.ok) {
-      console.error("[caixa-aviso] Evolution recusou:", (await r.text()).slice(0, 250))
-      return json({ ok: false, erro: "evolution" }, 502)
+    // Um dono que da erro nao pode calar o aviso dos outros.
+    const entregues: string[] = []
+    const falhou: string[] = []
+    for (const numero of numeros) {
+      const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${aviso.instancia}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: numero, text: aviso.texto }),
+      })
+      if (r.ok) entregues.push(numero)
+      else {
+        falhou.push(numero)
+        console.error(`[caixa-aviso] Evolution recusou ${numero}:`, (await r.text()).slice(0, 250))
+      }
     }
+    if (!entregues.length) return json({ ok: false, erro: "evolution", falhou }, 502)
 
-    return json({ ok: true, enviado: true, momento, para: numero })
+    return json({ ok: true, enviado: true, momento: diaId ? "dia" : momento, para: entregues, falhou })
   } catch (e) {
     console.error("[caixa-aviso] erro:", e)
     return json({ ok: false, erro: String(e).slice(0, 300) }, 500)

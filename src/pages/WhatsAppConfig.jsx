@@ -108,6 +108,9 @@ export default function WhatsAppConfig() {
   const [recadoAtivo,     setRecadoAtivo]     = useState(false)
   const [recadoTexto,     setRecadoTexto]     = useState('')
   const [recadoPalavras,  setRecadoPalavras]  = useState('')
+  // Donos extras: loja com dois sócios recebia aviso só num número. Fica fora
+  // do `form` porque no banco é text[] e aqui é texto digitado.
+  const [donosExtras,     setDonosExtras]     = useState('')
   // Janela do recado (mig 0348): dias da semana, hora e feriado.
   const [recadoDias,      setRecadoDias]      = useState([])
   const [recadoInicio,    setRecadoInicio]    = useState('')
@@ -198,6 +201,7 @@ export default function WhatsAppConfig() {
       setRecadoAtivo(data.recado_ativo ?? false)
       setRecadoTexto(data.recado_texto ?? '')
       setRecadoPalavras(data.recado_palavras ?? '')
+      setDonosExtras((data.admin_phones ?? []).join(', '))
       setRecadoDias(Array.isArray(data.recado_dias) ? data.recado_dias.map(Number) : [])
       setRecadoInicio(String(data.recado_hora_inicio ?? '').slice(0, 5))
       setRecadoFim(String(data.recado_hora_fim ?? '').slice(0, 5))
@@ -468,8 +472,16 @@ export default function WhatsAppConfig() {
     setSaving(true)
     setSaveMsg(null)
 
+    // Os donos extras vêm de um campo de texto: separa por vírgula/linha, tira
+    // tudo que não é dígito e descarta o que não chega a um telefone.
+    const extras = donosExtras
+      .split(/[,;\n]+/)
+      .map(t => t.replace(/\D/g, ''))
+      .filter(t => t.length >= 10)
+      .filter((t, i, a) => a.indexOf(t) === i)
+
     const { error } = await supabase.from('whatsapp_config').upsert(
-      { empresa_id: profile.empresa_id, ...form },
+      { empresa_id: profile.empresa_id, ...form, admin_phones: extras.length ? extras : null },
       { onConflict: 'empresa_id' }
     )
 
@@ -1494,6 +1506,22 @@ export default function WhatsAppConfig() {
                   onChange={(e) => setField('admin_phone', e.target.value)}
                 />
                 <span className="wa-hint">DDD + número, sem espaços. Ex: 84999999999. Usado para alertas de estoque e quando o bot escalar um problema para humano.</span>
+              </div>
+
+              {/* Loja com dois sócios: os dois recebem o mesmo aviso. */}
+              <div className="wa-input-group">
+                <label htmlFor="wa-admin-phones">Outros donos que também recebem (opcional)</label>
+                <input
+                  id="wa-admin-phones"
+                  type="tel"
+                  placeholder="84988888888, 84977777777"
+                  value={donosExtras}
+                  onChange={(e) => setDonosExtras(e.target.value)}
+                />
+                <span className="wa-hint">
+                  Um número por vírgula. Cada um recebe os mesmos avisos de caixa e estoque
+                  que o responsável acima. Número repetido entra uma vez só.
+                </span>
               </div>
             </div>
           )}

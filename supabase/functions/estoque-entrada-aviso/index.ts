@@ -35,7 +35,15 @@ const cors = {
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
 
-type Aviso = { empresa_id: string; instancia: string; telefone: string; texto: string }
+// `telefones` é a lista de donos da loja (mig 0398). `telefone` continua
+// vindo pra não quebrar nada que leia um só.
+type Aviso = {
+  empresa_id: string
+  instancia: string
+  telefone: string
+  telefones?: string[]
+  texto: string
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
@@ -83,22 +91,27 @@ serve(async (req) => {
 
     let enviadas = 0
     for (const a of avisos) {
-      let numero = String(a.telefone ?? "").replace(/\D/g, "")
-      if (!numero) continue
-      if (!numero.startsWith("55")) numero = "55" + numero
-      try {
-        const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${a.instancia}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-          body: JSON.stringify({ number: numero, text: a.texto }),
-        })
-        if (r.ok) { enviadas++; continue }
-        console.error("[estoque-entrada] Evolution recusou:", (await r.text()).slice(0, 200))
-      } catch (e) {
-        console.error("[estoque-entrada] falhou:", String(e).slice(0, 160))
+      // Loja com dois sócios: o mesmo aviso vai pra cada um. O laço é por
+      // número justamente pra que um número errado não cale os outros.
+      const fones = (a.telefones?.length ? a.telefones : [a.telefone])
+        .map((t) => String(t ?? "").replace(/\D/g, ""))
+        .filter(Boolean)
+      for (const bruto of fones) {
+        const numero = bruto.startsWith("55") ? bruto : "55" + bruto
+        try {
+          const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${a.instancia}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify({ number: numero, text: a.texto }),
+          })
+          if (r.ok) enviadas++
+          else console.error("[estoque-entrada] Evolution recusou:", (await r.text()).slice(0, 200))
+        } catch (e) {
+          console.error("[estoque-entrada] falhou:", String(e).slice(0, 160))
+        }
+        // Espaça: é o número da própria loja, sem pressa.
+        await new Promise((r) => setTimeout(r, 1200))
       }
-      // Espaça: é o número da própria loja, sem pressa.
-      await new Promise((r) => setTimeout(r, 1200))
     }
 
     return json({ ok: true, enviado: enviadas, de: avisos.length })
