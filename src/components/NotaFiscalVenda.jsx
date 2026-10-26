@@ -54,8 +54,8 @@ export default function NotaFiscalVenda({ empresaId, venda, compacto = false }) 
 
   async function emitir() {
     const cpfLimpo = cpf.replace(/\D/g, '')
-    if (cpf.trim() && cpfLimpo.length !== 11) {
-      setMsg({ ok: false, txt: 'CPF precisa ter 11 números (ou deixe em branco).' }); return
+    if (cpf.trim() && cpfLimpo.length !== 11 && cpfLimpo.length !== 14) {
+      setMsg({ ok: false, txt: 'CPF tem 11 números e CNPJ tem 14 (ou deixe em branco).' }); return
     }
     setEmitindo(true); setMsg(null)
     try {
@@ -146,7 +146,7 @@ export default function NotaFiscalVenda({ empresaId, venda, compacto = false }) 
           )}
           <input
             value={cpf} onChange={e => setCpf(e.target.value)} inputMode="numeric"
-            placeholder="CPF na nota (opcional)"
+            placeholder="CPF ou CNPJ na nota (opcional)"
             style={{ width: '100%', padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border)',
               background: 'transparent', color: 'var(--text)', fontSize: 13.5 }}
           />

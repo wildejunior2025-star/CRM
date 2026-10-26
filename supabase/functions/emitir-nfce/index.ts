@@ -422,8 +422,10 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   // porque ninguem pede CPF na nota pra comprar quentinha. Entao, sem CPF, o
   // pedido sai como consumidor nao identificado — que e o certo pra NFC-e.
   const cpfLimpo = soDigitos(cpf)
-  if (cpfLimpo.length === 11) {
-    nfce.cpf_destinatario = cpfLimpo
+  // 11 digitos = CPF, 14 = CNPJ (empresa que pede a nota no CNPJ dela).
+  if (cpfLimpo.length === 11 || cpfLimpo.length === 14) {
+    if (cpfLimpo.length === 11) nfce.cpf_destinatario = cpfLimpo
+    else nfce.cnpj_destinatario = cpfLimpo
     if (ped.cliente_nome && ped.cliente_nome !== "Cliente iFood") nfce.nome_destinatario = ped.cliente_nome
   }
 
