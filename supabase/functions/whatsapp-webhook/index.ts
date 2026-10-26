@@ -446,7 +446,8 @@ async function handleSalvarRua(
   rua: string,
   bairro?: string | null,
   cidade?: string | null,
-  estado?: string | null
+  estado?: string | null,
+  complemento?: string | null,
 ): Promise<{ resposta: string }> {
   try {
     // Bairro e cidade também são salvos quando vêm junto (cliente que digitou o
@@ -476,14 +477,17 @@ async function handleSalvarRua(
       campos.endereco_lng    = null
       // Bairro velho também não vale pra rua nova, a não ser que ele venha agora.
       campos.endereco_bairro = null
+      campos.endereco_complemento = null
     }
     if (bairro) campos.endereco_bairro = bairro
     if (cidade) campos.endereco_cidade = cidade
     if (estado) campos.endereco_estado = estado
+    if (complemento) campos.endereco_complemento = complemento
     await salvarEnderecoNoCarrinho(empresaId, phone, campos)
 
     const detalhe = [rua, bairro, cidade].filter(Boolean).join(" — ")
-    return { resposta: `✅ Endereço salvo!\n\n📍 ${detalhe}\n\nQual o *número* da sua casa? 😊` }
+    const linhaCompl = complemento ? `\n🏠 ${complemento}` : ""
+    return { resposta: `✅ Endereço salvo!\n\n📍 ${detalhe}${linhaCompl}\n\nQual o *número* da sua casa? 😊` }
   } catch (e: any) {
     console.error("[Rua] exceção:", e?.message ?? String(e))
     return { resposta: "Não consegui salvar a rua. Pode repetir?" }
@@ -541,7 +545,32 @@ function recortarEnderecoNoTexto(txt: string): string {
   return base
 }
 
-function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; bairro: string | null } | null {
+// ── O COMPLEMENTO GRUDADO NO BAIRRO (26/10/2026) ────────────────────────────
+//
+// A Victoria escreveu "Rua monsenhor José Paulino 1061, Tirol Ap 1103" e o
+// pedido nasceu com bairro *"Tirol Ap 1103"* e complemento VAZIO. Dois estragos
+// de uma vez: o bairro deixa de casar com a tabela de taxa por bairro, e o
+// entregador chega no prédio sem saber o apartamento — justo o dado que ela deu.
+//
+// Exige um VALOR depois da palavra (ap 1103, bloco B, casa 2). Sem isso,
+// "Casa Caiada" e "Vila Frente" virariam complemento.
+const RE_COMPLEMENTO = /\b(ap(?:to?|artamento)?|bl(?:oco)?|casa|cs|qd|quadra|lote|lt|sala|torre|andar|box|kitnet)\b\.?\s*[nº°]?\s*(\d{1,5}[a-zA-Z]?|[a-zA-Z]\b)/i
+// Estes se bastam sozinhos — ninguém escreve "fundos 2".
+const RE_COMPLEMENTO_SOZINHO = /\b(fundos|frente|t[ée]rreo)\b/i
+
+/** Tira o complemento de dentro do texto e devolve os dois separados. */
+function separarComplemento(txt: string | null): { limpo: string | null; complemento: string | null } {
+  const base = String(txt ?? "").trim()
+  if (!base) return { limpo: null, complemento: null }
+  const m = RE_COMPLEMENTO.exec(base) ?? RE_COMPLEMENTO_SOZINHO.exec(base)
+  if (!m || m.index === undefined) return { limpo: base, complemento: null }
+  const complemento = base.slice(m.index).trim().replace(/^[,\-–\s]+/, "")
+  const limpo = base.slice(0, m.index).trim().replace(/[,\-–\s]+$/, "")
+  // Se o complemento comeu o texto inteiro ("Ap 1103" sozinho), não sobra bairro.
+  return { limpo: limpo || null, complemento: complemento || null }
+}
+
+function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; bairro: string | null; complemento?: string | null } | null {
   const bruto = limparRotuloEndereco(recortarEnderecoNoTexto(txt))
   if (bruto.length < 8 || bruto.length > 160) return null
   const partes = bruto.split(",").map(p => p.trim()).filter(Boolean)
@@ -574,7 +603,32 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
   if (!rua || rua.length < 5) return null
   // Sem prefixo de rua e sem número, é conversa, não endereço.
   if (!PREFIXO_RUA.test(rua) && !numero) return null
-  return { rua, numero, bairro: bairro && bairro.length >= 3 ? bairro : null }
+
+  // Apartamento, bloco, casa: sai do bairro e vira complemento. Quando o
+  // complemento veio sozinho numa vírgula ("Rua X, 100, Ap 202, Tirol"), o
+  // bairro é o pedaço seguinte.
+  const sep = separarComplemento(bairro)
+  let complemento = sep.complemento
+  bairro = sep.limpo
+  if (complemento && !bairro) {
+    const i = partes.findIndex(p => p.trim() === complemento)
+    const seguinte = i >= 0 ? partes[i + 1] : null
+    if (seguinte && !/\d/.test(seguinte)) bairro = seguinte.trim()
+  }
+  // Também pode ter vindo colado na RUA ("Rua X 100 ap 202" sem vírgula).
+  if (!complemento) {
+    const sepRua = separarComplemento(rua)
+    if (sepRua.complemento && sepRua.limpo && sepRua.limpo.length >= 5) {
+      complemento = sepRua.complemento
+      rua = sepRua.limpo
+    }
+  }
+
+  return {
+    rua, numero,
+    bairro: bairro && bairro.length >= 3 ? bairro : null,
+    complemento: complemento || null,
+  }
 }
 
 /**
@@ -1043,7 +1097,7 @@ async function handleSalvarNumero(
   try {
     const { data: c } = await supabase
       .from("whatsapp_carrinho")
-      .select("endereco_rua, endereco_bairro, endereco_cidade, endereco_estado, endereco_lat, endereco_lng")
+      .select("endereco_rua, endereco_bairro, endereco_cidade, endereco_estado, endereco_complemento, endereco_lat, endereco_lng")
       .eq("empresa_id", empresaId)
       .eq("phone", phone)
       .single()
@@ -1062,6 +1116,7 @@ async function handleSalvarNumero(
     await supabase.from("clientes").update({
       endereco: c.endereco_rua,
       numero,
+      complemento: c.endereco_complemento ?? null,
       bairro: c.endereco_bairro ?? null,
       cidade: c.endereco_cidade ?? null,
       estado: c.endereco_estado ?? null,
@@ -2208,7 +2263,7 @@ async function handleFecharPedido(
   supabase_url: string,
   supabase_key: string,
   instanceName: string,
-  carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null; estado?: string|null; lat?: number|null; lng?: number|null },
+  carrinhoEndereco: { rua: string|null; numero: string|null; bairro: string|null; cidade: string|null; estado?: string|null; complemento?: string|null; lat?: number|null; lng?: number|null },
   indicadorProfileId: string|null = null,
   taxaEntregaCalc: number|null = null,
   mensagensHist: any[] = [],
@@ -2254,6 +2309,8 @@ async function handleFecharPedido(
     const endBairro = acao.cliente_bairro ? String(acao.cliente_bairro).trim() : (carrinhoEndereco.bairro ?? cliente?.bairro   ?? null)
     const endCidade = acao.cliente_cidade ? String(acao.cliente_cidade).trim() : (carrinhoEndereco.cidade ?? cliente?.cidade   ?? null)
     const endEstado = acao.cliente_estado ? String(acao.cliente_estado).trim() : (carrinhoEndereco.estado ?? cliente?.estado ?? null)
+    // Apartamento/bloco: veio do que o cliente escreveu, ou do cadastro dele.
+    const endComplemento = carrinhoEndereco.complemento ?? cliente?.complemento ?? null
     // O PONTO. Sem ele o pedido saía só com o texto do endereço, e o app do
     // entregador jogava esse texto no Google — que, sem confiar no número,
     // larga o pino no meio da rua. Ordem: o que o cliente mandou agora, senão o
@@ -2506,7 +2563,7 @@ async function handleFecharPedido(
             itens: itens, total: totalFinal, subtotal: totalCarrinho, taxa_entrega: taxaFinal,
             tipo_entrega: tipoEntrega,
             endereco_rua: endRua, endereco_numero: endNumero, endereco_bairro: endBairro,
-            endereco_cidade: endCidade, endereco_estado: endEstado,
+            endereco_cidade: endCidade, endereco_estado: endEstado, endereco_complemento: endComplemento,
             endereco_lat: tipoEntrega === "entrega" ? endLat : null,
             endereco_lng: tipoEntrega === "entrega" ? endLng : null,
           }
@@ -2548,7 +2605,7 @@ async function handleFecharPedido(
     const pedidoPayload = {
       empresa_id: empresaId, cliente_id: clienteId, cliente_nome: clienteNomeInsert, cliente_telefone: clienteTel,
       endereco_rua: endRua, endereco_numero: endNumero, endereco_bairro: endBairro,
-      endereco_cidade: endCidade, endereco_estado: endEstado,
+      endereco_cidade: endCidade, endereco_estado: endEstado, endereco_complemento: endComplemento,
       endereco_lat: tipoEntrega === "entrega" ? endLat : null,
       endereco_lng: tipoEntrega === "entrega" ? endLng : null,
       itens: itens, subtotal: totalCarrinho, taxa_entrega: taxaFinal, total: totalFinal,
@@ -3756,12 +3813,12 @@ serve(async (req) => {
         .order("nome")
         .limit(MENU_INTEIRO_ATE),
       supabase.from("whatsapp_carrinho")
-        .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado, endereco_lat, endereco_lng")
+        .select("items, cliente_id, endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_estado, endereco_complemento, endereco_lat, endereco_lng")
         .eq("empresa_id", empresaId)
         .eq("phone", phone)
         .single(),
       supabase.from("clientes")
-        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
+        .select("id, nome, email, cep, numero, endereco, complemento, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
         .eq("empresa_id", empresaId)
         .in("telefone", [...new Set([phone, phoneLocal, `0${phoneLocal}`, `55${phoneLocal}`, phoneLocalWith9, `55${phoneLocalWith9}`, phoneLocalNo9, `55${phoneLocalNo9}`])])
         .limit(1)
@@ -4029,6 +4086,7 @@ serve(async (req) => {
       bairro: carrinhoRes.data?.endereco_bairro ?? null,
       cidade: carrinhoRes.data?.endereco_cidade ?? null,
       estado: carrinhoRes.data?.endereco_estado ?? null,
+      complemento: carrinhoRes.data?.endereco_complemento ?? null,
       // O ponto que o cliente mandou (mig 0239). É ele que vai pro pedido e que
       // o app do entregador abre — o texto acima é pro papel.
       lat:    carrinhoRes.data?.endereco_lat    ?? null,
@@ -4038,7 +4096,7 @@ serve(async (req) => {
     let cliente = clienteRes.data ?? null
     if (!cliente && clienteIdNoCarrinho) {
       const { data } = await supabase.from("clientes")
-        .select("id, nome, email, cep, numero, endereco, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
+        .select("id, nome, email, cep, numero, endereco, complemento, bairro, cidade, estado, telefone, created_at, origem, endereco_lat, endereco_lng, endereco_pin_manual")
         .eq("id", clienteIdNoCarrinho)
         .maybeSingle()
       if (data) cliente = data
@@ -5236,7 +5294,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         const cidadeReal = await descobrirCidade(end.rua, end.bairro, empresa.estado ?? null, empresa.cidade ?? null, empresa.id ?? null)
         const r = await handleSalvarRua(
           supabase, empresaId, phone, end.rua, end.bairro,
-          cidadeReal, empresa.estado ?? null,
+          cidadeReal, empresa.estado ?? null, end.complemento ?? null,
         )
         resposta = r.resposta
         if (end.numero) {
