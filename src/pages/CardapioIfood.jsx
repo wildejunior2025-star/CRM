@@ -36,23 +36,38 @@ export default function CardapioIfood() {
   const [importar, setImportar] = useState(null)    // null = painel fechado; senão [{id,nome}]
   const [marcadas, setMarcadas] = useState(() => new Set())
 
+  const [lojas, setLojas] = useState([])         // lojas do iFood da empresa
+  const [lojaId, setLojaId] = useState(null)       // merchant_id escolhido
+
   useEffect(() => {
     if (!empresa?.id) return
-    // A empresa pode ter várias lojas no iFood; o cardápio daqui trabalha na
-    // principal (as outras continuam sendo editadas no próprio iFood).
+    // A empresa pode ter várias lojas no iFood: cada uma tem o seu cardápio,
+    // então a tela trabalha na loja escolhida (começa pela principal).
     supabase.from('ifood_config')
-      .select('merchant_id, ambiente, ativo, ultimo_polling_em')
+      .select('merchant_id, apelido, ambiente, ativo, ultimo_polling_em, principal')
       .eq('empresa_id', empresa.id)
+      .not('merchant_id', 'is', null)
       .order('principal', { ascending: false })
       .order('created_at', { ascending: true })
-      .limit(1)
-      .then(({ data }) => setCfg((data ?? [])[0] ?? null))
+      .then(({ data }) => {
+        const l = data ?? []
+        setLojas(l)
+        setLojaId(atual => atual ?? l[0]?.merchant_id ?? null)
+        setCfg(l[0] ?? null)
+      })
   }, [empresa?.id])
+
+  const lojaAtual = lojas.find(l => l.merchant_id === lojaId) ?? cfg
+
+  function trocarLoja(id) {
+    setLojaId(id); setImportar(null); setMarcadas(new Set()); setMsg(null)
+    setRecarregar(n => n + 1)
+  }
 
   async function abrirImportar() {
     setMsg(null)
     setImportar('carregando')
-    const d = await chamarIfood({ acao: 'catalogo_categorias', empresa_id: empresa.id })
+    const d = await chamarIfood({ acao: 'catalogo_categorias', empresa_id: empresa.id, merchant_id: lojaId })
     if (d.ok) {
       setImportar(d.categorias ?? [])
       setMarcadas(new Set())
@@ -92,7 +107,7 @@ export default function CardapioIfood() {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token ?? ''}` },
-        body: JSON.stringify({ acao: 'catalogo', empresa_id: empresa.id, categoria_ids: [...marcadas] }),
+        body: JSON.stringify({ acao: 'catalogo', empresa_id: empresa.id, merchant_id: lojaId, categoria_ids: [...marcadas] }),
       })
       const data = await res.json()
       if (data.ok) {
@@ -157,10 +172,29 @@ export default function CardapioIfood() {
         </div>
       </div>
 
+      {lojas.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '0 0 14px' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loja:</span>
+          {lojas.map(l => {
+            const ativa = l.merchant_id === lojaId
+            return (
+              <button key={l.merchant_id} type="button" onClick={() => trocarLoja(l.merchant_id)}
+                style={{
+                  padding: '8px 16px', borderRadius: 999, cursor: 'pointer', fontSize: 14, fontWeight: 700,
+                  border: `1.5px solid ${ativa ? RED : 'var(--border)'}`,
+                  background: ativa ? RED : 'transparent', color: ativa ? '#fff' : 'inherit',
+                }}>
+                {l.apelido || l.merchant_id.slice(0, 8)}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 8px', maxWidth: 720 }}>
         Este é o cardápio que está <strong>no ar no iFood</strong> — separado do seu cardápio da loja,
         porque os preços e os nomes costumam ser diferentes nos dois. O que você mudar aqui muda lá na hora.
-        {cfg.ambiente === 'teste' && <strong style={{ color: RED }}> (Ambiente de teste.)</strong>}
+        {lojaAtual?.ambiente === 'teste' && <strong style={{ color: RED }}> (Ambiente de teste.)</strong>}
       </p>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px', maxWidth: 720 }}>
         🔗 <strong>Produto publicado daqui fica ligado ao item de lá:</strong> quando você pausar no
@@ -229,13 +263,13 @@ export default function CardapioIfood() {
       )}
 
       <div className="card" style={{ padding: 18 }}>
-        <IfoodEnviarDaLoja empresaId={empresa?.id} onPronto={() => setRecarregar(n => n + 1)} />
-        <IfoodCatalogoManager key={recarregar} empresaId={empresa?.id} merchantOk={!!cfg.merchant_id} autoCarregar />
+        <IfoodEnviarDaLoja key={`env-${lojaId}`} empresaId={empresa?.id} merchantId={lojaId} onPronto={() => setRecarregar(n => n + 1)} />
+        <IfoodCatalogoManager key={`${lojaId}-${recarregar}`} empresaId={empresa?.id} merchantId={lojaId} merchantOk={!!lojaAtual?.merchant_id} autoCarregar />
         {/* Roteamento da impressão. Fica aqui embaixo e não numa página nova
             porque é a mesma pergunta que o lojista veio fazer ("o que acontece
             com o que vem do iFood?"), só que do lado do papel. E vale pras
             DUAS lojas, diferente do resto desta tela, que trabalha só na
-            principal. */}
+            loja escolhida. */}
         <IfoodSetorCategorias empresaId={empresa?.id} />
       </div>
     </div>

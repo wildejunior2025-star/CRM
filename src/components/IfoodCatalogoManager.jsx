@@ -17,7 +17,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
 
 const FUNC_URL = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
 
-async function chamar(payload) {
+async function chamarBase(payload) {
   const { data: { session } } = await supabase.auth.getSession()
   const res = await fetch(FUNC_URL, {
     method: 'POST',
@@ -73,10 +73,14 @@ function gravarJson(chave, valor) {
 // Busca sem acento e sem caixa: "camarao" acha "Camarão".
 const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 
-export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarregar = false }) {
-  const [categorias, setCategorias] = useState(() => lerJson(CHAVE_CATS(empresaId)))
+export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk, autoCarregar = false }) {
+  // Empresa com 2 lojas no iFood: toda chamada diz de qual loja é (o servidor
+  // só obedece a loja escolhida, nunca cai na principal por engano).
+  const chamar = (payload) => chamarBase(merchantId ? { ...payload, merchant_id: merchantId } : payload)
+  const cacheId = merchantId ? `${empresaId}_${merchantId}` : empresaId
+  const [categorias, setCategorias] = useState(() => lerJson(CHAVE_CATS(cacheId)))
   const [novaCat, setNovaCat] = useState('')
-  const [item, setItem] = useState(() => { const r = lerJson(CHAVE_RASCUNHO(empresaId)); return r ? comPreview(r) : itemVazio() })
+  const [item, setItem] = useState(() => { const r = lerJson(CHAVE_RASCUNHO(cacheId)); return r ? comPreview(r) : itemVazio() })
   const [salvos, setSalvos] = useState([])             // itens já mandados (pra pausar/editar)
   const [busy, setBusy] = useState('')                 // rótulo da ação em curso
   const [msg, setMsg] = useState(null)                 // { tipo, texto }
@@ -89,19 +93,19 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
 
   // Empresa chegou depois (ou o lojista trocou de loja): recarrega o rascunho dela.
   useEffect(() => {
-    const r = lerJson(CHAVE_RASCUNHO(empresaId))
+    const r = lerJson(CHAVE_RASCUNHO(cacheId))
     setItem(r ? comPreview(r) : itemVazio())
-    setCategorias(lerJson(CHAVE_CATS(empresaId)))
+    setCategorias(lerJson(CHAVE_CATS(cacheId)))
     setSalvos([])
   }, [empresaId])
 
   // Guarda o rascunho a cada tecla — sair da página não perde mais o item.
   useEffect(() => {
-    gravarJson(CHAVE_RASCUNHO(empresaId), itemEmBranco(item) ? null : semPreview(item))
+    gravarJson(CHAVE_RASCUNHO(cacheId), itemEmBranco(item) ? null : semPreview(item))
   }, [item, empresaId])
 
   // Guarda as categorias já carregadas, pra caixinha não voltar vazia no F5.
-  useEffect(() => { gravarJson(CHAVE_CATS(empresaId), categorias) }, [categorias, empresaId])
+  useEffect(() => { gravarJson(CHAVE_CATS(cacheId), categorias) }, [categorias, cacheId])
 
   async function carregarCategorias() {
     setBusy('cats'); setMsg(null)
@@ -216,7 +220,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantOk, autoCarreg
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   function novo() {
-    setItem(itemVazio()); gravarJson(CHAVE_RASCUNHO(empresaId), null); setMsg(null)
+    setItem(itemVazio()); gravarJson(CHAVE_RASCUNHO(cacheId), null); setMsg(null)
     if (autoCarregar) setCriando(false)   // na página do cardápio, fecha o formulário e volta pra lista
   }
 

@@ -1,6 +1,7 @@
 // Versão fixa: o "@2" hoje cai na 2.112.2, que está quebrada no esm.sh
 // (postgrest-js 404) e faz o deploy falhar no bundle.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.111.0"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { runConciliacaoMensal, runConciliacaoSolicitar, runConciliacaoStatus, runFinanceiroSync } from "./financeiro.ts"
 
 // =====================================================================
@@ -72,7 +73,14 @@ Deno.serve(async (req) => {
   try { body = await req.json() } catch { body = {} }
   const acao = body?.acao ?? "poll"
 
+  // Cardápio de uma empresa com 2+ lojas no iFood: a tela diz qual loja quer
+  // (merchant_id). Fica no contexto da requisição — assim cada chamada enxerga
+  // só a sua, sem passar o parâmetro por dezenas de funções.
+  const merchantCat = acao.startsWith("catalogo") && typeof body?.merchant_id === "string" && body.merchant_id
+    ? body.merchant_id : null
+
   try {
+    return await merchantCatalogo.run(merchantCat, async () => {
     if (acao === "poll") return json(await runPoll(sb))
     if (acao === "test") return json(await runTest(sb, body?.empresa_id, body?.merchant_id))
     if (acao === "status") return json(await runStatus(sb, body?.pedido_id, body?.novo_status))
@@ -104,6 +112,7 @@ Deno.serve(async (req) => {
     if (acao === "conciliacao_solicitar") return json(await runConciliacaoSolicitar(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
     if (acao === "conciliacao_status") return json(await runConciliacaoStatus(req, sb, getTokenFinanceiro, body?.empresa_id, body?.competencia))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
+    })
   } catch (e) {
     return json({ ok: false, error: String(e?.message ?? e) }, 500)
   }
@@ -203,8 +212,18 @@ async function getToken(sb: any, cfg: Config): Promise<string> {
 // Acha a loja do iFood de uma empresa. Com merchantId, é aquela loja; sem ele
 // (cardápio, teste), vale a principal. Nunca usar .maybeSingle() aqui: empresa
 // com duas lojas devolve duas linhas e o maybeSingle estoura.
+const merchantCatalogo = new AsyncLocalStorage<string | null>()
+
 async function cfgDaEmpresa(sb: any, empresaId: string, merchantId?: string | null): Promise<Config | null> {
   if (!empresaId) return null
+  // Loja escolhida na tela do cardápio: é aquela ou nenhuma. Cair na principal
+  // aqui pausaria o item da loja errada.
+  const escolhida = merchantId ? null : merchantCatalogo.getStore()
+  if (escolhida) {
+    const { data } = await sb.from("ifood_config").select("*")
+      .eq("empresa_id", empresaId).eq("merchant_id", escolhida).limit(1)
+    return ((data ?? [])[0] ?? null) as Config | null
+  }
   if (merchantId) {
     const { data } = await sb.from("ifood_config").select("*")
       .eq("empresa_id", empresaId).eq("merchant_id", merchantId).limit(1)

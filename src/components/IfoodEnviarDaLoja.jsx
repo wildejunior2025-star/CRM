@@ -22,7 +22,8 @@ const inp = { padding: '9px 10px', borderRadius: 8, border: '1px solid var(--bor
 const norm = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 const reais = (v) => Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
+export default function IfoodEnviarDaLoja({ empresaId, merchantId, onPronto }) {
+  const chamar = (payload) => chamarBase(merchantId ? { ...payload, merchant_id: merchantId } : payload)
   const [aberto, setAberto] = useState(false)
   const [produtos, setProdutos] = useState(null)     // todos os ativos da loja
   const [gruposPorProduto, setGruposPorProduto] = useState({})  // quantos complementos cada um leva
@@ -337,7 +338,7 @@ export default function IfoodEnviarDaLoja({ empresaId, onPronto }) {
 
 const botao = { borderRadius: 8, cursor: 'pointer', border: 'none', background: RED, color: '#fff', fontWeight: 700 }
 
-async function chamar(payload) {
+async function chamarBase(payload) {
   const { data: { session } } = await supabase.auth.getSession()
   const url = `${import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'}/functions/v1/ifood-integration`
   const res = await fetch(url, {
