@@ -366,7 +366,8 @@ export default function Produtos() {
   // quantos tem. Aqui o dono já digita a contagem e a gente grava a
   // movimentação (entrada na criação, ajuste na edição) depois de salvar.
   const [estoqueQtd, setEstoqueQtd] = useState('')          // o que o dono digitou (vazio = não mexer)
-  const [estoqueSaldo, setEstoqueSaldo] = useState(0)       // saldo atual do produto (0 em produto novo)
+  const [saldoLista, setSaldoLista] = useState(() => new Map())  // estoque atual por produto, pra coluna da lista
+  const [estoqueSaldo, setEstoqueSaldo] = useState(0)     // saldo atual do produto (0 em produto novo)
   const [carregandoSaldo, setCarregandoSaldo] = useState(false)
 
   // Complementos / opções do produto (ex.: monte sua quentinha)
@@ -802,6 +803,13 @@ export default function Produtos() {
     else {
       setProdutos(data ?? [])
       setTotal(count ?? 0)
+      // Estoque atual de cada produto (mesma view da tela Estoque)
+      if (usaEstoque && profile?.empresa_id) {
+        const { data: sd } = await fetchAll(() => supabase
+          .from('estoque_saldo').select('produto_id, quantidade_atual')
+          .eq('empresa_id', profile.empresa_id).order('produto_id'))
+        setSaldoLista(new Map((sd ?? []).map(s => [s.produto_id, Number(s.quantidade_atual ?? 0)])))
+      }
       // Complementos dos produtos exibidos (accordion pausável na própria lista)
       const ids = (data ?? []).map(p => p.id)
       if (ids.length) {
@@ -1891,7 +1899,7 @@ export default function Produtos() {
                 <th className="col-extra">Custo</th>
                 <th>Venda</th>
                 {MOSTRAR_PRECO_APP && <th className="col-extra">Venda App</th>}
-                {usaEstoque && <th className="col-extra">Estoque mín.</th>}
+                {usaEstoque && <th className="col-extra">Estoque</th>}
                 <th>Disponível</th>
                 <th className="prod-acoes-th"></th>
               </tr>
@@ -2038,7 +2046,11 @@ export default function Produtos() {
                     )}
                   </td>
                   {MOSTRAR_PRECO_APP && <td className="col-extra">R$ {Number(p.preco_app || 0).toFixed(2)}</td>}
-                  {usaEstoque && <td className="col-extra">{p.estoque_minimo}</td>}
+                  {usaEstoque && (
+                    <td className="col-extra" title={p.estoque_minimo > 0 ? `Estoque mínimo: ${p.estoque_minimo}` : undefined}>
+                      {p.controla_estoque === false ? '—' : (saldoLista.get(p.id) ?? 0)}
+                    </td>
+                  )}
                   <td>
                     <button
                       type="button"
