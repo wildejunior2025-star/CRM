@@ -378,6 +378,25 @@ export default function Usuarios() {
                             </label>
                           )
                         })}
+                        {/* Encosto: valor garantido por dia, somado as corridas no acerto. */}
+                        <label title="Valor garantido que ele ganha por dia a mais das corridas. Soma no acerto do dia em que ele roda."
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+                          <span style={{ width: 62, fontWeight: 700 }}>Encosto</span>
+                          <span style={{ color: 'var(--text-muted, #9ca3af)' }}>R$</span>
+                          <input
+                            type="number" min="0" step="0.50"
+                            value={p.entregador_encosto ?? 0}
+                            onChange={(e) => setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, entregador_encosto: e.target.value } : x))}
+                            onBlur={async (e) => {
+                              const v = Math.max(0, Number(e.target.value) || 0)
+                              setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, entregador_encosto: v } : x))
+                              const { error } = await supabase.from('profiles').update({ entregador_encosto: v }).eq('id', p.id)
+                              if (error) setError(error.message)
+                            }}
+                            style={{ width: 72 }}
+                          />
+                          <span style={{ color: 'var(--text-muted, #9ca3af)' }}>/dia</span>
+                        </label>
                       </div>
                     ) : (
                       <span style={{ color: 'var(--text-muted, #9ca3af)' }}>—</span>

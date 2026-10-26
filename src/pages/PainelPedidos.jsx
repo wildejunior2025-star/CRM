@@ -7195,7 +7195,7 @@ function ModalAcertoEntregador({ dados, onFechar, onConfirmar }) {
   }, [dados])
   if (!dados) return null
 
-  const { nome, ids, aReceber, emDinheiro } = dados
+  const { nome, ids, aReceber, emDinheiro, encosto = 0, entregadorId = null } = dados
   const brl = v => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`
   const retido = ficou ? Math.min(emDinheiro, aReceber) : 0
   const restante = aReceber - retido
@@ -7211,7 +7211,9 @@ function ModalAcertoEntregador({ dados, onFechar, onConfirmar }) {
         style={{ width: '100%', maxWidth: 440, background: 'var(--surface, #16161f)', border: '1px solid var(--border, #2a2a3a)', borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>Acertar com {nome}</div>
         <div style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-          Taxa das {ids.length} corridas: <strong style={{ color: '#16a34a' }}>{brl(aReceber)}</strong><br />
+          Taxa das {ids.length} corridas: <strong style={{ color: '#16a34a' }}>{brl(aReceber - encosto)}</strong><br />
+          {encosto > 0 && <>Encosto do dia: <strong style={{ color: '#16a34a' }}>{brl(encosto)}</strong><br /></>}
+          {encosto > 0 && <>Total a pagar a ele: <strong style={{ color: '#16a34a' }}>{brl(aReceber)}</strong><br /></>}
           Dinheiro das entregas que ele recebeu: <strong style={{ color: '#0ea5e9' }}>{brl(emDinheiro)}</strong>
         </div>
 
@@ -7264,7 +7266,7 @@ function ModalAcertoEntregador({ dados, onFechar, onConfirmar }) {
         )}
 
         <div style={{ fontSize: 12.5, lineHeight: 1.45, color: '#f87171', background: 'rgba(248,113,113,.1)', border: '1px solid rgba(248,113,113,.4)', borderRadius: 8, padding: '9px 11px' }}>
-          ⚠️ Isso <strong>não tem como desfazer</strong>. As {ids.length} corridas ficam pagas de vez.
+          ⚠️ Isso <strong>não tem como desfazer</strong>. As {ids.length} corridas{encosto > 0 ? ' e o encosto' : ''} ficam pagas de vez.
         </div>
 
         <div style={{ display: 'flex', gap: 9 }}>
@@ -7273,7 +7275,7 @@ function ModalAcertoEntregador({ dados, onFechar, onConfirmar }) {
             Cancelar
           </button>
           <button type="button" disabled={salvando}
-            onClick={async () => { setSalvando(true); await onConfirmar({ ids, sangria, nome, caixaId }); setSalvando(false) }}
+            onClick={async () => { setSalvando(true); await onConfirmar({ ids, sangria, nome, caixaId, encosto, entregadorId }); setSalvando(false) }}
             style={{ flex: 1.4, padding: '12px', borderRadius: 10, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 14.5, cursor: salvando ? 'wait' : 'pointer' }}>
             {salvando ? 'Salvando…' : 'Confirmar acerto'}
           </button>
@@ -8036,8 +8038,9 @@ export default function PainelPedidos() {
   // a sangria no caixa ABERTO. Sem caixa aberto a sangria não tem onde entrar —
   // aí o acerto acontece mesmo assim (o entregador não pode ficar esperando) e
   // o dono é avisado pra lançar na mão depois.
-  async function fecharAcertoEntregador({ ids, sangria, nome, caixaId }) {
+  async function fecharAcertoEntregador({ ids, sangria, nome, caixaId, encosto = 0, entregadorId = null }) {
     await pagarCorridas(ids)
+    if (encosto > 0 && entregadorId) await pagarEncosto(entregadorId, encosto)
     if (sangria > 0.004) {
       if (!caixaId) {
         window.alert(`Corridas marcadas como pagas.\n\nMas não há caixa aberto, então a sangria de ${fmt(sangria)} não foi lançada. Abra o caixa e lance a sangria na mão.`)
@@ -8049,12 +8052,40 @@ export default function PainelPedidos() {
         tipo: 'sangria',
         valor: Number(sangria.toFixed(2)),
         forma: 'dinheiro',
-        observacao: `Pagamento entregador ${nome} — ${ids.length} corrida${ids.length > 1 ? 's' : ''}`,
+        observacao: `Pagamento entregador ${nome} — ${ids.length} corrida${ids.length > 1 ? 's' : ''}${encosto > 0 ? ' + encosto' : ''}`,
         created_by: profile?.id,
       })
       if (error) window.alert(`Corridas marcadas como pagas, mas a sangria de ${fmt(sangria)} falhou: ${error.message}\n\nLance na mão no Caixa.`)
     }
     setAcertoAberto(null)
+  }
+
+  // ── Encosto do motoboy: valor garantido do dia, somado as corridas ──
+  // O padrao fica no cadastro dele (profiles.entregador_encosto); este mapa
+  // so tem os dias com registro (valor mudado pelo dono e/ou ja pago).
+  const [encostos, setEncostos] = useState({})   // entregador_id -> { valor, pago }
+  const hojeYmd = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const carregarEncostos = useCallback(async () => {
+    if (!empresa) return
+    const { data } = await supabase.from('entregador_encosto_dia')
+      .select('entregador_id, valor, pago').eq('empresa_id', empresa.id).eq('data', hojeYmd())
+    setEncostos(Object.fromEntries((data ?? []).map(r => [r.entregador_id, { valor: Number(r.valor), pago: !!r.pago }])))
+  }, [empresa])
+  async function gravarEncosto(entregadorId, valor, pago = false) {
+    const agora = new Date().toISOString()
+    setEncostos(prev => ({ ...prev, [entregadorId]: { valor, pago } }))
+    const { error } = await supabase.from('entregador_encosto_dia').upsert({
+      empresa_id: empresa.id, entregador_id: entregadorId, data: hojeYmd(), valor, pago, pago_em: pago ? agora : null,
+    }, { onConflict: 'entregador_id,data' })
+    if (error) { window.alert('Não consegui salvar o encosto: ' + error.message); carregarEncostos() }
+  }
+  const pagarEncosto = (entregadorId, valor) => gravarEncosto(entregadorId, valor, true)
+  function editarEncosto(ent, valorAtual) {
+    const txt = window.prompt(`Encosto de hoje do ${ent?.nome || 'entregador'} (R$):`, String(valorAtual).replace('.', ','))
+    if (txt == null) return
+    const v = Math.round(parseFloat(String(txt).replace(',', '.')) * 100) / 100
+    if (!Number.isFinite(v) || v < 0) { window.alert('Valor inválido.'); return }
+    gravarEncosto(ent.id, v, false)
   }
 
   async function pagarCorridas(ids) {
@@ -8068,8 +8099,8 @@ export default function PainelPedidos() {
     // Fechou o painel? O mapa volta fechado. Senão ele reabria sozinho na
     // próxima visita e a economia de mapa ia embora sem ninguém perceber.
     if (painelDireito !== 'entregadores') { setMapaAberto(false); return }
-    setEntregadorSel(null); carregarEntregasConcluidas()
-  }, [painelDireito, carregarEntregasConcluidas])
+    setEntregadorSel(null); carregarEntregasConcluidas(); carregarEncostos()
+  }, [painelDireito, carregarEntregasConcluidas, carregarEncostos])
 
   // ── Onde os motoboys estão agora (mig 0245) ─────────────────
   // O app do entregador grava a posição enquanto está aberto — e ele abre a
@@ -9644,7 +9675,7 @@ export default function PainelPedidos() {
     if (!empresa) return
     supabase
       .from('profiles')
-      .select('id, nome, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_tipo, entregador_desconto_loja_ativo, entregador_desconto_loja_valor, entregador_desconto_loja_tipo')
+      .select('id, nome, entregador_encosto, entregador_desconto_ativo, entregador_desconto_valor, entregador_desconto_tipo, entregador_desconto_loja_ativo, entregador_desconto_loja_valor, entregador_desconto_loja_tipo')
       .eq('empresa_id', empresa.id)
       .eq('perfil', 'entregador')
       .eq('ativo', true)
@@ -12122,6 +12153,13 @@ export default function PainelPedidos() {
               const descontos = descontosDoEntregador(ent)
               const ganho = p => ganhoDaCorrida(descontos, p)
               const somaTaxa = arr => arr.reduce((s, p) => s + ganho(p), 0)
+              // ENCOSTO: valor garantido do dia, somado as corridas. Vale o do dia
+              // (se o dono mexeu) ou o padrao do cadastro, este so se ele rodou hoje.
+              const recEnc = encostos[entregadorSel]
+              const rodouHoje = concl.length > 0 || rota.length > 0
+              const encostoValor = recEnc ? recEnc.valor : (rodouHoje ? Number(ent?.entregador_encosto) || 0 : 0)
+              const encostoPago = !!recEnc?.pago
+              const encostoPend = (!encostoPago && encostoValor > 0) ? encostoValor : 0
               // Pagamento do CLIENTE: o motoqueiro cobrou na entrega (dinheiro/cartão)
               // ou já estava pago (PIX confirmado / iFood)?
               const pagCliente = p => {
@@ -12246,17 +12284,18 @@ export default function PainelPedidos() {
                       // dono — ele via "a receber 108" e "em dinheiro 59" e tinha
                       // que subtrair na hora de pagar.
                       const emDinheiro = porBalde('dinheiro')
-                      const acerto = somaTaxa(pendentes) - emDinheiro
+                      const acerto = somaTaxa(pendentes) + encostoPend - emDinheiro
                       const cards = [
-                        // Verde: e o que a LOJA deve pagar pro motoqueiro.
-                        ['A receber', fmt(somaTaxa(pendentes)), '#16a34a', null],
-                        ['Pago', fmt(somaTaxa(pagos)), 'var(--text-muted)', null],
+                        // Verde: e o que a LOJA deve pagar pro motoqueiro (corridas + encosto).
+                        ['A receber', fmt(somaTaxa(pendentes) + encostoPend), '#16a34a', null],
+                        ['Pago', fmt(somaTaxa(pagos) + (encostoPago ? encostoValor : 0)), 'var(--text-muted)', null],
+                        ['Encosto', fmt(encostoValor) + (encostoPago ? ' ✓' : ''), '#16a34a', '__encosto'],
                         ['Em dinheiro', fmt(emDinheiro), '#0ea5e9', 'dinheiro'],
                         ['Maquineta', fmt(porBalde('maquina')), '#8b5cf6', 'maquina'],
                         ['PIX', fmt(porBalde('pix')), '#0891b2', 'pix'],
                         ['Em rota', rota.length, '#7c3aed', null],
                       ]
-                      if (pendentes.length > 0) {
+                      if (pendentes.length > 0 || encostoPend > 0) {
                         cards.push([
                           acerto >= 0 ? 'Pagar a ele ✓' : 'Ele devolve ✓',
                           fmt(Math.abs(acerto)),
@@ -12265,7 +12304,7 @@ export default function PainelPedidos() {
                         ])
                       }
                       const outros = porBalde('outros')
-                      if (outros > 0.004) cards.splice(5, 0, ['Outras formas', fmt(outros), '#f59e0b', 'outros'])
+                      if (outros > 0.004) cards.splice(6, 0, ['Outras formas', fmt(outros), '#f59e0b', 'outros'])
                       return cards.map(([lab, val, cor, balde]) => {
                         const ativo = balde && filtroForma === balde
                         const acertarAqui = balde === '__acertar'
@@ -12281,6 +12320,16 @@ export default function PainelPedidos() {
                           background: ativo ? 'rgba(14,165,233,.14)' : acertarAqui ? 'rgba(22,163,74,.10)' : 'transparent',
                         }
                         if (!balde) return <div key={lab} style={base}>{dentro}</div>
+                        // Encosto: toque pra lançar/mudar o valor de HOJE (some depois de pago).
+                        if (balde === '__encosto') {
+                          return (
+                            <button key={lab} type="button" style={{ ...base, cursor: encostoPago ? 'default' : 'pointer', font: 'inherit' }}
+                              title={encostoPago ? 'Encosto de hoje já pago' : 'Valor garantido do dia, somado às corridas. Toque pra mudar.'}
+                              onClick={() => { if (!encostoPago) editarEncosto(ent, encostoValor) }}>
+                              {dentro}
+                            </button>
+                          )
+                        }
                         // O card do acerto não filtra: ele FECHA a conta do dia.
                         // Com confirmação porque marca tudo de uma vez e não tem
                         // desfazer — um toque errado no meio do movimento apagaria
@@ -12293,7 +12342,9 @@ export default function PainelPedidos() {
                               onClick={() => setAcertoAberto({
                                 nome: ent?.nome || 'o entregador',
                                 ids,
-                                aReceber: somaTaxa(pendentes),
+                                aReceber: somaTaxa(pendentes) + encostoPend,
+                                encosto: encostoPend,
+                                entregadorId: entregadorSel,
                                 emDinheiro,
                               })}>
                               {dentro}
