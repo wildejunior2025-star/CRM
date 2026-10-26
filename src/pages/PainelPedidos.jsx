@@ -3589,15 +3589,15 @@ function CodigoColetaIfood({ pedido, onLiberar }) {
 // fechava. Aqui a correcao e so do pagamento: nao mexe em item, valor nem
 // endereco, porque quem corrige na correria nao pode ter como errar o resto.
 //
-// "Fiado" fica de fora de proposito: fiar abre divida no nome do cliente, e
-// isso tem tela propria — virar fiado por este atalho criaria venda recebida
-// que ninguem cobra.
+// "Fiado" so aparece no pedido de balcao (26/10): a troca cria a divida em
+// `vendas` junto, igual ao + Vender. No delivery de fora continua de fora.
 const FORMAS_TROCA = [
   { id: 'dinheiro', label: '\ud83d\udcb5 Dinheiro' },
   { id: 'pix_entrega', label: '\ud83d\udcf1 PIX na entrega' },
   { id: 'debito', label: '\ud83d\udcb3 D\u00e9bito' },
   { id: 'credito', label: '\ud83d\udcb3 Cr\u00e9dito' },
   { id: 'vale', label: '\ud83c\udf7d\ufe0f Vale-refei\u00e7\u00e3o' },
+  { id: 'fiado', label: '\ud83d\udcd2 Fiado', soBalcao: true },
 ]
 
 function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
@@ -3623,11 +3623,11 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
           Como o cliente pagou o #{pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()}?
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 14px' }}>
-          Estava como <strong>{nomeForma(pedido.forma_pagamento)}</strong> \u00b7 total {fmt(pedido.total)}
+          Estava como <strong>{nomeForma(pedido.forma_pagamento)}</strong> &middot; total {fmt(pedido.total)}
         </p>
 
         <div style={{ display: 'grid', gap: 8 }}>
-          {FORMAS_TROCA.map(f => (
+          {FORMAS_TROCA.filter(f => !f.soBalcao || pedido.origem === 'balcao').map(f => (
             <button key={f.id} type="button" onClick={() => setForma(f.id)}
               style={{ padding: '11px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                 fontSize: 14, fontWeight: 700,
@@ -7322,6 +7322,21 @@ export default function PainelPedidos() {
   // Corrige o que o cliente REALMENTE pagou. Mexe so no pagamento: a conta do
   // caixa (mig 0334) le este campo, entao e isto que faz o dia fechar.
   async function salvarTrocaPagamento(pedido, forma, trocoPara) {
+    // Fiado so vira por aqui no pedido de balcao COM cliente, e a divida entra
+    // junto (mesma regra do + Vender): sem a linha em `vendas` ninguem cobra.
+    if (forma === 'fiado') {
+      const { data: ped } = await supabase.from('pedidos_delivery')
+        .select('cliente_id, numero_pedido, total').eq('id', pedido.id).single()
+      if (!ped?.cliente_id) { alert('Fiado precisa de cliente cadastrado neste pedido.'); return }
+      const { data: ja } = await supabase.from('vendas').select('id').eq('pedido_id', pedido.id).limit(1)
+      if (!ja?.length) {
+        const { error: eV } = await supabase.from('vendas').insert({
+          empresa_id: empresa.id, cliente_id: ped.cliente_id, forma_pagamento: 'fiado', status: 'entregue',
+          total: ped.total, pedido_id: pedido.id, observacoes: 'Balcao - Pedido #' + (ped.numero_pedido ?? ''),
+        })
+        if (eV) { alert('Não consegui registrar a dívida: ' + eV.message); return }
+      }
+    }
     const { error } = await supabase.from('pedidos_delivery').update({
       forma_pagamento: forma,
       // Pagamento dividido deixa de existir quando se escolhe uma forma unica —
