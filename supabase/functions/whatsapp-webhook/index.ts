@@ -557,6 +557,9 @@ function recortarEnderecoNoTexto(txt: string): string {
 const RE_COMPLEMENTO = /\b(ap(?:to?|artamento)?|bl(?:oco)?|casa|cs|qd|quadra|lote|lt|sala|torre|andar|box|kitnet)\b\.?\s*[nº°]?\s*(\d{1,5}[a-zA-Z]?|[a-zA-Z]\b)/i
 // Estes se bastam sozinhos — ninguém escreve "fundos 2".
 const RE_COMPLEMENTO_SOZINHO = /\b(fundos|frente|t[ée]rreo)\b/i
+// Começo de NOME DE PRÉDIO. O que vem assim não é bairro: é o lugar que o
+// entregador procura na rua.
+const RE_PREDIO = /^(ed\.?|edif[íi]cio|cond\.?|condom[íi]nio|res\.?|residencial|torre|bl\.?|bloco|apt?o?\b|casa\b)/i
 
 /** Tira o complemento de dentro do texto e devolve os dois separados. */
 function separarComplemento(txt: string | null): { limpo: string | null; complemento: string | null } {
@@ -577,6 +580,8 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
   let rua = partes[0] ?? ""
   let numero: string | null = null
   let bairro: string | null = partes[1] ?? null
+  // Nome do predio, quando ele vem colado no numero ("1199 Ed. Esmeralda").
+  let complementoDoPredio: string | null = null
 
   // Número colado na rua ("Rua Eliane Barros 600") ou na própria vírgula.
   const comNumero = rua.match(/^(.+?)[ ,]+(?:n[º°o.]?\s*)?(\d{1,5}[a-zA-Z]?)$/i)
@@ -599,6 +604,36 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
   if (!numero && bairro && /^\d{1,5}[a-zA-Z]?$/.test(bairro)) {
     numero = bairro
     bairro = partes[2] ?? null
+    // "Av. Prudente de Morais, 3800, Ed. Vivendas, Lagoa Nova": o prédio vem
+    // num pedaço só dele, no meio. Sem isto ele virava o bairro.
+    if (bairro && RE_PREDIO.test(bairro)) {
+      complementoDoPredio = bairro
+      bairro = partes[3] ?? null
+    }
+  }
+  // O NÚMERO COM O PRÉDIO ATRÁS (26/10/2026).
+  //
+  // "Av. Afonso Pena, 1199 Ed. Esmeralda apto 901": o pedaço depois da vírgula
+  // começa com o número da casa e continua com o NOME DO PRÉDIO. O campo do
+  // bairro ficava "1199 Ed. Esmeralda" — e um bairro desses não casa com a
+  // tabela de taxa e ainda atrapalha o mapa, que mandou o pedido pra Assú.
+  //
+  // O número sai na frente; o que sobra é prédio (vira complemento) ou bairro,
+  // conforme comece com marca de edifício.
+  if (!numero && bairro) {
+    const comPredio = bairro.match(/^(\d{1,5}[a-zA-Z]?)[\s,.-]+(.{2,60})$/)
+    if (comPredio) {
+      numero = comPredio[1]
+      const resto = comPredio[2].trim()
+      const ehPredio = RE_PREDIO.test(resto)
+      if (ehPredio) {
+        // O nome do prédio inteiro é o que o entregador procura na rua.
+        complementoDoPredio = resto
+        bairro = partes[2] ?? null
+      } else {
+        bairro = resto
+      }
+    }
   }
   if (!rua || rua.length < 5) return null
   // Sem prefixo de rua e sem número, é conversa, não endereço.
@@ -624,10 +659,14 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
     }
   }
 
+  // O predio e o apartamento viajam juntos: "Ed. Esmeralda apto 901" e o
+  // endereco inteiro pro entregador.
+  const complementoFinal = [complementoDoPredio, complemento]
+    .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ")
   return {
     rua, numero,
     bairro: bairro && bairro.length >= 3 ? bairro : null,
-    complemento: complemento || null,
+    complemento: complementoFinal || null,
   }
 }
 
@@ -642,15 +681,31 @@ function lerEnderecoEscrito(txt: string): { rua: string; numero: string | null; 
  */
 async function descobrirCidade(rua: string, bairro: string | null, estado: string | null, cidadeLoja: string | null, empresaId: string | null = null): Promise<string | null> {
   try {
-    const ponto = await geocodificarEndereco([rua, bairro, estado].filter(Boolean).join(", "), empresaId)
-    if (!ponto) return cidadeLoja
-    // Com o Google, o ponto já vem com a cidade separada — uma consulta resolve
-    // as duas coisas, e o reverso só é pago quando o cache não tem.
-    const gRev = await googleEndereco(empresaId, { acao: "reverso", lat: ponto.lat, lng: ponto.lng })
-    if (gRev?.partes?.cidade) {
-      console.log(`[Geo] cidade do endereço (Google): ${gRev.partes.cidade}`)
-      return String(gRev.partes.cidade)
+    // MUDAR A CIDADE DO PEDIDO É COISA SÉRIA (26/10/2026).
+    //
+    // "Av. Afonso Pena, 1199 Ed. Esmeralda" foi parar em ASSÚ, a 200 km de
+    // Natal, porque o nome da avenida existe lá também e o pedaço "1199 Ed.
+    // Esmeralda" (que tinha ido parar no campo do bairro) não ajudou a
+    // desempatar. Com a cidade errada, o raio de entrega, a taxa e a rota do
+    // entregador vão todos pro lugar errado.
+    //
+    // Esta função existe pra pegar o caso legítimo — loja em Natal entregando
+    // em São Gonçalo —, e nesse caso o ponto é EXATO. Ponto vago (centro da
+    // rua, da cidade) não pode mudar a cidade: fica a da loja, que é o palpite
+    // mais provável.
+    const busca = [rua, bairro, estado].filter(Boolean).join(", ")
+    const g = await googleEndereco(empresaId, { rua: busca })
+    if (g?.partes?.cidade) {
+      const exato = g.precisao === "ROOFTOP" || g.precisao === "RANGE_INTERPOLATED"
+      if (!exato && cidadeLoja) {
+        console.log(`[Geo] cidade "${g.partes.cidade}" ignorada (${g.precisao}) — fica ${cidadeLoja}`)
+        return cidadeLoja
+      }
+      console.log(`[Geo] cidade do endereço (Google, ${g.precisao}): ${g.partes.cidade}`)
+      return String(g.partes.cidade)
     }
+    const ponto = await geocodificarEndereco(busca, empresaId)
+    if (!ponto) return cidadeLoja
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${ponto.lat}&lon=${ponto.lng}&format=json&addressdetails=1`,
       { headers: { "User-Agent": "CRM-FWC/1.0" } },
@@ -1258,6 +1313,32 @@ const normSabor = (s: unknown) => String(s ?? "")
   .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
   .replace(/\bcom\b|\+|&/g, " ").replace(/[^a-z0-9]+/g, " ").trim()
 
+/**
+ * Distância de edição com teto — só interessa saber se está PERTO.
+ *
+ * Para quando a diferença já passou do teto, então é barata mesmo em nome
+ * grande. Não serve pra ranquear: serve pra responder "é a mesma palavra
+ * escrita errado?".
+ */
+function distanciaCurta(a: string, b: string, teto: number): number {
+  if (a === b) return 0
+  if (Math.abs(a.length - b.length) > teto) return teto + 1
+  let linha = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const nova = [i]
+    let menor = i
+    for (let j = 1; j <= b.length; j++) {
+      const custo = a[i - 1] === b[j - 1] ? 0 : 1
+      const v = Math.min(linha[j] + 1, nova[j - 1] + 1, linha[j - 1] + custo)
+      nova[j] = v
+      if (v < menor) menor = v
+    }
+    if (menor > teto) return teto + 1      // a linha inteira já estourou
+    linha = nova
+  }
+  return linha[b.length]
+}
+
 const RE_MISTURADO = /^(misturad[oa]s?|sortid[oa]s?|variad[oa]s?|mix|sabores? variados?|a loja escolhe)$/
 // "Misturado menos paçoca" (CDBom, 15/09/2026): 20 picolés de cobertura em
 // todos os sabores tirando um. A IA manda {"nome": "Misturado", "exceto":
@@ -1464,6 +1545,25 @@ function conferirSabores(
         const daFamilia = sp.disponiveis.filter(n => new RegExp(`\\b${escapado}\\b`).test(normSabor(n)))
         if (daFamilia.length === 1) achado = daFamilia[0]
         else if (daFamilia.length > 1) emDois = daFamilia
+      }
+      // UMA LETRA DE DIFERENÇA NÃO PODE CUSTAR O PEDIDO (26/10/2026)
+      //
+      // O Guilherme escreveu "Espaguete alho e óleo", que é como todo mundo
+      // escreve; a loja cadastrou "Spaguete alho e óleo". Uma letra. O robô
+      // respondeu "a quentinha pequena não tem Espaguete alho e óleo" — de um
+      // item que estava no cardápio — e despejou a lista. Ele desistiu do robô
+      // e a atendente fechou o pedido na mão: a venda saiu, mas fora do
+      // sistema.
+      //
+      // Teto apertado e UM candidato só: "coca" e "cuca" não podem virar a
+      // mesma coisa. Por isso o mínimo de 5 letras e 1 erro até 8 letras.
+      if (!achado && emDois.length === 0 && alvo.length >= 5) {
+        const teto = alvo.length <= 8 ? 1 : 2
+        const perto = sp.disponiveis.filter(n => distanciaCurta(normSabor(n), alvo, teto) <= teto)
+        if (perto.length === 1) {
+          console.log(`[Sabor] "${alvo}" ≈ "${normSabor(perto[0])}" (erro de digitação)`)
+          achado = perto[0]
+        } else if (perto.length > 1) emDois = perto
       }
       if (achado) {
         // O MODELO ESCOLHEU A CALABRESA NO LUGAR DO CLIENTE.
@@ -1950,10 +2050,14 @@ function detalheDaSacola(itens: any[]): string {
     const itens = g.linhas as any[]
     if (!itens.length) return cab
     // Um sabor só pro produto todo (ou item montado): sem repetir a quantidade.
-    const sabores = (itens.length === 1 && itens[0].qtd === g.qtd)
-      ? itens[0].texto
-      : itens.map(l => `${l.texto} ${l.qtd}`).join(" · ")
-    return `${cab}\n${sabores}`
+    if (itens.length === 1 && itens[0].qtd === g.qtd) return `${cab}\n${itens[0].texto}`
+    // DUAS QUENTINHAS DIFERENTES SÃO DUAS LINHAS (26/10/2026).
+    //
+    // Antes saíam grudadas e com a quantidade no fim de cada uma: "...Batata
+    // inglesa cozida 1 · Peixe grelhado, Arroz integral...". Com seis itens em
+    // cada uma, ninguém acha onde termina a primeira — e é justamente aí que o
+    // cliente confere se a comida dele está certa.
+    return `${cab}\n${itens.map(l => ` ▪️ ${l.qtd > 1 ? `${l.qtd}× ` : ""}${l.texto}`).join("\n")}`
   }).join("\n\n")
 }
 
