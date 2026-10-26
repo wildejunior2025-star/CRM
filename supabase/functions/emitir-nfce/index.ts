@@ -99,6 +99,36 @@ function descricaoDoItem(nome: string): string {
   return (base.length > 0 && base.length <= 120 ? base : limpo.slice(0, 120)).trim()
 }
 
+// ALÍQUOTA DO IBPT POR NCM (Lei 12.741/2012, 26/10/2026)
+// Consulta a API De Olho no Imposto (conta da FWC) uma vez por NCM+UF e guarda
+// em ibpt_aliquotas até a vigência da tabela acabar. Qualquer falha devolve null
+// e a nota sai com a alíquota de reserva: imposto aproximado nunca trava venda.
+// Secrets: IBPT_TOKEN, IBPT_CNPJ
+async function aliquotaIbpt(sb: any, ncm: string, uf: string) {
+  type R = { nacional: number; estadual: number; importado: number; municipal: number; chave: string; versao: string }
+  try {
+    const hoje = new Date().toISOString().slice(0, 10)
+    const { data: c } = await sb.from("ibpt_aliquotas").select("*").eq("ncm", ncm).eq("uf", uf).maybeSingle()
+    if (c && c.vigencia_fim && c.vigencia_fim >= hoje) {
+      return { nacional: Number(c.nacional), estadual: Number(c.estadual), importado: Number(c.importado), municipal: Number(c.municipal), chave: c.chave ?? "", versao: c.versao ?? "" } as R
+    }
+    const token = Deno.env.get("IBPT_TOKEN"), cnpjIbpt = Deno.env.get("IBPT_CNPJ")
+    if (!token || !cnpjIbpt) return null
+    const q = new URLSearchParams({ token, cnpj: cnpjIbpt, codigo: ncm, uf, ex: "0", descricao: "Produto", unidadeMedida: "UN", valor: "1", gtin: "SEM GTIN" })
+    const res = await fetch(`https://apidoni.ibpt.org.br/api/v1/produtos?${q}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return null
+    const d = await res.json()
+    if (typeof d?.Nacional !== "number") return null
+    const fim = String(d.VigenciaFim ?? "").split("/")
+    await sb.from("ibpt_aliquotas").upsert({
+      ncm, uf, nacional: d.Nacional, estadual: d.Estadual ?? 0, importado: d.Importado ?? 0, municipal: d.Municipal ?? 0,
+      descricao: d.Descricao ?? null, chave: d.Chave ?? null, versao: d.Versao ?? null,
+      vigencia_fim: fim.length === 3 ? `${fim[2]}-${fim[1]}-${fim[0]}` : null, atualizado_em: new Date().toISOString(),
+    })
+    return { nacional: d.Nacional, estadual: d.Estadual ?? 0, importado: d.Importado ?? 0, municipal: d.Municipal ?? 0, chave: d.Chave ?? "", versao: d.Versao ?? "" } as R
+  } catch { return null }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors })
   const json = (d: unknown, s = 200) =>
@@ -350,7 +380,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     .select("*").eq(chave, comandaId ?? pedidoId).eq("status", "autorizada").maybeSingle()
   if (jaTem) return { ok: true, ja_emitida: true, nota: jaTem }
 
-  const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", ped.empresa_id).maybeSingle()
+  const { data: emp } = await sb.from("empresas").select("cnpj, estado").eq("id", ped.empresa_id).maybeSingle()
   const { data: fis } = await sb.from("empresa_fiscal").select("*").eq("empresa_id", ped.empresa_id).maybeSingle()
   if (!fis || !fis.ativo) return { ok: false, error: "Emissão de NFC-e não está habilitada nesta loja" }
   if (!fis.focus_registrada) return { ok: false, error: "Loja ainda não registrada no emissor (suba o A1 em Minha Loja → Nota Fiscal)" }
@@ -370,6 +400,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   // percentual é o aproximado do IBPT pro NCM padrão da loja (alimentos prontos
   // ficam perto de 31,5% somando federal + estadual); a loja pode ajustar em
   // `aliquota_tributos_aprox` na empresa_fiscal quando houver a coluna.
+  // Reserva (sem token ou com o IBPT fora do ar): 31,5%. O normal é a alíquota
+  // do IBPT por NCM — ver aliquotaIbpt().
   const aliqTrib = Number(fis.aliquota_tributos_aprox) || 31.5
 
   const itensPed: any[] = Array.isArray(ped.itens) ? ped.itens : []
@@ -387,6 +419,20 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     for (const p of prods ?? []) { const n = soDigitos(p.ncm); if (n.length === 8) ncmPorProduto[p.id] = n }
   }
 
+  const uf = String(emp?.estado ?? "RN").toUpperCase()
+  const ncmDoItem = (it: any) => ncmPorProduto[String(it.produto_id ?? it.id ?? "")] ?? ncm
+  const ibpt: Record<string, Awaited<ReturnType<typeof aliquotaIbpt>>> = {}
+  for (const n of new Set(itensPed.map(ncmDoItem))) ibpt[n] = await aliquotaIbpt(sb, n, uf)
+  const fontesIbpt = new Set<string>()
+  const pctDoItem = (it: any): number => {
+    const r = ibpt[ncmDoItem(it)]
+    if (!r) return aliqTrib
+    fontesIbpt.add(`${r.versao} ${r.chave}`.trim())
+    // origem 1 e 2 = mercadoria estrangeira: vale a coluna "importado"
+    const federal = origem === "1" || origem === "2" ? r.importado : r.nacional
+    return federal + r.estadual + r.municipal
+  }
+
   const items = itensPed.map((it, idx) => {
     const qtd = Number(it.quantidade ?? it.qtd ?? 1) || 1
     const unit = Number(it.preco_unitario ?? it.preco ?? 0) || 0
@@ -395,7 +441,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       numero_item: String(idx + 1),
       codigo_produto: String(it.codigo ?? it.id ?? idx + 1),
       descricao: descricaoDoItem(String(it.nome ?? it.descricao ?? "Item")),
-      codigo_ncm: ncmPorProduto[String(it.produto_id ?? it.id ?? "")] ?? ncm,
+      codigo_ncm: ncmDoItem(it),
       cfop,
       unidade_comercial: "UN",
       unidade_tributavel: "UN",
@@ -406,7 +452,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       valor_bruto: Number(bruto.toFixed(2)),
       icms_origem: origem,
       icms_situacao_tributaria: csosn,
-      valor_total_tributos: Number((bruto * aliqTrib / 100).toFixed(2)),
+      valor_total_tributos: Number((bruto * pctDoItem(it) / 100).toFixed(2)),
     }
   })
   const tribTotal = Number(items.reduce((s, i) => s + (i.valor_total_tributos as number), 0).toFixed(2))
@@ -433,7 +479,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     items,
     formas_pagamento: formasNota,
     informacoes_adicionais_contribuinte:
-      `Valor aproximado dos tributos: R$ ${tribTotal.toFixed(2).replace(".", ",")} (${aliqTrib.toString().replace(".", ",")}%). Fonte: IBPT`,
+      `Valor aproximado dos tributos: R$ ${tribTotal.toFixed(2).replace(".", ",")} (${(total > 0 ? tribTotal / total * 100 : aliqTrib).toFixed(2).replace(".", ",")}%). Fonte: IBPT${[...fontesIbpt].length ? " " + [...fontesIbpt].join(" ") : ""}`,
   }
   // NOME DE CLIENTE SO EXISTE SE TIVER CPF (24/10/2026)
   //
