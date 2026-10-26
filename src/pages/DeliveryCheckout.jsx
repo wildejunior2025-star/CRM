@@ -348,6 +348,38 @@ async function geocodeGoogle({ empresaId, rua, numero, bairro, cidade, estado, c
   } catch { return null }
 }
 
+// A LISTA DE RUAS TAMBEM TEM QUE SER A DO GOOGLE (25/10/2026)
+//
+// Trocar so o endereco->ponto nao bastou: a LISTA que o cliente escolhe vinha
+// dos Correios, que procura o texto inteiro dentro do nome oficial. Digitando
+// "av nascimento de castro 81" ele devolvia a mesma avenida tres vezes, em tres
+// bairros, e ignorava o 81 — porque numero de casa nao existe no cadastro deles.
+//
+// O Google entende do jeito que a pessoa fala e ja devolve "Av. Nascimento de
+// Castro, 81 - Lagoa Nova". E acha por NOME DE LUGAR, que e como muita gente
+// explica onde mora ("perto da escola tal").
+//
+// O resultado dele vem com `place_id`: escolhendo um, o ponto depois sai exato,
+// sem adivinhacao de grafia.
+async function sugerirRuasGoogle({ empresaId, texto, lat, lng }) {
+  if (!empresaId || !texto || texto.trim().length < 4) return []
+  try {
+    const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+    const chave = import.meta.env.VITE_SUPABASE_ANON_KEY
+    const r = await fetch(`${base}/functions/v1/geocodificar-google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: chave, Authorization: `Bearer ${chave}` },
+      body: JSON.stringify({ acao: 'sugerir', empresa_id: empresaId, texto: texto.trim(), lat, lng }),
+    })
+    const g = await r.json()
+    if (!g?.ok || !Array.isArray(g.sugestoes)) return []
+    return g.sugestoes.map(x => ({
+      place_id: x.place_id, logradouro: x.titulo, bairro: x.detalhe,
+      localidade: '', uf: '', cep: '', doGoogle: true,
+    }))
+  } catch { return [] }
+}
+
 async function geocodeEndereco({ empresaId, rua, numero, bairro, cidade, estado, cep } = {}) {
   // Google primeiro: e o unico que acha NUMERO DE CASA.
   const g = await geocodeGoogle({ empresaId, rua, numero, bairro, cidade, estado, cep })
@@ -1268,6 +1300,14 @@ export default function DeliveryCheckout() {
     setRuaBuscando(true)
     const t = setTimeout(async () => {
       try {
+        // Google primeiro. Se ele achar, a lista e dele; o dos Correios entra
+        // embaixo, porque loteamento novo as vezes so existe la.
+        const doGoogle = await sugerirRuasGoogle({
+          empresaId: state?.empresaId, texto: termo,
+          lat: lojaEndereco?.latitude, lng: lojaEndereco?.longitude,
+        })
+        if (vivo && doGoogle.length) { setRuaSugestoes(doGoogle); setRuaNaoAchou(false) }
+
         const buscar = async (q, cidadeAlvo = cid) => {
           if (!q || q.length < 3 || !cidadeAlvo) return []
           try {
@@ -1354,8 +1394,12 @@ export default function DeliveryCheckout() {
         // aparecia embaixo da rua parecida de São Gonçalo, e ninguém rola uma
         // lista de sugestão até o fim.
         lista.sort((a, b) => pontosDaRua(b.logradouro, semTipo || termo) - pontosDaRua(a.logradouro, semTipo || termo))
-        setRuaSugestoes(lista.slice(0, 8))
-        setRuaNaoAchou(lista.length === 0)
+        // O Google fica NO TOPO: ele e o unico que entende numero de casa e
+        // nome de lugar. Os Correios ficam embaixo porque loteamento novo as
+        // vezes so existe no cadastro deles.
+        const juntas = [...doGoogle, ...lista].slice(0, 8)
+        setRuaSugestoes(juntas)
+        setRuaNaoAchou(juntas.length === 0)
       } catch { if (vivo) { setRuaSugestoes([]); setRuaNaoAchou(true) } }
       finally { if (vivo) setRuaBuscando(false) }
     }, 500)
@@ -1750,7 +1794,47 @@ export default function DeliveryCheckout() {
 
 
   // Escolheu a rua na lista: preenche bairro, CEP, cidade e estado de uma vez.
-  function escolherRua(r) {
+  async function escolherRua(r) {
+    // ESCOLHEU UMA DO GOOGLE: ele devolve o endereco ja separado (rua, numero,
+    // bairro, cidade, CEP) e o ponto EXATO daquele lugar — sem adivinhar
+    // grafia, que e o que o caminho antigo erra. O titulo da lista ja vem com
+    // o numero ("Av. Nascimento de Castro, 81"), entao jogar ele no campo da
+    // rua deixaria o numero dentro do nome; o que vale sao as PARTES.
+    if (r.place_id) {
+      setRuaSugestoes([]); setRuaAberta(false)
+      try {
+        const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+        const chave = import.meta.env.VITE_SUPABASE_ANON_KEY
+        const resp = await fetch(`${base}/functions/v1/geocodificar-google`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: chave, Authorization: `Bearer ${chave}` },
+          body: JSON.stringify({ empresa_id: state?.empresaId, place_id: r.place_id }),
+        })
+        const g = await resp.json()
+        if (g?.ok) {
+          const pt = g.partes ?? {}
+          const cg = String(pt.cep ?? '').replace(/\D/g, '')
+          setForm(prev => ({
+            ...prev,
+            rua: pt.rua || r.logradouro || prev.rua,
+            numero: pt.numero || prev.numero,
+            bairro: pt.bairro || prev.bairro,
+            cidade: pt.cidade || prev.cidade || '',
+            estado: pt.estado || prev.estado || '',
+            cep: cg.length === 8 ? `${cg.slice(0, 5)}-${cg.slice(5)}` : prev.cep,
+          }))
+          if (pt.estado) carregarCidades(pt.estado, pt.cidade)
+          if (Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+            const ponto = { lat: g.lat, lng: g.lng }
+            pontoEnderecoRef.current = ponto
+            if (!pinManualRef.current) setCoordCliente(ponto)
+          }
+          return
+        }
+      } catch { /* sem a funcao: fica o que ele digitou */ }
+      setForm(prev => ({ ...prev, rua: r.logradouro || prev.rua }))
+      return
+    }
     const cepNum = String(r.cep ?? '').replace(/\D/g, '')
     setForm(prev => ({
       ...prev,
@@ -2501,7 +2585,7 @@ export default function DeliveryCheckout() {
                             style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
                           <div className="dco-rua-lista">
                             {ruaSugestoes.map(r => (
-                              <button key={`${r.cep}-${r.logradouro}`} type="button"
+                              <button key={r.place_id || `${r.cep}-${r.logradouro}`} type="button"
                                 onClick={() => escolherRua(r)}>
                                 <strong>{r.logradouro}</strong>
                                 <span>{[r.bairro, r.localidade].filter(Boolean).join(' · ')}</span>
