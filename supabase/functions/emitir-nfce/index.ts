@@ -375,6 +375,18 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   const itensPed: any[] = Array.isArray(ped.itens) ? ped.itens : []
   if (!itensPed.length) return { ok: false, error: "pedido sem itens" }
 
+  // NCM DE CADA PRODUTO (26/10/2026)
+  // A Agv vende bebida, picolé, bala e comida pronta: mandar o NCM de comida
+  // pronta em tudo é classificar errado. Vale o NCM do cadastro do produto; o
+  // padrão da loja fica só pra quem não tem (ex.: quentinha, self-service).
+  const ehUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+  const idsProd = [...new Set(itensPed.map(it => String(it.produto_id ?? it.id ?? "")).filter(ehUuid))]
+  const ncmPorProduto: Record<string, string> = {}
+  if (idsProd.length) {
+    const { data: prods } = await sb.from("produtos").select("id, ncm").in("id", idsProd).eq("empresa_id", ped.empresa_id)
+    for (const p of prods ?? []) { const n = soDigitos(p.ncm); if (n.length === 8) ncmPorProduto[p.id] = n }
+  }
+
   const items = itensPed.map((it, idx) => {
     const qtd = Number(it.quantidade ?? it.qtd ?? 1) || 1
     const unit = Number(it.preco_unitario ?? it.preco ?? 0) || 0
@@ -383,7 +395,7 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       numero_item: String(idx + 1),
       codigo_produto: String(it.codigo ?? it.id ?? idx + 1),
       descricao: descricaoDoItem(String(it.nome ?? it.descricao ?? "Item")),
-      codigo_ncm: ncm,
+      codigo_ncm: ncmPorProduto[String(it.produto_id ?? it.id ?? "")] ?? ncm,
       cfop,
       unidade_comercial: "UN",
       unidade_tributavel: "UN",
@@ -478,6 +490,13 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   if (patch.status === "rejeitada" && /tribut|685|vTotTrib/i.test(String(patch.motivo_rejeicao ?? ""))) {
     for (const it of items) delete (it as Record<string, unknown>).valor_total_tributos
     refUsada = `${refUsada}-t`
+    patch = await enviar(refUsada)
+  }
+  // NCM do produto que a SEFAZ não reconhece (778): volta pro padrão da loja pra
+  // venda não travar na frente do cliente. O motivo fica no log da nota anterior.
+  if (patch.status === "rejeitada" && /ncm|778/i.test(String(patch.motivo_rejeicao ?? ""))) {
+    for (const it of items) (it as Record<string, unknown>).codigo_ncm = ncm
+    refUsada = `${refUsada}-n`
     patch = await enviar(refUsada)
   }
   // A consulta e o cancelamento acham a nota pela referencia: tem que ser a que valeu.
