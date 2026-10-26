@@ -77,6 +77,7 @@ function canalDaVenda(obs) {
   const o = semAcento(obs)
   if (!o) return null
   if (o.startsWith('balcao')) return 'Balcão'
+  if (o.startsWith('delivery')) return 'Delivery'
   const mesa = /mesa\s*(\S+)/.exec(o)
   if (o.startsWith('presencial') && mesa) return `Mesa ${mesa[1]}`
   const com = /comanda\s*(\S+)/.exec(o)
@@ -100,6 +101,10 @@ function desdeDoPeriodo(id) {
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const nomeDoItem = i => i.produtos?.nome ?? i.nome_produto ?? 'item'
+// O que veio dentro do item (acompanhamentos, adicionais): "2× Bacon, Alface".
+const complementosDoItem = i => (Array.isArray(i.complementos) ? i.complementos : [])
+  .map(c => `${Number(c.qtd) > 1 ? Number(c.qtd) + '× ' : ''}${c.nome}${Number(c.preco) > 0 ? ` (+${fmtBRL(c.preco)})` : ''}`)
+  .join(', ')
 
 // Extrato pra imprimir ou salvar em PDF: cada compra com seus itens e preços,
 // os pagamentos e o saldo — o papel que o cliente pede pra conferir a conta.
@@ -109,7 +114,7 @@ function imprimirExtrato({ cliente, nomeLoja, periodoLabel, vendas, pagamentos, 
   const blocos = [...fiados].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).map(v => `
     <div class="v">
       <div class="h"><b>${esc(canalDaVenda(v.observacoes) ?? 'Fiado')}</b><span>${esc(dataHora(v.created_at))}</span></div>
-      ${(v.venda_itens ?? []).map(i => `<div class="i"><span>${esc(Number(i.quantidade))}× ${esc(nomeDoItem(i))}</span><span>${fmtBRL(i.preco_unitario)}${Number(i.quantidade) !== 1 ? ' un · ' + fmtBRL(i.subtotal) : ''}</span></div>`).join('')}
+      ${(v.venda_itens ?? []).map(i => `<div class="i"><span>${esc(Number(i.quantidade))}× ${esc(nomeDoItem(i))}</span><span>${fmtBRL(i.preco_unitario)}${Number(i.quantidade) !== 1 ? ' un · ' + fmtBRL(i.subtotal) : ''}</span></div>${complementosDoItem(i) ? `<div class="c">${esc(complementosDoItem(i))}</div>` : ''}`).join('')}
       <div class="t"><span>Total</span><span>${fmtBRL(v.total)}</span></div>
     </div>`).join('')
   const pag = pagamentos.map(p => `<div class="i"><span>${esc(dataHora(p.created_at))} · ${esc(FORMAS.find(f => f.id === p.forma_pagamento)?.label ?? p.forma_pagamento)}</span><span>${fmtBRL(p.valor)}</span></div>`).join('')
@@ -119,7 +124,7 @@ function imprimirExtrato({ cliente, nomeLoja, periodoLabel, vendas, pagamentos, 
     <style>body{font-family:Arial,sans-serif;max-width:640px;margin:20px auto;padding:0 14px;color:#111;font-size:14px}
     h1{font-size:18px;margin:0}.s{color:#555;margin:2px 0 14px}.v{border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin-bottom:8px;break-inside:avoid}
     .h,.i,.t{display:flex;justify-content:space-between;gap:8px;padding:2px 0}.h{border-bottom:1px solid #eee;margin-bottom:4px}.t{border-top:1px solid #eee;margin-top:4px;font-weight:700}
-    .r{margin-top:14px;font-size:15px}.r div{display:flex;justify-content:space-between;padding:2px 0}h2{font-size:13px;margin:16px 0 4px;color:#555}</style></head><body>
+    .c{color:#555;font-size:12.5px;padding:0 0 3px 14px}.r{margin-top:14px;font-size:15px}.r div{display:flex;justify-content:space-between;padding:2px 0}h2{font-size:13px;margin:16px 0 4px;color:#555}</style></head><body>
     <h1>${esc(nomeLoja)}</h1><div class="s">Extrato de fiado · <b>${esc(cliente)}</b><br>${esc(periodoLabel)} · emitido em ${esc(dataHora(new Date().toISOString()))}</div>
     ${blocos || '<p>Nenhuma compra no período.</p>'}
     ${pag ? `<h2>PAGAMENTOS</h2>${pag}` : ''}
@@ -284,7 +289,7 @@ export default function ClientesFiado({ empresaId }) {
     // em tela nenhuma: pra saber, tinha que abrir o banco.
     const [vd, pg] = await Promise.all([
       supabase.from('vendas')
-        .select('id, total, forma_pagamento, created_at, observacoes, venda_itens(quantidade, preco_unitario, subtotal, nome_produto, produtos(nome))')
+        .select('id, total, forma_pagamento, created_at, observacoes, venda_itens(quantidade, preco_unitario, subtotal, nome_produto, complementos, produtos(nome))')
         .eq('empresa_id', empresaId)
         .eq('cliente_id', clienteId)
         .neq('status', 'cancelado')
@@ -707,11 +712,16 @@ export default function ClientesFiado({ empresaId }) {
                                   {(v.venda_itens ?? []).length > 0 && (
                                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
                                       {v.venda_itens.map((it, i) => (
-                                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                          <span>{Number(it.quantidade)}× {nomeDoItem(it)}</span>
-                                          <span style={{ whiteSpace: 'nowrap' }}>
-                                            {Number(it.quantidade) !== 1 && <>{fmtBRL(it.preco_unitario)} un · </>}{fmtBRL(it.subtotal ?? it.preco_unitario * it.quantidade)}
-                                          </span>
+                                        <div key={i} style={{ marginBottom: 2 }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                            <span>{Number(it.quantidade)}× {nomeDoItem(it)}</span>
+                                            <span style={{ whiteSpace: 'nowrap' }}>
+                                              {Number(it.quantidade) !== 1 && <>{fmtBRL(it.preco_unitario)} un · </>}{fmtBRL(it.subtotal ?? it.preco_unitario * it.quantidade)}
+                                            </span>
+                                          </div>
+                                          {complementosDoItem(it) && (
+                                            <div style={{ fontSize: 12, paddingLeft: 14 }}>{complementosDoItem(it)}</div>
+                                          )}
                                         </div>
                                       ))}
                                     </div>
