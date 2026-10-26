@@ -3601,8 +3601,10 @@ function CodigoColetaIfood({ pedido, onLiberar }) {
 // fechava. Aqui a correcao e so do pagamento: nao mexe em item, valor nem
 // endereco, porque quem corrige na correria nao pode ter como errar o resto.
 //
-// "Fiado" so aparece no pedido de balcao (26/10): a troca cria a divida em
-// `vendas` junto, igual ao + Vender. No delivery de fora continua de fora.
+// "Fiado" so existe AQUI, na troca feita pela loja (26/10): a troca cria a
+// divida em `vendas` junto, igual ao + Vender. Cliente nunca ve fiado no
+// cardapio/app/link - e cliente que paga por mes pede em dinheiro e a loja
+// converte. Fora so o iFood, que ja veio pago pela plataforma.
 const FORMAS_TROCA = [
   { id: 'dinheiro', label: '\ud83d\udcb5 Dinheiro' },
   { id: 'pix_entrega', label: '\ud83d\udcf1 PIX na entrega' },
@@ -3639,7 +3641,7 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
         </p>
 
         <div style={{ display: 'grid', gap: 8 }}>
-          {FORMAS_TROCA.filter(f => !f.soBalcao || pedido.origem === 'balcao').map(f => (
+          {FORMAS_TROCA.filter(f => !f.soBalcao || pedido.origem !== 'ifood').map(f => (
             <button key={f.id} type="button" onClick={() => setForma(f.id)}
               style={{ padding: '11px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                 fontSize: 14, fontWeight: 700,
