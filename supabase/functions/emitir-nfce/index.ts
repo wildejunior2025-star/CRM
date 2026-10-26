@@ -435,13 +435,31 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   }).select("id").maybeSingle()
   const notaId = rascunho?.id
 
-  const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce?ref=${encodeURIComponent(ref)}`, {
-    method: "POST",
-    headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
-    body: JSON.stringify(nfce),
-  })
-  const data = await res.json().catch(() => ({}))
-  const patch = mapearRetornoFocus(data, ambiente)
+  const enviar = async (refUsada: string) => {
+    const res = await fetch(`${FOCUS_HOST[ambiente]}/v2/nfce?ref=${encodeURIComponent(refUsada)}`, {
+      method: "POST",
+      headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
+      body: JSON.stringify(nfce),
+    })
+    const data = await res.json().catch(() => ({}))
+    return mapearRetornoFocus(data, ambiente)
+  }
+  let refUsada = ref
+  let patch = await enviar(refUsada)
+
+  // NUMERO REPETIDO (rejeicao 539, "Duplicidade de NF-e, com diferenca na Chave
+  // de Acesso") (Agv, 26/10/2026): a venda de mesa foi recusada porque o numero
+  // que o emissor escolheu ja existia na SEFAZ — era o da nota no 1 da serie 10,
+  // que o delivery tinha emitido dois dias antes. Reenviar com uma referencia
+  // NOVA faz o emissor pegar o proximo numero livre. So repete nesse erro: se a
+  // resposta se perdesse (queda de rede), repetir poderia emitir a nota em dobro.
+  for (let tentativa = 2; tentativa <= 3 && patch.status === "rejeitada"
+       && /duplicidade|539/i.test(String(patch.motivo_rejeicao ?? "")); tentativa++) {
+    refUsada = `${ref}-${tentativa}`
+    patch = await enviar(refUsada)
+  }
+  // A consulta e o cancelamento acham a nota pela referencia: tem que ser a que valeu.
+  patch.ref = refUsada
 
   if (notaId) await sb.from("nfce_notas").update(patch).eq("id", notaId)
   const { data: nota } = await sb.from("nfce_notas").select("*").eq("id", notaId).maybeSingle()
