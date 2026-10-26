@@ -315,7 +315,44 @@ function pontoConfere(item, { rua, bairro, cidade } = {}) {
   if (cidade && cidadeOsm && !mesmoLugar(cidade, cidadeOsm)) return false
   return true
 }
-async function geocodeEndereco({ rua, numero, bairro, cidade, estado, cep } = {}) {
+// O GOOGLE ACHA A CASA; O MAPA GRATIS ACHA A RUA (25/10/2026)
+//
+// O buscador gratis e literal: "Rua Santa Maria 180" ele procura ao pe da letra
+// e devolve outra rua parecida, ou o meio da via. O Google entende o endereco
+// como gente fala e devolve a CASA — com o numero, o CEP e o nome certo da rua
+// ("Santa Maria" virou "Santa Margarida Maria" num teste real do Agv).
+//
+// Isso importa aqui mais que em qualquer outra tela: e deste ponto que sai a
+// TAXA DE ENTREGA. Ponto na rua errada e taxa errada, e o cliente so descobre
+// quando a comida nao chega.
+//
+// Nao e obrigatorio: se a loja nao for identificada, se a cota do dia estourar
+// ou se o Google cair, devolve nulo e o caminho antigo assume inteiro. Trocar
+// de motor nao pode ser motivo pra ninguem ficar sem comprar.
+async function geocodeGoogle({ empresaId, rua, numero, bairro, cidade, estado, cep }) {
+  if (!empresaId || !rua) return null
+  try {
+    const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+    const chave = import.meta.env.VITE_SUPABASE_ANON_KEY
+    const r = await fetch(`${base}/functions/v1/geocodificar-google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: chave, Authorization: `Bearer ${chave}` },
+      body: JSON.stringify({ empresa_id: empresaId, rua, numero, bairro, cidade, estado, cep }),
+    })
+    const g = await r.json()
+    if (!g?.ok || typeof g.lat !== 'number') return null
+    // APPROXIMATE e centro de bairro/cidade — pior que o ponto da rua que o
+    // caminho antigo acha. Nesse caso devolve nulo e deixa o antigo tentar.
+    if (g.precisao === 'APPROXIMATE') return null
+    return { lat: g.lat, lng: g.lng, precisao: g.precisao, partes: g.partes ?? null }
+  } catch { return null }
+}
+
+async function geocodeEndereco({ empresaId, rua, numero, bairro, cidade, estado, cep } = {}) {
+  // Google primeiro: e o unico que acha NUMERO DE CASA.
+  const g = await geocodeGoogle({ empresaId, rua, numero, bairro, cidade, estado, cep })
+  if (g) return g
+
   const uf = estado || ''
   const cepLimpo = String(cep || '').replace(/\D/g, '')
   // Todo ponto passa pela conferência antes de virar taxa — por isso o
@@ -388,7 +425,7 @@ async function reverseGeocode(lat, lng) {
 //     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
 //   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
 //     uma página que rola, é briga de dedo).
-function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
+function MapaLocalizador({ empresaIdMapa, storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -497,7 +534,7 @@ function MapaLocalizador({ storeLat, storeLng, raioKm, taxas, taxaBairro, bairro
       // pessoa digita); aqui só seguimos o ponto que ele achar.
       if (!embutido && !initial && endereco && (endereco.rua || endereco.cep)) {
         setGeoLoading(true)
-        geocodeEndereco(endereco).then(g => {
+        geocodeEndereco({ ...endereco, empresaId: empresaIdMapa }).then(g => {
           setGeoLoading(false)
           // Se o cliente já arrastou enquanto isto carregava, não desmancha o que ele fez.
           if (cancelado || !g || !mapObj.current || interagiu.current) return
@@ -1209,7 +1246,7 @@ export default function DeliveryCheckout() {
     const ehCelular = window.matchMedia('(max-width: 899px)').matches
     if (!form.numero.trim() && !ehCelular) return
     const t = setTimeout(async () => {
-      const c = await geocodeEndereco({ rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
+      const c = await geocodeEndereco({ empresaId: state?.empresaId, rua, numero: form.numero, bairro: form.bairro, cidade, estado: form.estado, cep: form.cep })
       // O endereço escrito passa a valer a partir DESTE ponto (ver o reverse do
       // pino): é daqui que se mede se o pino andou de verdade depois.
       if (c && !pinManualRef.current) { pontoEnderecoRef.current = c; setCoordCliente(c) }
@@ -2678,6 +2715,7 @@ export default function DeliveryCheckout() {
                     <div className="dco-mapa-embutido" style={{ marginTop: 4 }}>
                       <MapaLocalizador
                         embutido
+                        empresaIdMapa={state?.empresaId}
                         storeLat={lojaEndereco.latitude}
                         storeLng={lojaEndereco.longitude}
                         raioKm={lojaEndereco.raio_entrega_km}
@@ -3094,6 +3132,7 @@ export default function DeliveryCheckout() {
 
       {mapaAberto && (
         <MapaLocalizador
+          empresaIdMapa={state?.empresaId}
           storeLat={lojaEndereco?.latitude}
           storeLng={lojaEndereco?.longitude}
           raioKm={lojaEndereco?.raio_entrega_km}

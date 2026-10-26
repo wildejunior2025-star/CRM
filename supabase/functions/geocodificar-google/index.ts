@@ -168,11 +168,31 @@ Deno.serve(async (req) => {
       if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
     } else {
       const { data: u } = await supabase.auth.getUser(token)
-      if (!u?.user) return json({ ok: false, erro: 'nao_autenticado' }, 401)
-      const { data: perfil } = await supabase.from('profiles')
-        .select('empresa_id').eq('id', u.user.id).maybeSingle()
+      const { data: perfil } = u?.user
+        ? await supabase.from('profiles').select('empresa_id').eq('id', u.user.id).maybeSingle()
+        : { data: null }
       empresaId = perfil?.empresa_id as string | undefined
-      if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
+
+      // O CLIENTE TAMBEM PRECISA ACHAR A PROPRIA RUA (25/10/2026)
+      //
+      // Ate aqui so entrava funcionario de loja (crachao) ou o servidor. Mas
+      // quem mais erra endereco e justamente quem digita o proprio: no link do
+      // catalogo o cliente nem esta logado, e no app ele tem conta de CLIENTE,
+      // que por definicao nao pertence a loja nenhuma. Os dois levavam 403 e
+      // ficavam no mapa gratis, que e o que troca a rua e perde a entrega.
+      //
+      // Agora a pagina diz de qual loja e o pedido (ela ja sabe) e a consulta
+      // passa a ter dono. O freio contra abuso continua sendo o mesmo de
+      // sempre: o teto diario POR LOJA, que limita o estrago de uma pagina
+      // publica a 150 consultas. Loja de verdade usa 24 no pico.
+      if (!empresaId) {
+        const daPagina = String(b.empresa_id ?? '').trim()
+        if (!daPagina) return json({ ok: false, erro: 'sem_loja' }, 403)
+        const { data: loja } = await supabase.from('empresas')
+          .select('id').eq('id', daPagina).maybeSingle()
+        if (!loja) return json({ ok: false, erro: 'sem_loja' }, 403)
+        empresaId = loja.id as string
+      }
     }
 
     if (!GOOGLE_KEY) return json({ ok: false, erro: 'sem_chave' })
