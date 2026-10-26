@@ -86,6 +86,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
   const [msg, setMsg] = useState(null)                 // { tipo, texto }
   const [busca, setBusca] = useState('')
   const [criando, setCriando] = useState(false)        // formulário de item aberto?
+  const [catsAbertas, setCatsAbertas] = useState(() => new Set())   // categorias expandidas (começam recolhidas)
   const [abertos, setAbertos] = useState(() => new Set())  // itens com os complementos à mostra
   const [confirmar, avisoConfirmar] = useConfirmar()
 
@@ -510,7 +511,12 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
         {porCategoria.map(cat => (
           <div key={cat.nome} style={{ marginBottom: 14 }}>
             <div className="ifc-cat" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>{cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span></span>
+              <button type="button" onClick={() => setCatsAbertas(prev => {
+                  const st = new Set(prev); st.has(cat.nome) ? st.delete(cat.nome) : st.add(cat.nome); return st
+                })}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left' }}>
+                {catsAbertas.has(cat.nome) || busca.trim() ? '▾' : '▸'} {cat.nome} <span style={{ fontWeight: 400 }}>· {cat.itens.length}</span>
+              </button>
               {/* Só sem busca ativa: com filtro, a categoria aparece com parte dos
                   itens e o botão sugeriria apagar só aqueles. */}
               {!busca.trim() && (
@@ -525,6 +531,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
                 </button>
               )}
             </div>
+          {(catsAbertas.has(cat.nome) || busca.trim()) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {cat.itens.map(it => {
               const pausado = it.status === 'UNAVAILABLE'
@@ -627,6 +634,7 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
               )
             })}
           </div>
+          )}
           </div>
         ))}
       </div>
