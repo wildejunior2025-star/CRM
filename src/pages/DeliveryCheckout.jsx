@@ -825,6 +825,10 @@ export default function DeliveryCheckout() {
   const telConfirmadoRef = useRef(false)
   const enderecoCadastroRef = useRef(null)
   const [reconfirmar, setReconfirmar] = useState(false) // só a minoria com endereço errado: obriga remarcar o pino uma vez
+  // POR QUE reconfirmar (mig 0394). 'bairro' = o mapa achou a rua em outro
+  // bairro. Sem o motivo o recado era generico e o cliente arrumava o pino
+  // mas deixava o bairro errado no cadastro — que e o que perde o entregador.
+  const [motivoReconfirmar, setMotivoReconfirmar] = useState(null)
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
@@ -1154,6 +1158,7 @@ export default function DeliveryCheckout() {
       // com o endereço e a taxa de Ponta Negra de quem usou o número antes).
       enderecoCadastroRef.current = chaveEndereco({ rua: data.endereco, numero: data.numero, cidade: data.cidade })
       setReconfirmar(!!data.reconfirmar_endereco) // marcado no banco → força remarcar o mapa
+      setMotivoReconfirmar(data.reconfirmar_motivo ?? null)
       // Pino que ESTE cliente já apontou no mapa (mig 0160). Só o manual volta:
       // ponto que o buscador chutou não é confiável pra calcular taxa — foi ele
       // que cobrou R$ 8 de quem morava a 500 m. Quem aplica é o efeito abaixo,
@@ -2577,6 +2582,26 @@ export default function DeliveryCheckout() {
                     )}
                   </Field>
                   </div>
+
+                  {/* BAIRRO QUE NAO CONFERE (25/10/2026)
+                      Na carga de pinos, 37 clientes tinham rua e numero que o
+                      mapa acha, mas num bairro diferente do cadastrado. Pode
+                      ser erro de quem digitou, pode ser rua de divisa — por
+                      isso o texto PEDE pra conferir, nao acusa de errado. Se a
+                      gente disser "voce errou" pra quem acertou, na proxima vez
+                      ele ignora o aviso que importa. */}
+                  {reconfirmar && motivoReconfirmar === 'bairro' && (
+                    <div style={{
+                      gridColumn: '1 / -1', fontSize: 12.5, lineHeight: 1.5,
+                      color: '#fca5a5', background: 'rgba(239,68,68,.12)',
+                      border: '1px solid rgba(239,68,68,.45)', borderRadius: 8,
+                      padding: '9px 11px', marginBottom: 8,
+                    }}>
+                      ⚠️ <strong>Confira o seu bairro.</strong> Não conseguimos confirmar o
+                      bairro do seu endereço no mapa. Digite o nome da rua de novo e escolha o
+                      bairro certo — assim a entrega chega sem erro e a taxa sai correta.
+                    </div>
+                  )}
 
                   {/* Bairro */}
                   <Field label="Bairro" required error={errors.bairro}>
