@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 44
+const APP_VERSION = 47
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -470,9 +470,9 @@ function imprimirBytes(bytes, nome, printerOverride) {
   return ok
 }
 function imprimir(pedido) {
-  if (jaImpressos.has(pedido.id)) return
+  if (jaImpressos.has(pedido.id)) return true
   jaImpressos.add(pedido.id)
-  imprimirCupomPedido(pedido)
+  return imprimirCupomPedido(pedido)
 }
 // Pedido de DELIVERY no papel.
 //
@@ -573,8 +573,21 @@ async function imprimirPedido(p, jaReservado) {
   // Quando alguem aceita (no nosso painel ou no app do iFood), o status vira
   // 'confirmado' e o UPDATE do tempo real traz o pedido de volta pra ca. O
   // botao de reimprimir do gestor nao passa por aqui: continua forcando papel.
-  if (p.origem === 'ifood' && p.status === 'aguardando') {
-    log('  (iFood #' + (p.ifood_display_id ?? p.numero_pedido ?? p.id) + ' ainda NAO ACEITO — nao imprimiu)')
+  if (p.status === 'aguardando') {
+    // PAPEL SO DEPOIS DO ACEITE, EM QUALQUER ORIGEM (26/10/2026)
+    //
+    // Era so pro iFood. O dono corrigiu a regra: NENHUMA loja quer papel de
+    // pedido que ela ainda pode recusar — se recusar, a cozinha ja comecou.
+    //
+    // A duvida era se isso deixaria alguem sem papel: loja que nunca aperta
+    // "aceitar" ficaria muda. Medido em 757 pedidos de 7 dias, nas 7 lojas:
+    // ZERO ficaram sem ser aceitos. Quem usa aceite automatico confirma em um
+    // segundo e nao nota diferenca; quem aceita na mao — o Agv — passa a ter o
+    // papel na hora certa.
+    //
+    // Venda de BALCAO nasce 'confirmado' (quem vende e o atendente, nao tem o
+    // que aceitar), entao ela nao passa por aqui e continua saindo na hora.
+    log('  (#' + (p.numero_pedido ?? p.id) + ' ainda NAO ACEITO — o papel sai quando aceitarem)')
     return
   }
 
@@ -610,7 +623,36 @@ async function imprimirPedido(p, jaReservado) {
   } catch (e) { /* sem resposta — segue e imprime */ }
 
   marcarImpresso(p.id)
-  imprimir(p)
+  const saiu = imprimir(p)
+
+  // QUEM GANHA A VEZ E NAO IMPRIME TEM QUE DEVOLVER (26/10/2026)
+  //
+  // A reserva calou o cupom repetido, mas criou um buraco: o aparelho que
+  // ganhava a vez calava os outros mesmo sem conseguir imprimir. No Agv a
+  // POS-80 estava travada (2 trabalhos presos, offline ha 26 min), pegou a vez
+  // do pedido e a outra maquina — que estava boa — ficou impedida. O papel nao
+  // saiu em nenhuma das duas, e a loja so percebeu pela falta do pedido.
+  //
+  // `imprimirBytes` devolve false quando o Windows RECUSA o envio (sem
+  // impressora escolhida, fila morta). Nesse caso solta a vez e esquece o
+  // pedido: a outra maquina assume, ou esta mesma tenta de novo na rodada de
+  // 12s, ja com a fila destravada.
+  //
+  // Atencao ao que `true` significa aqui: so que o Windows ACEITOU. Papel preso
+  // depois disso nao volta por este caminho — quem avisa e o relatorio de saude.
+  if (saiu === false) {
+    log('  ! nao consegui imprimir #' + (p.numero_pedido ?? p.id) + ' — devolvendo a vez pra outro aparelho')
+    pedidosImpressos.delete(p.id)
+    try { fs.writeFileSync(IMPRESSOS_FILE, JSON.stringify([...pedidosImpressos])) } catch (e) {}
+    jaImpressos.delete(p.id)
+    if (!jaReservado) {
+      supabase.rpc('liberar_impressao', {
+        p_pedido: p.id,
+        p_quem: (os.hostname() || 'app').slice(0, 60),
+        p_papel: papelDoPc(),
+      }).catch(() => {})
+    }
+  }
 }
 
 // ---- pedidos de MESA (comandas) — imprime na cozinha automaticamente ----
