@@ -944,7 +944,7 @@ function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embu
                   {/* No chat: manda a lista pronta pro cliente escolher. Sem
                       isto, quem atende digitava os sabores um a um na mão. */}
                   {onEnviarLista && (grupo.opcoes ?? []).length > 0 && (
-                    <button type="button" onClick={() => onEnviarLista(grupo)} disabled={enviandoLista}
+                    <button type="button" onClick={() => onEnviarLista(grupo, produto?.nome)} disabled={enviandoLista}
                       title="Manda esta lista de sabores na conversa do cliente"
                       style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6,
                         border: '1px solid rgba(124,58,237,.55)', background: 'rgba(124,58,237,.12)',
@@ -1586,7 +1586,7 @@ function lerDraftVenda(empresaId) {
  * balcão, e trazer o carrinho de outro cliente pra dentro da conversa é como
  * se começa a mandar o pedido errado pra pessoa errada.
  */
-function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido = false, prefill = null }) {
+function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido = false, prefill = null, onEnviarCategoria = null, onEnviarLista = null, enviandoLista = false }) {
   const editando = !!pedidoEdicao
   // Rascunho só vale pra venda nova (não pra edição de pedido existente)
   const draft = (editando || prefill) ? null : lerDraftVenda(empresa?.id)
@@ -2731,6 +2731,16 @@ ${url}
             ← Categorias · <span style={{ color: 'var(--text)' }}>{catSel}</span>
           </button>
         )}
+        {/* Na sacola do chat: manda a categoria inteira (com preço) na conversa
+            do cliente — "que picolé vocês têm?" — sem digitar item por item. */}
+        {catSel && !buscaNorm && onEnviarCategoria && filtrados.length > 0 && (
+          <button type="button" disabled={enviandoLista}
+            onClick={() => onEnviarCategoria(catSel, filtrados.map(p => ({ nome: p.nome, preco: p.preco_venda, faixas_preco: p.faixas_preco })))}
+            style={{ marginBottom: 8, padding: '8px 12px', borderRadius: 8, cursor: enviandoLista ? 'wait' : 'pointer', fontWeight: 700, fontSize: 13,
+              border: '1px solid rgba(124,58,237,.55)', background: 'rgba(124,58,237,.12)', color: '#a78bfa', width: '100%', textAlign: 'left' }}>
+            {enviandoLista ? 'enviando…' : `📤 Mandar os ${filtrados.length} no chat`}
+          </button>
+        )}
         <div ref={listaRef} className="pp-venda-lista" style={{ overflowY: 'auto', flexShrink: 0, border: '1px solid var(--border, #2a2a3a)', borderRadius: 10, padding: 6, marginBottom: 14 }}>
           {loading ? (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 16, fontSize: 13 }}>Carregando produtos...</div>
@@ -3241,6 +3251,8 @@ ${url}
         produto={produtoComp}
         iniciais={produtoComp._iniciais ?? []}
         onFechar={() => setProdutoComp(null)}
+        onEnviarLista={onEnviarLista || undefined}
+        enviandoLista={enviandoLista}
         onConfirmar={(prod, selecoes, precoUnit, qtdItem, adicionalUnit) => {
           // Edição: tira a linha antiga e recria com a escolha nova, mantendo a
           // qtd — menos no atacado, onde a quantidade É a soma dos sabores e
@@ -7340,6 +7352,33 @@ export default function PainelPedidos() {
         if (eV) { alert('Não consegui registrar a dívida: ' + eV.message); return }
       }
     }
+    // SAINDO DO FIADO, A DÍVIDA TEM QUE SAIR JUNTO (26/10/2026).
+    //
+    // O caminho de ida já estava certo: dinheiro → fiado cria a linha em
+    // `vendas` e o cliente aparece devendo. A VOLTA não existia. O caso é o
+    // mais comum de todos: ele levou fiado, voltou e pagou, a loja corrige pra
+    // dinheiro — e o nome dele continuava na lista de quem deve, para sempre.
+    // Mesma coisa quando o fiado foi marcado por engano.
+    //
+    // Usa a mesma função do botão "apagar fiado" da tela de Fiado: ela registra
+    // o porquê e RECUSA quando a dívida já teve recebimento — e aí a troca
+    // inteira para, porque um pedido pago em dinheiro com dívida viva é pior
+    // que não ter corrigido nada.
+    if (pedido.forma_pagamento === 'fiado' && forma !== 'fiado') {
+      const { data: divida } = await supabase.from('vendas')
+        .select('id').eq('pedido_id', pedido.id).neq('status', 'cancelado').limit(1).maybeSingle()
+      if (divida?.id) {
+        const { error: eC } = await supabase.rpc('cancelar_venda_fiado', {
+          p_venda_id: divida.id,
+          p_motivo: `pagamento corrigido para ${nomeForma(forma)} no gestor`,
+        })
+        if (eC) {
+          alert('A dívida deste pedido não pôde ser apagada:\n\n' + eC.message
+            + '\n\nO pagamento NÃO foi alterado. Acerte o recebimento na tela de Fiado e tente de novo.')
+          return
+        }
+      }
+    }
     const { error } = await supabase.from('pedidos_delivery').update({
       forma_pagamento: forma,
       // Pagamento dividido deixa de existir quando se escolhe uma forma unica —
@@ -8812,7 +8851,7 @@ export default function PainelPedidos() {
   // "Quais sabores tem?" — a pergunta de sempre. Em vez de quem atende digitar
   // 16 nomes na mão (e esquecer três), o seletor de complementos manda a lista
   // pronta na conversa, só com o que está disponível e com o acréscimo de cada.
-  async function enviarListaDeSabores(grupo) {
+  async function enviarListaDeSabores(grupo, nomeProduto) {
     if (!grupo || !chatAberto || !empresa?.id) return
     const disp = (grupo.opcoes ?? []).filter(o => o.disponivel !== false)
     if (!disp.length) {
@@ -8827,7 +8866,8 @@ export default function PainelPedidos() {
         : ''
       return `• ${o.nome}${extra}`
     }).join('\n')
-    const nomeProd = produtoCompChat?.nome ? `*${produtoCompChat.nome}*\n` : ''
+    const nomeBase = nomeProduto || produtoCompChat?.nome
+    const nomeProd = nomeBase ? `*${nomeBase}*\n` : ''
     const texto = `${nomeProd}${grupo.nome}:\n\n${linhas}\n\nÉ só me dizer qual você quer 😉`
     const r = await mandarTextoNoChat(texto)
     setEnviandoLista(false)
@@ -12504,6 +12544,9 @@ export default function PainelPedidos() {
               cidade: enderecoRobo?.cidade ?? '',
               cep: enderecoRobo?.cep ?? '',
             }}
+            onEnviarCategoria={enviarListaDaCategoria}
+            onEnviarLista={enviarListaDeSabores}
+            enviandoLista={enviandoLista}
             onFechar={() => setSacolaLateral(false)}
             onCriado={() => { carregarPedidos(); setSacolaLateral(false) }}
           />
