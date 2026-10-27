@@ -99,6 +99,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     // valer, e mostrar um campo so fazia a tela mentir sobre qual esta em uso.
     csc_homologacao: '', csc_id_homologacao: '', csc_producao: '', csc_id_producao: '',
     ncm_padrao: '21069090', cfop_padrao: '5102', csosn_padrao: '102', origem_padrao: '0',
+    nfce_auto: false, nfce_auto_formas: [], nfce_auto_espera_min: 2,
   })
   const [fiscalSalvando, setFiscalSalvando] = useState(false)
   const [fiscalMsg, setFiscalMsg] = useState(null) // { tipo, texto }
@@ -188,6 +189,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
       cfop_padrao: fiscalCfg.cfop_padrao.trim() || null,
       csosn_padrao: fiscalCfg.csosn_padrao.trim() || null,
       origem_padrao: fiscalCfg.origem_padrao.trim() || null,
+      nfce_auto: fiscalCfg.nfce_auto,
+      nfce_auto_formas: fiscalCfg.nfce_auto_formas,
+      nfce_auto_espera_min: Math.max(1, Number(fiscalCfg.nfce_auto_espera_min) || 2),
     })
     setFiscalSalvando(false)
     setFiscalMsg(error
@@ -440,6 +444,9 @@ export default function MinhaLoja({ secao = 'loja' }) {
           cfop_padrao: data.cfop_padrao ?? '5102',
           csosn_padrao: data.csosn_padrao ?? '102',
           origem_padrao: data.origem_padrao ?? '0',
+          nfce_auto: data.nfce_auto ?? false,
+          nfce_auto_formas: data.nfce_auto_formas ?? [],
+          nfce_auto_espera_min: data.nfce_auto_espera_min ?? 2,
         })
         setCertNome(data.certificado_nome ?? '')
         setCertRegistrada(data.focus_registrada ?? false)
@@ -1961,6 +1968,55 @@ export default function MinhaLoja({ secao = 'loja' }) {
               </select>
             </div>
           </div>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 4px' }}>Emitir nota automaticamente</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 12 }}>
+            Desligado, a nota só sai quando alguém emite. Ligado, o sistema emite sozinho a nota das vendas
+            já fechadas, só nas formas de pagamento marcadas. Vale a partir do momento em que você liga:
+            vendas de antes não viram nota.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
+            <input
+              type="checkbox"
+              checked={fiscalCfg.nfce_auto}
+              onChange={e => setFiscalCfg({ ...fiscalCfg, nfce_auto: e.target.checked })}
+            />
+            Emitir NFC-e automática
+          </label>
+          {fiscalCfg.nfce_auto && (
+            <>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[['cartao', 'Cartão'], ['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['vale', 'Vale / benefício']].map(([k, rotulo]) => (
+                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={fiscalCfg.nfce_auto_formas.includes(k)}
+                      onChange={e => setFiscalCfg({
+                        ...fiscalCfg,
+                        nfce_auto_formas: e.target.checked
+                          ? [...fiscalCfg.nfce_auto_formas, k]
+                          : fiscalCfg.nfce_auto_formas.filter(x => x !== k),
+                      })}
+                    />
+                    {rotulo}
+                  </label>
+                ))}
+              </div>
+              <div className="form-field" style={{ maxWidth: 260 }}>
+                <label>Esperar quantos minutos depois de fechar a venda</label>
+                <input
+                  type="number" min="1" max="30"
+                  value={fiscalCfg.nfce_auto_espera_min}
+                  onChange={e => setFiscalCfg({ ...fiscalCfg, nfce_auto_espera_min: e.target.value })}
+                />
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+                Venda fiado ou sem forma de pagamento nunca emite sozinha. Forma que você não marcar fica manual:
+                emitir nota sobre ela é decisão e responsabilidade da loja, já que toda venda ao consumidor
+                final precisa de documento fiscal.
+              </p>
+            </>
+          )}
 
           <button type="submit" className="btn btn-primary" disabled={fiscalSalvando} style={{ marginTop: 16 }}>
             {fiscalSalvando ? 'Salvando...' : 'Salvar dados fiscais'}
