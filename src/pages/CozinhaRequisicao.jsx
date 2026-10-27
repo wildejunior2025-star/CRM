@@ -39,6 +39,7 @@ export default function CozinhaRequisicao({ empresaId }) {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
   const [periodo, setPeriodo] = useState('hoje')
+  const [estimado, setEstimado] = useState(null)   // { custo, vendido } estimados pelas vendas do período
 
   const [funcId, setFuncId] = useState('')
   const [linhas, setLinhas] = useState([])
@@ -61,12 +62,21 @@ export default function CozinhaRequisicao({ empresaId }) {
     setCarregando(true)
     setErro(null)
     try {
-      const [f, m, r] = await Promise.all([
+      // O que a conta da loja ESPERA ter gasto: custo estimado dos pratos vendidos (ficha técnica ou % do vendido).
+      // É o mesmo número do "Dia a dia" — a comparação com o gasto real da cozinha nasce daqui.
+      const noInstante = (dia) => new Date(`${dia}T00:00:00-03:00`).toISOString()
+      const [f, m, r, ce] = await Promise.all([
         supabase.from('funcionarios').select('id, nome, cargo').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
         fetchAll(() => supabase.from('materia_prima_saldo').select('materia_prima_id, nome, unidade, custo, quantidade_atual, categoria').order('materia_prima_id')),
         supabase.from('requisicoes_cozinha').select('*, requisicao_itens(*)').eq('empresa_id', empresaId)
           .gte('data', de).lte('data', ate).order('created_at', { ascending: false }),
+        supabase.rpc('custo_vendido_periodo', { p_ini: noInstante(de), p_fim: noInstante(somaDias(ate, 1)), p_empresa_id: empresaId }),
       ])
+      if (ce.error) setEstimado(null)
+      else setEstimado({
+        custo: r2((ce.data || []).reduce((s, x) => s + Number(x.custo || 0), 0)),
+        vendido: r2((ce.data || []).reduce((s, x) => s + Number(x.valor_vendido || 0), 0)),
+      })
       if (f.error) throw f.error
       if (m.error) throw m.error
       if (r.error) throw r.error
@@ -207,6 +217,35 @@ export default function CozinhaRequisicao({ empresaId }) {
           </div>
         )}
       </div>
+
+      {/* ── Real × estimado: a pergunta que o dono quer responder ── */}
+      {estimado && resumo.usado > 0 && (() => {
+        const dif = r2(resumo.usado - estimado.custo)
+        const acima = dif > 0
+        const pct = estimado.vendido > 0 ? Math.round((resumo.usado / estimado.vendido) * 100) : null
+        return (
+          <div style={{ ...cartao, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', marginBottom: 8 }}>⚖️ GASTO REAL × O QUE AS VENDAS PREVIAM</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 15 }}>
+              <span>Gasto real da cozinha</span><b>{brl(resumo.usado)}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 15, marginTop: 4 }}>
+              <span>Previsto pelas vendas</span><b>{brl(estimado.custo)}</b>
+            </div>
+            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, fontWeight: 700, fontSize: 14,
+              background: acima ? 'rgba(220,38,38,.1)' : 'rgba(22,163,74,.1)', color: acima ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
+              {estimado.custo <= 0 ? 'Sem venda de prato com custo cadastrado nesse período — não há o que comparar ainda.'
+                : Math.abs(dif) < 0.01 ? 'Bateu certinho.'
+                : acima ? `Gastou ${brl(dif)} a MAIS do que as vendas previam.` : `Gastou ${brl(-dif)} a MENOS do que as vendas previam.`}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6 }}>
+              {pct != null && estimado.vendido > 0 ? `Real = ${pct}% do vendido em pratos (${brl(estimado.vendido)}). ` : ''}
+              {resumo.semSobra > 0 ? `Falta a sobra de ${brl(resumo.semSobra)} entregues — o gasto real ainda está incompleto. ` : ''}
+              Se passa sempre pro mesmo lado, o percentual de custo dos pratos precisa ser ajustado (ou tem desperdício).
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Nova entrega ── */}
       {periodo === 'hoje' && (
