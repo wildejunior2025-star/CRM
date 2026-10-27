@@ -983,9 +983,23 @@ export default function FichaTecnica({ modo = 'fichas' }) {
               </div>
               <div className="form-field full">
                 <label>Categoria</label>
-                <select value={materiaForm.categoria} onChange={e => setMateriaForm(f => ({ ...f, categoria: e.target.value }))}>
+                <select value={materiaForm.categoria} onChange={e => {
+                  let v = e.target.value
+                  // Categoria própria da loja (ex.: "Temperos"): fica gravada no insumo e passa a aparecer
+                  // aqui pros outros. No dinheiro (rateio da nota) o insumo continua caindo numa categoria padrão.
+                  if (v === '__nova__') {
+                    v = (window.prompt('Nome da nova categoria (ex.: Temperos):') || '').trim().replace(/\s+/g, ' ')
+                    if (!v) return
+                    v = v.charAt(0).toUpperCase() + v.slice(1)
+                  }
+                  setMateriaForm(f => ({ ...f, categoria: v }))
+                }}>
                   <option value="">{materiaEdit ? SEM_CATEGORIA : 'Automática (pelo nome)'}</option>
                   {CATEGORIAS_INSUMO.map(c => <option key={c} value={c}>{ICONE_CATEGORIA[c]} {c}</option>)}
+                  {[...new Set([...materias.map(m => m.categoria), materiaForm.categoria])]
+                    .filter(c => c && !CATEGORIAS_INSUMO.includes(c)).sort()
+                    .map(c => <option key={c} value={c}>📦 {c}</option>)}
+                  <option value="__nova__">➕ Outra categoria…</option>
                 </select>
               </div>
               <div className="form-field">
