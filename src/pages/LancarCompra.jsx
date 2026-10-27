@@ -22,6 +22,7 @@ const num = (v) => {
   const n = Number(String(v ?? '').replace(',', '.'))
   return Number.isFinite(n) ? n : 0
 }
+const qtdTxt = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100
 const hojeISO = () => new Date().toLocaleDateString('sv-SE')
@@ -79,6 +80,7 @@ export default function LancarCompra({ empresaId }) {
   const [catConta, setCatConta] = useState('')          // '' = automática
   const [busca, setBusca] = useState('')
   const [novo, setNovo] = useState(null)                // cadastro rápido de MATÉRIA-PRIMA aberto
+  const [saldos, setSaldos] = useState(new Map())      // 'produto:id' / 'materia:id' → quantidade em estoque hoje
   const [apelidos, setApelidos] = useState([])          // ligações nome-da-nota → item
   const [ligando, setLigando] = useState(null)          // { texto, q } = escolhendo a que item ligar
   const [salvando, setSalvando] = useState(false)
@@ -93,7 +95,7 @@ export default function LancarCompra({ empresaId }) {
     if (!empresaId) return
     setCarregando(true)
     try {
-      const [pr, mp, ap, fo, hi, ct, ape] = await Promise.all([
+      const [pr, mp, ap, fo, hi, ct, ape, sp, sm] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque')
           .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null).order('nome').order('id')),
@@ -106,11 +108,17 @@ export default function LancarCompra({ empresaId }) {
           .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(15),
         supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId).order('ordem'),
         supabase.from('item_apelidos').select('apelido, apelido_norm, tipo, item_id').eq('empresa_id', empresaId).limit(5000),
+        fetchAll(() => supabase.from('estoque_saldo').select('produto_id, quantidade_atual').order('produto_id')),
+        fetchAll(() => supabase.from('materia_prima_saldo').select('materia_prima_id, quantidade_atual').order('materia_prima_id')),
       ])
       if (pr.error) throw pr.error
       if (mp.error) throw mp.error
       setProdutos(pr.data || [])
       setApelidos(ape.data || [])
+      const sd = new Map()
+      for (const x of (sp.error ? [] : sp.data || [])) sd.set(`produto:${x.produto_id}`, Number(x.quantidade_atual) || 0)
+      for (const x of (sm.error ? [] : sm.data || [])) sd.set(`materia:${x.materia_prima_id}`, Number(x.quantidade_atual) || 0)
+      setSaldos(sd)
       // Categorias do catálogo: as cadastradas + as que os produtos usam (sem repetir "Self service"/"self service").
       const vistas = new Map()
       for (const n of [...(ct.data || []).map(x => x.nome), ...(pr.data || []).map(x => x.categoria)]) {
@@ -152,6 +160,7 @@ export default function LancarCompra({ empresaId }) {
         estoque: item.tipo === 'materia' ? true : item.controla_estoque !== false,
         qtd: item.qtd && num(item.qtd) > 0 ? String(item.qtd).replace('.', ',') : '1', custo, total: null,
         apelido: item.via || item.apelido || null,      // o nome como veio na nota, se foi ligado
+        saldo: saldos.get(key) ?? 0, custoAtual: Number(item.custo) || 0,   // pra mostrar o custo médio que vai ficar
         // Produto de revenda: manda a categoria do catálogo (Picolé, Sucos…). Matéria-prima não tem
         // categoria de venda, então fica com o palpite entre os tipos de gasto.
         cat: aprendidas[chaveDoItem(item.nome)]
@@ -160,7 +169,7 @@ export default function LancarCompra({ empresaId }) {
     })
     setFoco(key)
     setBusca('')
-  }, [aprendidas])
+  }, [aprendidas, saldos])
 
   // Leitor de código de barras (USB é teclado) funciona aqui também, igual à Entrada de estoque.
   useEffect(() => {
@@ -245,6 +254,16 @@ export default function LancarCompra({ empresaId }) {
 
   // ── linhas ──────────────────────────────────────────────────────────────
   const valorLinha = (l) => (l.total !== null ? num(l.total) : r2(num(l.qtd) * num(l.custo)))
+  // O custo que o cadastro vai ficar: MÉDIA PONDERADA entre o que já tem e o que está entrando (mig 0405) —
+  // a mesma conta do banco. Estoque zerado/negativo ou custo antigo zerado: vale o preço pago.
+  const custoMedio = (l) => {
+    const q = num(l.qtd)
+    const unit = q > 0 ? valorLinha(l) / q : 0
+    if (!(unit > 0)) return null
+    const temBase = l.estoque && l.saldo > 0 && l.custoAtual > 0
+    const novo = temBase ? (l.saldo * l.custoAtual + q * unit) / (l.saldo + q) : unit
+    return { unit, novo: Math.round(novo * (l.tipo === 'produto' ? 100 : 10000)) / (l.tipo === 'produto' ? 100 : 10000), temBase }
+  }
 
   function mudar(key, campo, valor) {
     setLinhas(prev => prev.map(l => {
@@ -641,6 +660,18 @@ export default function LancarCompra({ empresaId }) {
                     </select>
                   </div>
                 </div>
+                {(() => {
+                  const cm = custoMedio(l)
+                  if (!cm) return null
+                  const un = l.tipo === 'materia' ? ` por ${l.unidade}` : ''
+                  return (
+                    <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      {cm.temBase
+                        ? <>Tem <strong>{qtdTxt(l.saldo)}</strong> a {brl(l.custoAtual)} → fica <strong>{qtdTxt(l.saldo + num(l.qtd))}</strong> ao <strong>custo médio de {brl(cm.novo)}</strong>{un}</>
+                        : <>{l.estoque ? 'Sem estoque (ou sem custo) antes: o ' : 'O '}custo passa a ser <strong>{brl(cm.novo)}</strong>{un}</>}
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>
