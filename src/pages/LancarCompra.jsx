@@ -4,6 +4,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { CATEGORIAS_COMPRA, CATEGORIAS_PAGAR, chaveDoItem } from '../lib/categoriasFinanceiro'
 import { recadoDeErro } from '../lib/erroRede'
+import { lerChave, parseNFeXml, pagamentoDaNota, casarItem, extraDaLinha, normApelido, fmtCnpj } from '../lib/nfe'
 import '../components/Page.css'
 
 // LANÇAR COMPRA — a nota de hoje, digitada UMA vez, caindo em três cantos.
@@ -42,9 +43,6 @@ const somaMeses = (iso, n) => {
 }
 const ddmm = (iso) => (iso ? iso.split('-').reverse().slice(0, 2).join('/') : '')
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-
-// O nome da nota sem acento/pontuação, minúsculo e com espaços simples: a chave da ligação (igual à do robô).
-const normApelido = (s) => norm(s).replace(/[^a-z0-9 ]/g, ' ').replace(/ +/g, ' ').trim()
 
 const FORMAS = [['pix', 'PIX'], ['dinheiro', 'Dinheiro'], ['transferencia', 'Transferência'], ['boleto', 'Boleto'],
   ['debito', 'Débito'], ['credito', 'Crédito'], ['cheque', 'Cheque'], ['outro', 'Outro']]
@@ -126,6 +124,7 @@ const LinhaItem = memo(function LinhaItem({ l, ult, catalogoCats, onMudar, onTro
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onTirar(l.key)}
           style={{ marginLeft: 'auto' }} aria-label={`Tirar ${l.nome}`}>✕</button>
       </div>
+      {l.avisoNota && <div style={{ fontSize: 12.5, color: '#b45309', fontWeight: 700, marginBottom: 8 }}>⚠️ {l.avisoNota}</div>}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         {l.tipo === 'produto' && (
           <div>
@@ -200,6 +199,37 @@ const LinhaItem = memo(function LinhaItem({ l, ult, catalogoCats, onMudar, onTro
   )
 })
 
+// Foto de celular tem 3 a 8 MB e a IA não precisa disso: reduz pra ~1800 px no lado maior e manda JPEG. PDF vai como está.
+// Se o navegador sabe ler código de barras (BarcodeDetector), já tira a CHAVE da nota da própria foto — aí a mesma nota
+// não entra duas vezes mesmo quando veio por foto.
+async function prepararArquivo(arquivo) {
+  const paraBase64 = (blob) => new Promise((res, rej) => {
+    const fr = new FileReader()
+    fr.onload = () => res(String(fr.result).split(',')[1])
+    fr.onerror = rej
+    fr.readAsDataURL(blob)
+  })
+  if (arquivo.type === 'application/pdf') {
+    if (arquivo.size > 8 * 1024 * 1024) throw new Error('PDF grande demais (limite de 8 MB)')
+    return { base64: await paraBase64(arquivo), mimetype: 'application/pdf', chave: null }
+  }
+  const bmp = await createImageBitmap(arquivo)
+  let chave = null
+  try {
+    if ('BarcodeDetector' in window) {
+      const det = new window.BarcodeDetector({ formats: ['code_128', 'qr_code'] })
+      for (const c of await det.detect(bmp)) { chave = lerChave(c.rawValue); if (chave) break }
+    }
+  } catch { /* sem leitor de código no navegador: segue só com a IA */ }
+  const esc = Math.min(1, 1800 / Math.max(bmp.width, bmp.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bmp.width * esc)
+  canvas.height = Math.round(bmp.height * esc)
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height)
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85))
+  return { base64: await paraBase64(blob), mimetype: 'image/jpeg', chave }
+}
+
 const chaveRascunho = (empresaId) => `lc_rascunho_${empresaId}`
 function lerRascunho(empresaId) {
   try {
@@ -242,7 +272,17 @@ export default function LancarCompra({ empresaId }) {
   const [novo, setNovo] = useState(null)                // cadastro rápido de MATÉRIA-PRIMA aberto
   const [saldos, setSaldos] = useState(new Map())      // 'produto:id' / 'materia:id' → quantidade em estoque hoje
   const [apelidos, setApelidos] = useState([])          // ligações nome-da-nota → item
-  const [ligando, setLigando] = useState(null)          // { texto, q } = escolhendo a que item ligar
+  const [ligando, setLigando] = useState(null)          // { texto, q, pendente? } = escolhendo a que item ligar
+  // Puxar da nota fiscal (chave / XML da Focus / foto lida por IA)
+  const [chaveInput, setChaveInput] = useState('')
+  const [chaveNota, setChaveNota] = useState(rascunho?.chaveNota ?? '')      // 44 dígitos da nota que está sendo lançada
+  const [cnpjNota, setCnpjNota] = useState(rascunho?.cnpjNota ?? '')          // CNPJ do emitente (vira o do fornecedor)
+  const [pendentes, setPendentes] = useState(rascunho?.pendentes ?? [])        // itens da nota que ainda não acharam item no cadastro
+  const [totalEsperado, setTotalEsperado] = useState(rascunho?.totalEsperado ?? null)  // total impresso na nota
+  const [importando, setImportando] = useState(null)    // texto enquanto trabalha
+  const [avisoImport, setAvisoImport] = useState(null)  // { tipo, texto, chave?, ciencia?, tentar?, foto? }
+  const fotoRef = useRef(null)
+  const importarRef = useRef(null)
   const [aberta, setAberta] = useState(null)            // compra aberta no histórico
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
@@ -264,7 +304,7 @@ export default function LancarCompra({ empresaId }) {
         fetchAll(() => supabase.from('materias_primas')
           .select('id, nome, unidade, custo, estoque_minimo').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
         supabase.from('categoria_item_aprendida').select('termo, categoria').eq('empresa_id', empresaId).limit(2000),
-        supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
+        supabase.from('fornecedores').select('id, nome, cnpj').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
         supabase.from('compras_lancadas')
           .select('id, fornecedor, data, total, pago, status, itens, created_at, numero_nota, observacao')
           .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(200),
@@ -327,6 +367,7 @@ export default function LancarCompra({ empresaId }) {
       custo: extra.custo !== undefined ? String(extra.custo).replace('.', ',') : (custoPadrao ? String(r2(custoPadrao * 100) / 100).replace('.', ',') : ''),
       total: extra.total ?? null,
       apelido: item.via || item.apelido || null,      // o nome como veio na nota, se foi ligado
+      aprender: !!extra.aprender, avisoNota: extra.avisoNota || null,   // veio de uma nota: o nome dela vira ligação ao lançar
       saldo: extra.saldo ?? saldos.get(key) ?? 0, custoAtual: extra.custoAtual ?? custoCad, minimo: Number(item.minimo) || 0,
       // Produto de revenda: manda a categoria do catálogo (Picolé, Sucos…). Matéria-prima não tem
       // categoria de venda, então fica com o palpite entre os tipos de gasto.
@@ -350,6 +391,7 @@ export default function LancarCompra({ empresaId }) {
   useEffect(() => {
     if (!produtos.length) return
     return ouvirBipada((codigo) => {
+      if (lerChave(codigo)) { importarRef.current?.(codigo); return }   // o código de barras da NOTA FISCAL é a chave
       const p = acharPorCodigo(produtos, codigo)
       if (p) poeItem(doProduto(p))
       else setErro(`Código ${codigo} não está em nenhum produto.`)
@@ -398,10 +440,29 @@ export default function LancarCompra({ empresaId }) {
     if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => Math.max(s - 1, 0)); return }
     if (e.key !== 'Enter') return
     e.preventDefault()
+    if (lerChave(busca)) { importarRef.current?.(busca); setBusca(''); return }
     const por = acharPorCodigo(produtos, busca)
     if (por) return poeItem(doProduto(por))
     const alvo = achados[Math.min(sel, achados.length - 1)]
     if (alvo && !linhas.some(l => l.key === `${alvo.tipo}:${alvo.id}`)) poeItem(alvo)
+  }
+
+  // Guarda "este nome da nota é este item". Da próxima vez que o nome aparecer, já se sabe de quem é.
+  async function salvarApelido(texto, item) {
+    const chave = normApelido(texto)
+    if (!chave) return false
+    const { error } = await supabase.from('item_apelidos').upsert(
+      { empresa_id: empresaId, apelido: String(texto).trim(), apelido_norm: chave, tipo: item.tipo, item_id: item.id },
+      { onConflict: 'empresa_id,apelido_norm' })
+    if (error) { setErro(recadoDeErro(error, 'guardar a ligação')); return false }
+    setApelidos(a => [...a.filter(x => x.apelido_norm !== chave), { apelido: String(texto).trim(), apelido_norm: chave, tipo: item.tipo, item_id: item.id }])
+    return true
+  }
+
+  // Um item da nota que não achou par no cadastro foi resolvido: vira linha da compra e sai da lista de pendentes.
+  function usarPendente(pend, base, sobrescreve = {}) {
+    poeItem({ ...base, via: pend.descricao }, { ...extraDaLinha(pend, base), ...sobrescreve })
+    setPendentes(ps => ps.filter(x => x.id !== pend.id))
   }
 
   // Liga o nome da nota ao item e já põe na nota. Fica guardado: na próxima vez, o nome já é conhecido.
@@ -409,15 +470,20 @@ export default function LancarCompra({ empresaId }) {
     if (!ligando) return
     setErro(null)
     const texto = ligando.texto.trim()
-    const chave = normApelido(texto)
-    if (!chave) return
-    const { error } = await supabase.from('item_apelidos').upsert(
-      { empresa_id: empresaId, apelido: texto, apelido_norm: chave, tipo: item.tipo, item_id: item.id },
-      { onConflict: 'empresa_id,apelido_norm' })
-    if (error) { setErro(recadoDeErro(error, 'guardar a ligação')); return }
-    setApelidos(a => [...a.filter(x => x.apelido_norm !== chave), { apelido: texto, apelido_norm: chave, tipo: item.tipo, item_id: item.id }])
+    if (!(await salvarApelido(texto, item))) return
+    const pend = ligando.pendente ? pendentes.find(x => x.id === ligando.pendente) : null
     setLigando(null)
+    if (pend) { const base = paraItem(item.tipo, item.id); if (base) { usarPendente(pend, base); return } }
     poeItem({ ...item, apelido: texto })
+  }
+
+  // Toque numa sugestão ("É a Coxa de frango?"): liga e usa, de uma vez.
+  async function ligarSugestao(pend, sug) {
+    setErro(null)
+    const base = paraItem(sug.tipo, sug.id)
+    if (!base) return
+    if (!(await salvarApelido(pend.descricao, sug))) return
+    usarPendente(pend, base)
   }
 
   async function desligar(l) {
@@ -511,7 +577,15 @@ export default function LancarCompra({ empresaId }) {
         .select('id, nome, unidade, custo, estoque_minimo').single()
       if (error) throw error
       setMaterias(m => [...m, d])
-      poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, minimo: d.estoque_minimo }, { qtd: novo.qtd })
+      const baseNova = { tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, minimo: d.estoque_minimo }
+      if (novo.pendente) {
+        // Veio de um item da nota: já fica ligado (o nome que a nota usa → esta matéria-prima nova).
+        await salvarApelido(novo.descricao, baseNova)
+        setPendentes(ps => ps.filter(x => x.id !== novo.pendente))
+        poeItem({ ...baseNova, via: novo.descricao }, { qtd: novo.qtd })
+      } else {
+        poeItem(baseNova, { qtd: novo.qtd })
+      }
       setNovo(null)
     } catch (e) {
       setErro(recadoDeErro(e, 'cadastrar o item'))
@@ -566,9 +640,11 @@ export default function LancarCompra({ empresaId }) {
   const duplicada = useMemo(() => {
     if (!fornecedor.trim() || total <= 0) return null
     const t = norm(fornecedor).trim()
+    const nf = numeroNota.trim()
     return compras.find(c => c.status === 'lancada' && c.id !== editandoId && norm(c.fornecedor).trim() === t
-      && Math.abs(Number(c.total) - total) < 0.01 && Math.abs(new Date(c.data) - new Date(data)) <= 3 * 86400000) || null
-  }, [compras, fornecedor, total, data, editandoId])
+      && ((nf && String(c.numero_nota || '') === nf)
+        || (Math.abs(Number(c.total) - total) < 0.01 && Math.abs(new Date(c.data) - new Date(data)) <= 3 * 86400000))) || null
+  }, [compras, fornecedor, total, data, editandoId, numeroNota])
   const totalEstranho = totalNota.trim() !== '' && soma > 0 && Math.abs(diferenca) > Math.max(20, soma * 0.1)
 
   // ── fornecedor: lista da loja + cadastro na hora ──────────────────────────
@@ -610,21 +686,194 @@ export default function LancarCompra({ empresaId }) {
     if (!vencMexido) setVencimento(maisDias(v || hojeISO(), 7))
   }
 
+  // ── puxar da nota fiscal ────────────────────────────────────────────────
+  // Chave de 44 dígitos (bipada, digitada ou do QR) -> Focus devolve o XML -> as linhas da compra.
+  // Foto/PDF -> IA lê. Os dois caminhos entram aqui, em `aplicarNota`, no mesmo formato.
+  const aplicarNota = (n) => {
+    const novas = []
+    const pend = []
+    for (const it of n.itens) {
+      const base = it.achado ? paraItem(it.achado.tipo, it.achado.id) : null
+      if (base) {
+        novas.push(novaLinha({ ...base, via: it.descricao }, { ...extraDaLinha(it, base), aprender: it.achado.via !== 'ligação' }))
+      } else {
+        const uCom = String(it.uCom || '').toLowerCase()
+        pend.push({
+          id: `p${pend.length}-${Math.random().toString(36).slice(2, 7)}`, descricao: it.descricao, nome: it.nome || '',
+          quantidade: it.quantidade, custo_unit: it.custo_unit, total: it.total ?? null, uCom: it.uCom || '', qTrib: it.qTrib, uTrib: it.uTrib,
+          unidade: it.unidade || (UNIDADES.includes(uCom) ? uCom : 'un'), sugestoes: it.sugestoes || [],
+        })
+      }
+    }
+    setLinhas(novas)
+    setPendentes(pend)
+    setEditandoId(null)
+    setRecuperado(false)
+    if (n.fornecedor) {
+      const f = fornecedores.find(x => (n.cnpj && x.cnpj === n.cnpj) || norm(x.nome).trim() === norm(n.fornecedor).trim())
+      setFornecedor(f ? f.nome : n.fornecedor)
+    }
+    // "000.000.600" (como está impresso) e "600" (como sai da chave) são a mesma nota.
+    setNumeroNota(/^[\d.\s]+$/.test(String(n.numero || '')) ? String(n.numero).replace(/\D/g, '').replace(/^0+(?=\d)/, '') : (n.numero || ''))
+    if (n.data && n.data <= hojeISO()) setData(n.data)
+    setChaveNota(n.chave || '')
+    setCnpjNota(n.cnpj || '')
+    if (n.parcelas?.length > 1) {
+      setModoPag('parcelado'); setNParc(Math.min(12, n.parcelas.length))
+      setParcDatas(Object.fromEntries(n.parcelas.map((x, i) => [i, x.vencimento])))
+      setVencimento(n.parcelas[0].vencimento); setVencMexido(true)
+    } else if (n.parcelas?.length === 1 || (n.vencimento && n.pago === false)) {
+      setModoPag('prazo'); setVencimento(n.parcelas?.[0]?.vencimento || n.vencimento); setVencMexido(true)
+    } else {
+      setModoPag('avista')
+      if (n.forma) setForma(n.forma)
+    }
+    setCatConta('')
+    setTotalNota('')
+    setTotalEsperado(n.total > 0 ? n.total : null)    // vira "total da nota" quando todos os itens estiverem na lista
+    const qtd = novas.length
+    setAvisoImport({
+      tipo: 'ok',
+      texto: `✅ Nota${n.numero ? ` nº ${n.numero}` : ''}${n.fornecedor ? ` de ${n.fornecedor}` : ''} ${n.origem === 'foto' ? 'lida da foto' : 'puxada'}: ${qtd} ${qtd === 1 ? 'item' : 'itens'} na compra${pend.length ? `, ${pend.length} para você ligar` : ''}${n.total ? `, total ${brl(n.total)}` : ''}. Confira e lance.${n.origem === 'foto' ? ' (Foto: dê uma olhada nos números.)' : ''}`,
+    })
+  }
+  // Quando o último item pendente é resolvido, o total impresso na nota vira o "total da nota" (frete/desconto aparecem sozinhos).
+  useEffect(() => {
+    if (totalEsperado == null || pendentes.length > 0) return
+    const somaAgora = r2(linhas.reduce((t, l) => t + valorLinha(l), 0))
+    setTotalNota(Math.abs(totalEsperado - somaAgora) > 0.05 ? String(totalEsperado).replace('.', ',') : '')
+    setTotalEsperado(null)
+  }, [pendentes.length, totalEsperado, linhas])
+
+  const jaLancada = async (chave) => {
+    const { data: ja } = await supabase.from('compras_lancadas').select('id, data, total, fornecedor')
+      .eq('empresa_id', empresaId).eq('chave_nfe', chave).eq('status', 'lancada').maybeSingle()
+    return ja
+  }
+  const msgJaLancada = (ja) => ({ tipo: 'erro', texto: `Essa nota já foi lançada em ${ddmm(ja.data)} (${ja.fornecedor}, ${brl(ja.total)}). Se precisa mudar algo, use “Corrigir” no histórico lá embaixo.` })
+
+  // O que dizer quando a Receita não entregou os itens. Sempre sobra a foto.
+  function mensagemFocus(motivo, chave, r) {
+    switch (motivo) {
+      case 'focus_desligado':
+        return { tipo: 'info', foto: true, texto: 'Já preenchi o que a chave conta (fornecedor e nº da nota). Para trazer os itens, tire uma foto da nota — eu leio.' }
+      case 'nao_chegou':
+        return { tipo: 'info', foto: true, tentar: true, chave, texto: 'Essa nota ainda não apareceu na Receita (pode levar de alguns minutos a algumas horas depois de emitida). Tente de novo mais tarde, ou tire uma foto da nota.' }
+      case 'precisa_ciencia':
+        return { tipo: 'info', foto: true, ciencia: true, chave, texto: `A nota${r?.resumo?.emitente ? ` de ${r.resumo.emitente}` : ''} chegou, mas para baixar os itens é preciso registrar a “Ciência da Operação” na Receita, em nome da loja. Quer registrar?` }
+      case 'aguardando':
+        return { tipo: 'info', foto: true, tentar: true, chave, texto: 'Ciência registrada. A Receita leva alguns minutos para liberar os itens — toque em “Tentar de novo” daqui a pouco, ou tire uma foto da nota.' }
+      case 'sem_fiscal':
+        return { tipo: 'info', foto: true, texto: 'Já preenchi o que a chave conta (fornecedor e nº da nota). Esta loja ainda não está ligada à Receita, então os itens vêm pela foto: tire uma foto da nota e eu leio.' }
+      case 'outra_loja':
+        return { tipo: 'erro', texto: 'Essa nota foi emitida para outro CNPJ, não para esta loja. Confira se é a nota certa.' }
+      case 'chave_invalida':
+        return { tipo: 'erro', texto: r?.mensagem || 'Essa chave não está certa. Confira os 44 números.' }
+      default:
+        return { tipo: 'info', foto: true, tentar: !!chave, chave, texto: 'Não consegui trazer os itens pela Receita agora. Tire uma foto da nota que eu leio — ou tente de novo.' }
+    }
+  }
+
+  async function importarChave(texto, acao = 'buscar') {
+    const info = lerChave(texto)
+    if (!info) {
+      setAvisoImport({ tipo: 'erro', texto: 'Não reconheci uma chave válida. Ela tem 44 números, logo abaixo do código de barras da nota. Confira se não faltou ou sobrou algum.' })
+      return
+    }
+    if (linhas.length && !confirm('Já tem itens na nota que você está montando. Trocar pelos da nota fiscal?')) return
+    setErro(null); setOk(null); setChaveInput('')
+    setImportando('Conferindo a nota…')
+    try {
+      const ja = await jaLancada(info.chave)
+      if (ja) { setAvisoImport(msgJaLancada(ja)); return }
+      // O que a própria chave já conta: nº da nota e, se o CNPJ já é de um fornecedor conhecido, quem é.
+      const conhecido = fornecedores.find(f => f.cnpj === info.cnpj)
+      setChaveNota(info.chave); setCnpjNota(info.cnpj); setNumeroNota(info.numero)
+      if (conhecido) setFornecedor(conhecido.nome)
+      setImportando('Buscando os itens na Receita…')
+      const { data: r, error } = await supabase.functions.invoke('nfe-por-chave', { body: { empresa_id: empresaId, chave: info.chave, acao } })
+      if (error) throw error
+      if (r?.ok) {
+        const nfe = parseNFeXml(r.xml)
+        if (!nfe?.itens?.length) { setAvisoImport(mensagemFocus('xml_indisponivel', info.chave)); return }
+        const itens = nfe.itens.map(it => { const c = casarItem(it, { produtos, materias, apelidos }); return { ...it, achado: c.achado, sugestoes: c.sugestoes } })
+        const pg = pagamentoDaNota(nfe)
+        aplicarNota({ fornecedor: nfe.emitente.nome, cnpj: nfe.emitente.cnpj || info.cnpj, chave: info.chave, numero: nfe.numero || info.numero,
+          data: nfe.data, itens, pago: pg.pago, forma: pg.forma, parcelas: nfe.duplicatas, total: nfe.total, origem: 'receita' })
+        return
+      }
+      setAvisoImport(mensagemFocus(r?.motivo, info.chave, r))
+    } catch {
+      setAvisoImport(mensagemFocus('erro', info.chave))
+    } finally {
+      setImportando(null)
+    }
+  }
+  useEffect(() => { importarRef.current = importarChave })
+
+  async function importarFoto(arquivo) {
+    if (!arquivo) return
+    if (linhas.length && !confirm('Já tem itens na nota que você está montando. Trocar pelos da foto?')) return
+    setErro(null); setOk(null); setAvisoImport(null)
+    setImportando('Lendo a nota… (pode levar uns 20 segundos)')
+    try {
+      const { base64, mimetype, chave } = await prepararArquivo(arquivo)
+      if (chave) {
+        const ja = await jaLancada(chave.chave)
+        if (ja) { setAvisoImport(msgJaLancada(ja)); return }
+      }
+      const { data: r, error } = await supabase.functions.invoke('ler-nota-estoque', {
+        body: {
+          imageBase64: base64, mimetype,
+          produtos: produtos.map(x => ({ id: x.id, nome: x.nome })), materias: materias.map(x => ({ id: x.id, nome: x.nome })),
+          dicionario: Object.entries(aprendidas).slice(0, 300).map(([termo, categoria]) => ({ termo, categoria })),
+        },
+      })
+      if (error || !r?.ok) { setAvisoImport({ tipo: 'erro', texto: `Não consegui ler essa nota${r?.error ? `: ${r.error}` : ''}. Tente outra foto, mais de perto e com a nota esticada.` }); return }
+      // O que a LOJA já ligou manda mais que o palpite da IA.
+      const lig = new Map(apelidos.map(a => [a.apelido_norm, a]))
+      const itens = []
+      for (const it of (r.itens || [])) {
+        const l = lig.get(normApelido(it.descricao))
+        itens.push({ descricao: it.descricao || it.nome, quantidade: it.quantidade, custo_unit: it.custo_unit,
+          achado: l ? { tipo: l.tipo, id: l.item_id, via: 'ligação' } : { tipo: it.tipo, id: it.id, via: 'IA' }, sugestoes: [] })
+      }
+      for (const n of (r.nao_encontrados || [])) {
+        const texto = n.descricao || n.nome
+        const l = lig.get(normApelido(texto))
+        const c = l ? null : casarItem({ descricao: texto }, { produtos, materias, apelidos: [] })
+        itens.push({ descricao: texto, nome: n.nome, quantidade: n.quantidade, custo_unit: n.custo_unit, unidade: n.unidade,
+          achado: l ? { tipo: l.tipo, id: l.item_id, via: 'ligação' } : null, sugestoes: c?.sugestoes || [] })
+      }
+      if (!itens.length) { setAvisoImport({ tipo: 'erro', texto: 'Não achei itens nessa foto. Tente de novo com a nota inteira e bem iluminada.' }); return }
+      const nota = r.nota || {}
+      aplicarNota({
+        fornecedor: nota.fornecedor, cnpj: nota.documento || chave?.cnpj || '', chave: chave?.chave || '', numero: nota.numero || chave?.numero || '',
+        data: nota.data, itens, pago: nota.pago, forma: nota.forma, vencimento: nota.vencimento, parcelas: null, total: nota.valor_total, origem: 'foto',
+      })
+      if (r.aviso) setAvisoImport(a => ({ ...a, texto: `${a.texto} ${r.aviso}` }))
+    } catch (e) {
+      setAvisoImport({ tipo: 'erro', texto: `Não consegui ler essa nota (${e?.message || 'erro'}). Tente outra foto.` })
+    } finally {
+      setImportando(null)
+    }
+  }
+
   // ── rascunho: a nota em andamento sobrevive a F5, aba fechada e queda de internet ──
   useEffect(() => {
     if (!empresaId) return
-    const temAlgo = linhas.length > 0 || fornecedor.trim() || numeroNota.trim() || observacao.trim()
+    const temAlgo = linhas.length > 0 || pendentes.length > 0 || fornecedor.trim() || numeroNota.trim() || observacao.trim()
     const t = setTimeout(() => {
       try {
         if (!temAlgo) localStorage.removeItem(chaveRascunho(empresaId))
         else localStorage.setItem(chaveRascunho(empresaId), JSON.stringify({
           fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas,
-          linhas, totalNota, catConta, editandoId, salvoEm: new Date().toISOString(),
+          linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, totalEsperado, salvoEm: new Date().toISOString(),
         }))
       } catch { /* sem storage (janela anônima): segue sem rascunho */ }
     }, 400)
     return () => clearTimeout(t)
-  }, [empresaId, fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas, linhas, totalNota, catConta, editandoId])
+  }, [empresaId, fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas, linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, totalEsperado])
 
   function limpar() {
     setLinhas([]); setTotalNota(''); setCatConta(''); setFornecedor(''); setNumeroNota(''); setObservacao('')
@@ -632,6 +881,7 @@ export default function LancarCompra({ empresaId }) {
     setModoPag('avista')
     setData(hojeISO()); setVencimento(maisDias(hojeISO(), 7)); setVencMexido(false); setNParc(2); setParcDatas({})
     setEditandoId(null); setRecuperado(false); setBusca(''); setNovo(null); setLigando(null)
+    setChaveNota(''); setCnpjNota(''); setPendentes([]); setTotalEsperado(null); setAvisoImport(null); setChaveInput('')
     try { localStorage.removeItem(chaveRascunho(empresaId)) } catch { /* ignora */ }
   }
 
@@ -650,7 +900,7 @@ export default function LancarCompra({ empresaId }) {
     })
     return {
       fornecedor: nomeForn, data, vencimento, pago: modoPag === 'avista', forma: modoPag === 'avista' ? forma : null,
-      categoria: categoriaDaConta, total, rateio, itens, numero_nota: numeroNota.trim(), observacao: observacao.trim(),
+      categoria: categoriaDaConta, total, rateio, itens, numero_nota: numeroNota.trim(), observacao: observacao.trim(), chave_nfe: chaveNota || '',
       ...(modoPag === 'parcelado' ? { parcelas } : {}),
     }
   }
@@ -664,7 +914,8 @@ export default function LancarCompra({ empresaId }) {
     try {
       // Digitou um nome e não clicou em "cadastrar"? Cadastra agora — a compra não pode criar fornecedor fantasma.
       let nomeForn = fornecedor.trim()
-      if (!fornExato) { const d = await cadastrarFornecedor(nomeForn); if (d) nomeForn = d.nome }
+      let fornId = fornExato?.id
+      if (!fornExato) { const d = await cadastrarFornecedor(nomeForn); if (d) { nomeForn = d.nome; fornId = d.id } }
       const p = pacote(nomeForn)
       const resumoItens = linhas.map(l => {
         const cm = custoMedio(l)
@@ -680,6 +931,13 @@ export default function LancarCompra({ empresaId }) {
           await supabase.from('produtos').update({ unidades_por_caixa: Math.round(num(l.porCx)) }).eq('id', l.id)
         }
       }
+      // A nota ensinou a loja: o nome que veio escrito nela passa a apontar pro item certo (só depois de lançar, ou seja, depois do dono conferir).
+      for (const l of linhas) {
+        if (l.aprender && l.apelido) await supabase.from('item_apelidos').upsert(
+          { empresa_id: empresaId, apelido: l.apelido, apelido_norm: normApelido(l.apelido), tipo: l.tipo, item_id: l.id }, { onConflict: 'empresa_id,apelido_norm' })
+      }
+      // O CNPJ do emitente (que veio na chave) fica no fornecedor: da próxima nota dele em diante, a chave sozinha já diz quem é.
+      if (cnpjNota && fornId) await supabase.from('fornecedores').update({ cnpj: cnpjNota }).eq('id', fornId).is('cnpj', null)
       setOk({
         fornecedor: nomeForn, total, pago: modoPag === 'avista', vencimento, nParcelas: modoPag === 'parcelado' ? parcelas.length : 0,
         corrigida: !!editandoId, itens: resumoItens, dataCompra: data,
@@ -764,6 +1022,62 @@ export default function LancarCompra({ empresaId }) {
   const hoje = hojeISO()
   const historico = compras.slice(0, 15)
 
+  const painelLigar = ligando ? (
+<div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13.5 }}>
+                  Na nota veio: <strong>“{ligando.texto}”</strong>. Qual item seu é esse?
+                </div>
+                <input autoFocus value={ligando.q} onChange={e => setLigando({ ...ligando, q: e.target.value })}
+                  placeholder="Busque o item do cardápio ou do estoque (ex.: coca zero)" style={{ ...inp, width: '100%' }} />
+                {achadosLigar.map(a => (
+                  <button key={`${a.tipo}:${a.id}`} type="button" className="btn btn-secondary" onClick={() => ligarA(a)}
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '10px 12px' }}>
+                    <span>{a.nome}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, ...tagTipo(a.tipo) }}>
+                      {a.tipo === 'materia' ? `Matéria-prima · ${a.unidade}` : 'Produto'}
+                    </span>
+                  </button>
+                ))}
+                {ligando.q.trim() && !achadosLigar.length && (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhum item com esse nome. Tente outra palavra.</div>
+                )}
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  A ligação fica salva: da próxima vez que esse nome aparecer, já vem o item certo.
+                </div>
+                <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setLigando(null)}>Cancelar</button></div>
+              </div>
+  ) : null
+
+  const painelNovo = novo ? (
+<div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <input value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })} style={inp} aria-label="Nome da matéria-prima" />
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div>
+                    <label style={lbl}>Compra por</label>
+                    <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
+                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={lbl}>Quantidade que está entrando ({novo.unidade})</label>
+                    <input inputMode="decimal" value={novo.qtd} placeholder="ex.: 2" onChange={e => setNovo({ ...novo, qtd: e.target.value })} style={{ ...inp, width: 150 }} />
+                  </div>
+                  <div>
+                    <label style={lbl}>Valor pago por {novo.unidade} (R$)</label>
+                    <input inputMode="decimal" value={novo.custo} placeholder="0,00" onChange={e => setNovo({ ...novo, custo: e.target.value })} style={{ ...inp, width: 130 }} />
+                  </div>
+                  <div>
+                    <label style={lbl}>Avisar quando baixar de</label>
+                    <input inputMode="decimal" value={novo.minimo} placeholder="opcional" onChange={e => setNovo({ ...novo, minimo: e.target.value })} style={{ ...inp, width: 130 }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={criarItem}>Cadastrar e usar</button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
+                </div>
+              </div>
+  ) : null
+
   return (
     <div>
       <div style={{ marginBottom: 14 }}>
@@ -808,6 +1122,82 @@ export default function LancarCompra({ empresaId }) {
         <div className="card" style={{ borderColor: '#2563eb' }}>
           📝 Recuperei a compra que você estava digitando{rascunho?.salvoEm ? ` (salva às ${new Date(rascunho.salvoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})` : ''}.{' '}
           <button type="button" className="btn btn-secondary btn-sm" onClick={limpar}>Descartar e começar do zero</button>
+        </div>
+      )}
+
+      {/* 0. puxar da nota fiscal */}
+      <div className="card" style={{ borderColor: 'var(--primary)' }}>
+        <div style={{ fontWeight: 800, marginBottom: 2 }}>📥 Puxar da nota fiscal</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+          Bipe o código de barras da nota (ou digite os 44 números da chave), ou tire uma foto dela. Eu preencho fornecedor, itens e valores — você só confere.
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input id="lc-chave" value={chaveInput} onChange={e => setChaveInput(e.target.value)} inputMode="numeric" autoComplete="off"
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); importarChave(chaveInput) } }}
+            placeholder="Chave da nota (44 números)" aria-label="Chave da nota fiscal"
+            style={{ ...inp, flex: '1 1 280px', fontSize: 15, padding: '11px 12px' }} />
+          <button type="button" className="btn btn-primary" onClick={() => importarChave(chaveInput)} disabled={!!importando || !chaveInput.trim()}>Puxar pela chave</button>
+          <button type="button" className="btn btn-secondary" onClick={() => fotoRef.current?.click()} disabled={!!importando}>📷 Foto ou PDF da nota</button>
+          <input ref={fotoRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} aria-label="Foto ou PDF da nota"
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
+        </div>
+        {importando && <div role="status" style={{ marginTop: 10, fontSize: 13.5, fontWeight: 700 }}>⏳ {importando}</div>}
+        {avisoImport && (
+          <div role="status" style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, fontSize: 13.5, lineHeight: 1.5,
+            background: avisoImport.tipo === 'ok' ? 'var(--success-bg, #dcfce7)' : avisoImport.tipo === 'erro' ? 'var(--danger-bg, #fee2e2)' : 'var(--bg, #f1f5f9)',
+            border: `1px solid ${avisoImport.tipo === 'ok' ? '#22c55e' : avisoImport.tipo === 'erro' ? 'var(--danger)' : 'var(--border)'}` }}>
+            <div>{avisoImport.texto}</div>
+            {(avisoImport.ciencia || avisoImport.tentar || avisoImport.foto) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                {avisoImport.ciencia && <button type="button" className="btn btn-primary btn-sm" onClick={() => importarChave(avisoImport.chave, 'ciencia')} disabled={!!importando}>Registrar ciência e baixar</button>}
+                {avisoImport.tentar && <button type="button" className="btn btn-secondary btn-sm" onClick={() => importarChave(avisoImport.chave)} disabled={!!importando}>Tentar de novo</button>}
+                {avisoImport.foto && <button type="button" className="btn btn-secondary btn-sm" onClick={() => fotoRef.current?.click()} disabled={!!importando}>📷 Tirar foto da nota</button>}
+              </div>
+            )}
+          </div>
+        )}
+        {chaveNota && !importando && (
+          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)' }}>
+            Chave da nota guardada{cnpjNota ? ` · emitente ${fmtCnpj(cnpjNota)}` : ''} — a mesma nota não entra duas vezes.
+          </div>
+        )}
+      </div>
+
+      {/* itens da nota que ainda não acharam par no cadastro */}
+      {pendentes.length > 0 && (
+        <div className="card" style={{ borderColor: '#d97706' }}>
+          <div style={{ fontWeight: 800 }}>
+            🔎 {pendentes.length} {pendentes.length === 1 ? 'item da nota ainda não está' : 'itens da nota ainda não estão'} ligado{pendentes.length === 1 ? '' : 's'} ao seu cadastro
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '2px 0 10px' }}>
+            Ligue cada um ao item certo UMA vez — da próxima nota em diante eu já reconheço sozinho.
+            {totalEsperado ? ` Total da nota: ${brl(totalEsperado)}.` : ''}
+          </div>
+          {pendentes.map(pd => (
+            <div key={pd.id} style={{ padding: '10px 0', borderTop: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{pd.descricao}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+                {qtdTxt(pd.quantidade)} {pd.uCom || pd.unidade} × {brl(pd.custo_unit)} = {brl(pd.total ?? r2((pd.quantidade || 0) * (pd.custo_unit || 0)))}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                {pd.sugestoes.map(sg => (
+                  <button key={`${sg.tipo}:${sg.id}`} type="button" className="btn btn-primary btn-sm" onClick={() => ligarSugestao(pd, sg)}>É “{sg.nome}”?</button>
+                ))}
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setNovo(null); setLigando({ texto: pd.descricao, q: pd.nome || '', pendente: pd.id }) }}>🔗 Ligar a um item</button>
+                <button type="button" className="btn btn-secondary btn-sm"
+                  onClick={() => { setLigando(null); setNovo({ nome: pd.nome || pd.descricao.toLowerCase(), descricao: pd.descricao, unidade: pd.unidade, qtd: String(pd.quantidade ?? '').replace('.', ','), custo: String(pd.custo_unit ?? '').replace('.', ','), minimo: '', pendente: pd.id }) }}>
+                  ➕ Cadastrar como matéria-prima
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPendentes(ps => ps.filter(x => x.id !== pd.id))}>Não é item de estoque</button>
+              </div>
+              {(ligando?.pendente === pd.id || novo?.pendente === pd.id) && (
+                <div style={{ marginTop: 10 }}>
+                  {ligando?.pendente === pd.id && painelLigar}
+                  {novo?.pendente === pd.id && painelNovo}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -978,61 +1368,9 @@ export default function LancarCompra({ empresaId }) {
               </>
             )}
 
-            {ligando && (
-              <div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: 13.5 }}>
-                  Na nota veio: <strong>“{ligando.texto}”</strong>. Qual item seu é esse?
-                </div>
-                <input autoFocus value={ligando.q} onChange={e => setLigando({ ...ligando, q: e.target.value })}
-                  placeholder="Busque o item do cardápio ou do estoque (ex.: coca zero)" style={{ ...inp, width: '100%' }} />
-                {achadosLigar.map(a => (
-                  <button key={`${a.tipo}:${a.id}`} type="button" className="btn btn-secondary" onClick={() => ligarA(a)}
-                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '10px 12px' }}>
-                    <span>{a.nome}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, ...tagTipo(a.tipo) }}>
-                      {a.tipo === 'materia' ? `Matéria-prima · ${a.unidade}` : 'Produto'}
-                    </span>
-                  </button>
-                ))}
-                {ligando.q.trim() && !achadosLigar.length && (
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhum item com esse nome. Tente outra palavra.</div>
-                )}
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  A ligação fica salva: da próxima vez que esse nome aparecer, já vem o item certo.
-                </div>
-                <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setLigando(null)}>Cancelar</button></div>
-              </div>
-            )}
+            {painelLigar && !ligando.pendente && painelLigar}
 
-            {novo && (
-              <div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <input value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })} style={inp} aria-label="Nome da matéria-prima" />
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <div>
-                    <label style={lbl}>Compra por</label>
-                    <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
-                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={lbl}>Quantidade que está entrando ({novo.unidade})</label>
-                    <input inputMode="decimal" value={novo.qtd} placeholder="ex.: 2" onChange={e => setNovo({ ...novo, qtd: e.target.value })} style={{ ...inp, width: 150 }} />
-                  </div>
-                  <div>
-                    <label style={lbl}>Valor pago por {novo.unidade} (R$)</label>
-                    <input inputMode="decimal" value={novo.custo} placeholder="0,00" onChange={e => setNovo({ ...novo, custo: e.target.value })} style={{ ...inp, width: 130 }} />
-                  </div>
-                  <div>
-                    <label style={lbl}>Avisar quando baixar de</label>
-                    <input inputMode="decimal" value={novo.minimo} placeholder="opcional" onChange={e => setNovo({ ...novo, minimo: e.target.value })} style={{ ...inp, width: 130 }} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="btn btn-primary btn-sm" onClick={criarItem}>Cadastrar e usar</button>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
-                </div>
-              </div>
-            )}
+            {painelNovo && !novo.pendente && painelNovo}
           </div>
         )}
 
