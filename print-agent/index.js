@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 49
+const APP_VERSION = 50
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -316,9 +316,14 @@ var _filasRuins = false
 async function outroPcSaudavel() {
   try {
     const desde = new Date(Date.now() - 4 * 60 * 1000).toISOString()
-    const { data } = await supabase.from('impressora_saude').select('pc, filas, visto_em')
+    // O outro PC so cobre o meu servico se cuida do MESMO papel (ou de tudo): loja
+    // com PC da cozinha e PC da frente tira papeis diferentes, e a frente nao
+    // imprime o que e da cozinha.
+    const meu = papelDoPc()
+    const { data } = await supabase.from('impressora_saude').select('pc, setor, filas, visto_em')
       .eq('empresa_id', empresaId).neq('pc', os.hostname()).gte('visto_em', desde)
-    return (data || []).some(r => Array.isArray(r.filas) && r.filas.length > 0 && r.filas.every(f => !f.offline))
+    return (data || []).some(r => (r.setor === 'tudo' || r.setor === meu)
+      && Array.isArray(r.filas) && r.filas.length > 0 && r.filas.every(f => !f.offline))
   } catch (e) { return false }
 }
 async function reportarSaude() {
