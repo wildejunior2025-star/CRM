@@ -207,12 +207,15 @@ export default function ContagemEstoque({ empresaId }) {
       {grupos.map(({ cat, itens }) => {
         const aberto = !!busca || catAberta === cat
         const feitos = itens.filter(it => !vazio(contado[chave(it)])).length
+        // Zerado (ou negativo) no sistema: ou acabou de verdade, ou entrou sem lançar a compra. Chama atenção.
+        const zerados = itens.filter(it => it.saldo <= 0 && vazio(contado[chave(it)])).length
         return (
           <div key={cat} style={{ ...cartao, marginBottom: 10, overflow: 'hidden' }}>
             <button type="button" onClick={() => setCatAberta(aberto && !busca ? null : cat)}
               style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '14px 14px', background: 'transparent', border: 0, color: 'var(--text)', cursor: 'pointer', fontSize: 16, fontWeight: 800, textAlign: 'left' }}>
               <span>{icone(cat)} {cat}</span>
               <span style={{ fontSize: 13, fontWeight: 700, color: feitos === itens.length ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
+                {zerados > 0 && <span style={{ color: '#b45309', marginRight: 8 }}>⚠️ {zerados} zerado{zerados > 1 ? 's' : ''}</span>}
                 {feitos}/{itens.length} {feitos === itens.length ? '✓' : ''} {aberto ? '▲' : '▼'}
               </span>
             </button>
@@ -221,11 +224,14 @@ export default function ContagemEstoque({ empresaId }) {
               const n = num(v)
               const dif = !vazio(v) && Number.isFinite(n) ? r2(n - it.saldo) : null
               return (
-                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
+                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: '1px solid var(--border)',
+                  ...(it.saldo <= 0 && vazio(v) ? { background: 'rgba(245,158,11,.08)', boxShadow: 'inset 3px 0 0 #f59e0b' } : {}) }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{it.nome}</div>
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                      sistema: {qtdTxt(it.saldo)} {it.unidade}
+                      {it.saldo <= 0
+                        ? <b style={{ color: '#b45309' }}>⚠️ {it.saldo < 0 ? `sistema negativo: ${qtdTxt(it.saldo)} ${it.unidade}` : 'zerado no sistema'}</b>
+                        : <>sistema: {qtdTxt(it.saldo)} {it.unidade}</>}
                       {it.custo <= 0 && <span style={{ color: '#b45309' }}> · sem custo</span>}
                       {dif !== null && dif !== 0 && (
                         <b style={{ color: dif < 0 ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
