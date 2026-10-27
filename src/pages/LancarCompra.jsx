@@ -58,6 +58,7 @@ function palpiteDaCategoria(nome, categoriaVenda) {
 export default function LancarCompra({ empresaId }) {
   const [produtos, setProdutos] = useState([])
   const [materias, setMaterias] = useState([])
+  const [catalogoCats, setCatalogoCats] = useState([])   // categorias de VENDA da loja (Picolé, Refeições…)
   const [aprendidas, setAprendidas] = useState({})      // { termo: categoria }
   const [fornecedores, setFornecedores] = useState([])
   const [historico, setHistorico] = useState([])
@@ -87,7 +88,7 @@ export default function LancarCompra({ empresaId }) {
     if (!empresaId) return
     setCarregando(true)
     try {
-      const [pr, mp, ap, fo, hi] = await Promise.all([
+      const [pr, mp, ap, fo, hi, ct] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque')
           .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null).order('nome').order('id')),
@@ -98,10 +99,18 @@ export default function LancarCompra({ empresaId }) {
         supabase.from('compras_lancadas')
           .select('id, fornecedor, data, total, pago, status, itens, created_at')
           .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(15),
+        supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId).order('ordem'),
       ])
       if (pr.error) throw pr.error
       if (mp.error) throw mp.error
       setProdutos(pr.data || [])
+      // Categorias do catálogo: as cadastradas + as que os produtos usam (sem repetir "Self service"/"self service").
+      const vistas = new Map()
+      for (const n of [...(ct.data || []).map(x => x.nome), ...(pr.data || []).map(x => x.categoria)]) {
+        const t = String(n ?? '').trim()
+        if (t && norm(t) !== 'outros' && !vistas.has(norm(t))) vistas.set(norm(t), t)
+      }
+      setCatalogoCats([...vistas.values()])
       setMaterias(mp.data || [])
       const m = {}
       for (const l of (ap.data || [])) m[l.termo] = l.categoria
@@ -135,7 +144,10 @@ export default function LancarCompra({ empresaId }) {
         key, tipo: item.tipo, id: item.id, nome: item.nome, unidade: item.unidade || 'un',
         estoque: item.tipo === 'materia' ? true : item.controla_estoque !== false,
         qtd: '1', custo, total: null,
-        cat: aprendidas[chaveDoItem(item.nome)] || palpiteDaCategoria(item.nome, item.categoria),
+        // Produto de revenda: manda a categoria do catálogo (Picolé, Sucos…). Matéria-prima não tem
+        // categoria de venda, então fica com o palpite entre os tipos de gasto.
+        cat: aprendidas[chaveDoItem(item.nome)]
+          || (item.tipo === 'produto' && item.categoria && norm(item.categoria) !== 'outros' ? item.categoria : palpiteDaCategoria(item.nome, item.categoria)),
       }]
     })
     setFoco(key)
@@ -206,21 +218,23 @@ export default function LancarCompra({ empresaId }) {
     try {
       if (novo.tipo === 'materia') {
         const { data: d, error } = await supabase.from('materias_primas')
-          .insert({ empresa_id: empresaId, nome, unidade: novo.unidade, custo: 0 }).select('id, nome, unidade, custo').single()
+          .insert({ empresa_id: empresaId, nome, unidade: novo.unidade, custo: num(novo.custo), estoque_minimo: num(novo.minimo) })
+          .select('id, nome, unidade, custo').single()
         if (error) throw error
         setMaterias(m => [...m, d])
-        poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: 0, unidade: d.unidade })
+        poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade })
       } else {
         // Nasce ESCONDIDO de todos os canais de venda: está sem preço, e produto com preço zero
         // não pode aparecer na Loja Online. O preço de venda se define depois em Produtos.
         const { data: d, error } = await supabase.from('produtos')
           .insert({
-            empresa_id: empresaId, nome, preco_custo: 0, preco_venda: 0, controla_estoque: true,
+            empresa_id: empresaId, nome, preco_custo: num(novo.custo), preco_venda: 0, controla_estoque: true,
+            categoria: novo.categoria || 'outros', estoque_minimo: num(novo.minimo),
             disponivel_delivery: false, vende_salao: false, vende_mesa: false, vende_online: false, vende_app: false,
           }).select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque').single()
         if (error) throw error
         setProdutos(p => [...p, d])
-        poeItem({ tipo: 'produto', id: d.id, nome: d.nome, custo: 0, categoria: d.categoria, controla_estoque: true })
+        poeItem({ tipo: 'produto', id: d.id, nome: d.nome, custo: d.preco_custo, categoria: d.categoria, controla_estoque: true })
       }
       setNovo(null)
     } catch (e) {
@@ -450,7 +464,7 @@ export default function LancarCompra({ empresaId }) {
             })}
             {!novo && (
               <button type="button" className="btn btn-secondary"
-                onClick={() => setNovo({ nome: busca.trim(), tipo: 'materia', unidade: 'kg' })}
+                onClick={() => setNovo({ nome: busca.trim(), tipo: 'materia', unidade: 'kg', custo: '', minimo: '', categoria: '' })}
                 style={{ textAlign: 'left', padding: '10px 12px', borderStyle: 'dashed' }}>
                 ➕ Cadastrar “{busca.trim()}” como item novo
               </button>
@@ -465,16 +479,36 @@ export default function LancarCompra({ empresaId }) {
                         background: novo.tipo === v ? 'var(--primary)' : 'transparent', color: novo.tipo === v ? '#fff' : 'var(--text)' }}>{t}</button>
                   ))}
                 </div>
-                {novo.tipo === 'materia' ? (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 13 }}>Compra por</span>
-                    <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
-                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  {novo.tipo === 'materia' && (
+                    <div>
+                      <label style={lbl}>Compra por</label>
+                      <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
+                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {novo.tipo === 'produto' && (
+                    <div style={{ flex: '1 1 200px' }}>
+                      <label style={lbl}>Categoria no catálogo</label>
+                      <select value={novo.categoria} onChange={e => setNovo({ ...novo, categoria: e.target.value })} style={{ ...inp, width: '100%' }}>
+                        <option value="">Sem categoria</option>
+                        {catalogoCats.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label style={lbl}>Valor pago por {novo.tipo === 'materia' ? novo.unidade : 'unidade'} (R$)</label>
+                    <input inputMode="decimal" value={novo.custo} placeholder="0,00" onChange={e => setNovo({ ...novo, custo: e.target.value })} style={{ ...inp, width: 130 }} />
                   </div>
-                ) : (
+                  <div>
+                    <label style={lbl}>Avisar quando baixar de</label>
+                    <input inputMode="decimal" value={novo.minimo} placeholder="opcional" onChange={e => setNovo({ ...novo, minimo: e.target.value })} style={{ ...inp, width: 130 }} />
+                  </div>
+                </div>
+                {novo.tipo === 'produto' && (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    O produto nasce escondido das vendas (sem preço). Defina o preço de venda em Produtos quando quiser vender.
+                    O produto nasce escondido das vendas (sem preço de venda). Defina o preço em Produtos quando quiser vender.
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -508,13 +542,13 @@ export default function LancarCompra({ empresaId }) {
                       style={{ ...inp, width: 90, textAlign: 'center' }} />
                   </div>
                   <div>
-                    <label style={lbl}>Valor unitário</label>
+                    <label style={lbl}>Valor de 1 unidade (R$)</label>
                     <input inputMode="decimal" value={l.custo} placeholder="0,00" onChange={e => mudar(l.key, 'custo', e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') buscaRef.current?.focus() }}
                       style={{ ...inp, width: 110 }} />
                   </div>
                   <div>
-                    <label style={lbl}>Total da linha</label>
+                    <label style={lbl}>Total desta linha (qtd × valor)</label>
                     <input inputMode="decimal" placeholder="0,00"
                       value={l.total !== null ? l.total : (valorLinha(l) ? String(valorLinha(l)).replace('.', ',') : '')}
                       onChange={e => mudar(l.key, 'total', e.target.value)}
@@ -522,9 +556,16 @@ export default function LancarCompra({ empresaId }) {
                       style={{ ...inp, width: 110, fontWeight: 700 }} />
                   </div>
                   <div style={{ flex: '1 1 190px', minWidth: 170 }}>
-                    <label style={lbl}>Categoria do gasto</label>
+                    <label style={lbl}>{l.tipo === 'produto' ? 'Categoria (do catálogo ou do gasto)' : 'Categoria do gasto'}</label>
                     <select value={l.cat} onChange={e => trocaCategoria(l, e.target.value)} style={{ ...inp, width: '100%' }}>
-                      {[...new Set([...CATEGORIAS_PAGAR, l.cat])].map(c => <option key={c} value={c}>{c}</option>)}
+                      {l.tipo === 'produto' && catalogoCats.length > 0 && (
+                        <optgroup label="Categorias do seu catálogo">
+                          {[...new Set([...catalogoCats, ...(catalogoCats.includes(l.cat) || CATEGORIAS_PAGAR.includes(l.cat) ? [] : [l.cat])])].map(c => <option key={'c' + c} value={c}>{c}</option>)}
+                        </optgroup>
+                      )}
+                      <optgroup label="Tipos de gasto">
+                        {[...new Set([...CATEGORIAS_PAGAR, ...(l.tipo !== 'produto' && !CATEGORIAS_PAGAR.includes(l.cat) ? [l.cat] : [])])].map(c => <option key={'g' + c} value={c}>{c}</option>)}
+                      </optgroup>
                     </select>
                   </div>
                 </div>
