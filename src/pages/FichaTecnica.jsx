@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { semanaDe, rotuloSemana, offsetDaSemana } from '../lib/semana'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
+import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
 
 // Normaliza pra busca: tira acento e deixa minúsculo. Assim "feijao" acha "Feijão".
 const normTxt = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
@@ -99,7 +100,8 @@ function fichaUsa(id, alvo, itensPorFicha, vistos = new Set()) {
   return (itensPorFicha[id] || []).some(it => it.ficha_ref_id && fichaUsa(it.ficha_ref_id, alvo, itensPorFicha, vistos))
 }
 
-const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '', pago: '', estoque_minimo: '' }
+const emptyMateria = { nome: '', unidade: 'kg', custo: '', ativo: true, quantidade: '', pago: '', estoque_minimo: '', categoria: '' }
+const SEM_CATEGORIA = 'Sem categoria'
 const linhaVazia = () => ({ materia_prima_id: '', ficha_ref_id: '', nome: '', quantidade: '', unidade: 'g', custo_unit: 0 })
 const emptyFicha = {
   nome: '', produto_id: '', complemento_opcao_id: '', rendimento: '', unid_rendimento: 'g',
@@ -414,7 +416,7 @@ export default function FichaTecnica() {
   }
   function abrirEditarMateria(m) {
     setMateriaEdit(m)
-    setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo, estoque_minimo: Number(m.estoque_minimo) > 0 ? String(m.estoque_minimo) : '' })
+    setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo, estoque_minimo: Number(m.estoque_minimo) > 0 ? String(m.estoque_minimo) : '', categoria: m.categoria || '' })
     setShowMateria(true)
   }
   async function salvarMateria(e) {
@@ -432,6 +434,8 @@ export default function FichaTecnica() {
       custo: custoDigitado > 0 ? custoDigitado : (materiaUnit ?? 0),
       ativo: !!materiaForm.ativo,
       estoque_minimo: Number(String(materiaForm.estoque_minimo ?? '').replace(',', '.')) || 0,
+      // Vazio no cadastro novo = o banco dá o palpite pelo nome (mig 0408).
+      categoria: materiaForm.categoria || null,
     }
     setSalvandoMateria(true)
     try {
@@ -532,6 +536,26 @@ export default function FichaTecnica() {
     () => materias.reduce((s, m) => s + Number(saldoMat[m.id] ?? 0) * Number(m.custo || 0), 0),
     [materias, saldoMat],
   )
+  // Estoque por categoria: subtotal de cada uma (sobre TODAS as matérias, não só as filtradas pela busca,
+  // pro número não mudar quando ele procura algo) e os itens que a busca deixou passar.
+  const [catAberta, setCatAberta] = useState(() => new Set())
+  const gruposMaterias = useMemo(() => {
+    const por = new Map()
+    for (const m of materias) {
+      const cat = m.categoria || SEM_CATEGORIA
+      if (!por.has(cat)) por.set(cat, { cat, itens: [], total: 0, baixos: 0 })
+      const g = por.get(cat)
+      const saldo = Number(saldoMat[m.id] ?? 0)
+      g.total += saldo * Number(m.custo || 0)
+      if (Number(m.estoque_minimo) > 0 && saldo <= Number(m.estoque_minimo)) g.baixos++
+    }
+    for (const m of materiasFiltradas) por.get(m.categoria || SEM_CATEGORIA).itens.push(m)
+    const ordem = [...CATEGORIAS_INSUMO, SEM_CATEGORIA]
+    return [...por.values()].sort((a, b) => {
+      const ia = ordem.indexOf(a.cat), ib = ordem.indexOf(b.cat)
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+    })
+  }, [materias, materiasFiltradas, saldoMat])
 
   // ── Carrinho rápido (baixa ou entrada de insumos) ──
   function abrirCarrinho(tipo) { setCartTipo(tipo); setCartMotivo(''); setBaixaBusca(''); setBaixaCart([]); setCartAtualizaCusto(true); setShowBaixa(true) }
@@ -1010,7 +1034,7 @@ export default function FichaTecnica() {
         ) : (
           <>
           {/* Total de dinheiro parado em matéria-prima */}
-          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
+          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', background: 'var(--bg)', backgroundImage: 'linear-gradient(rgba(124,58,237,.08), rgba(124,58,237,.08))' }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Total parado em matérias-primas</span>
             <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalMaterias)}</strong>
           </div>
@@ -1044,47 +1068,65 @@ export default function FichaTecnica() {
                 onClick={() => abrirNovaMateria(buscaMateria)}>+ Cadastrar "{buscaMateria.trim()}"</button>
             </div>
           ) : (
-          <div className="data-table">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th>Matéria-prima</th>
-                  <th>Custo</th>
-                  <th>Estoque atual</th>
-                  <th>Valor em estoque</th>
-                  <th style={{ width: 220 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {materiasFiltradas.map(m => {
-                  const saldo = saldoDe(m.id)
-                  const valor = saldo * Number(m.custo || 0)
-                  return (
-                  <tr key={m.id}>
-                    <td>
-                      {m.nome}
-                      {!m.ativo && <span className="badge badge-neutral" style={{ marginLeft: 6 }}>inativa</span>}
-                    </td>
-                    <td>{brl(m.custo)} <span style={{ color: 'var(--text-muted)' }}>/ {m.unidade}</span></td>
-                    <td style={{ fontWeight: 700, color: saldo < 0 ? 'var(--danger)' : 'var(--text)' }}>
-                      {fmtQtd(saldo, m.unidade)}
-                      {Number(m.estoque_minimo) > 0 && saldo <= Number(m.estoque_minimo) && (
-                        <span style={{ marginLeft: 6, padding: '2px 7px', borderRadius: 6, fontSize: 11.5, fontWeight: 700, background: 'rgba(220,38,38,.12)', color: 'var(--danger, #dc2626)' }} title={`Mínimo: ${fmtQtd(Number(m.estoque_minimo), m.unidade)}`}>⚠️ baixo</span>
-                      )}
-                    </td>
-                    <td style={{ fontWeight: 700 }}>{brl(valor)}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button className="btn btn-primary btn-sm" onClick={() => abrirMov(m)}>Movimentar</button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => abrirEditarMateria(m)}>Editar</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => excluirMateria(m)}>Excluir</button>
-                      </div>
-                    </td>
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {gruposMaterias.filter(g => !buscaMateria || g.itens.length > 0).map(g => {
+              // Procurando algo = abre tudo que achou; senão respeita o toque dele.
+              const aberto = !!buscaMateria || catAberta.has(g.cat)
+              const pct = totalMaterias > 0 ? Math.round((g.total / totalMaterias) * 100) : 0
+              return (
+                <div key={g.cat} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <button type="button" aria-expanded={aberto}
+                    onClick={() => setCatAberta(s => { const n = new Set(s); n.has(g.cat) ? n.delete(g.cat) : n.add(g.cat); return n })}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 14px', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
+                    <span style={{ fontSize: 24 }}>{ICONE_CATEGORIA[g.cat] || '📋'}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 800, fontSize: 15 }}>{g.cat}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        {g.itens.length} {g.itens.length === 1 ? 'item' : 'itens'}
+                        {!buscaMateria && g.baixos > 0 && <b style={{ color: 'var(--danger, #dc2626)', marginLeft: 8 }}>⚠️ {g.baixos} baixo{g.baixos > 1 ? 's' : ''}</b>}
+                      </span>
+                    </span>
+                    <span style={{ textAlign: 'right' }}>
+                      <strong style={{ display: 'block', fontSize: 17 }}>{brl(g.total)}</strong>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{pct}% do estoque</span>
+                    </span>
+                    <span style={{ fontSize: 14, color: 'var(--text-muted)', width: 14 }}>{aberto ? '▾' : '▸'}</span>
+                  </button>
+                  {aberto && (
+                    <div style={{ borderTop: '1px solid var(--border)' }}>
+                      {g.itens.map(m => {
+                        const saldo = saldoDe(m.id)
+                        const valor = saldo * Number(m.custo || 0)
+                        const baixo = Number(m.estoque_minimo) > 0 && saldo <= Number(m.estoque_minimo)
+                        return (
+                          <div key={m.id} style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
+                              <span style={{ fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>
+                                {m.nome}
+                                {!m.ativo && <span className="badge badge-neutral" style={{ marginLeft: 6 }}>inativa</span>}
+                              </span>
+                              <strong style={{ whiteSpace: 'nowrap' }}>{brl(valor)}</strong>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 3, fontSize: 13.5 }}>
+                              <span style={{ fontWeight: 700, color: saldo < 0 ? 'var(--danger)' : 'var(--text)' }}>{fmtQtd(saldo, m.unidade)}</span>
+                              <span style={{ color: 'var(--text-muted)' }}>· {brl(m.custo)} / {m.unidade}</span>
+                              {baixo && (
+                                <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 11.5, fontWeight: 700, background: 'rgba(220,38,38,.12)', color: 'var(--danger, #dc2626)' }} title={`Mínimo: ${fmtQtd(Number(m.estoque_minimo), m.unidade)}`}>⚠️ baixo</span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                              <button className="btn btn-primary btn-sm" onClick={() => abrirMov(m)}>Movimentar</button>
+                              <button className="btn btn-secondary btn-sm" onClick={() => abrirEditarMateria(m)}>Editar</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => excluirMateria(m)}>Excluir</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
           )}
           </>
@@ -1353,6 +1395,13 @@ export default function FichaTecnica() {
                 {materiaUnit != null && !materiaForm.custo && (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Vai entrar com {brl(materiaUnit)}, tirado da compra abaixo.</span>
                 )}
+              </div>
+              <div className="form-field full">
+                <label>Categoria</label>
+                <select value={materiaForm.categoria} onChange={e => setMateriaForm(f => ({ ...f, categoria: e.target.value }))}>
+                  <option value="">{materiaEdit ? SEM_CATEGORIA : 'Automática (pelo nome)'}</option>
+                  {CATEGORIAS_INSUMO.map(c => <option key={c} value={c}>{ICONE_CATEGORIA[c]} {c}</option>)}
+                </select>
               </div>
               <div className="form-field">
                 <label>Estoque mínimo ({materiaForm.unidade})</label>

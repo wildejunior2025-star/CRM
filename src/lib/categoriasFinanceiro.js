@@ -28,6 +28,24 @@ export const CATEGORIAS_COMPRA = [
   'Manutenção',
 ]
 
+// As do ESTOQUE de insumos (materias_primas.categoria): as mesmas da compra, menos Manutenção (não se
+// guarda em estoque). O palpite pelo nome mora no banco (categoria_insumo_palpite, mig 0408).
+export const CATEGORIAS_INSUMO = CATEGORIAS_COMPRA.filter(c => c !== 'Manutenção')
+
+export const ICONE_CATEGORIA = {
+  'Hortifruti': '🥬',
+  'Carnes e frios': '🥩',
+  'Laticínios e ovos': '🧀',
+  'Mercearia': '🛒',
+  'Padaria e confeitaria': '🍞',
+  'Congelados': '🧊',
+  'Bebidas': '🥤',
+  'Descartáveis e embalagens': '📦',
+  'Limpeza e higiene': '🧴',
+  'Gás': '🔥',
+  'Equipamentos e utensílios': '🔧',
+}
+
 export const CATEGORIAS_OPERACAO = [
   'Fornecedores',
   'Aluguel',
