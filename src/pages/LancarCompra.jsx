@@ -29,6 +29,9 @@ const maisDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(
 const ddmm = (iso) => (iso ? iso.split('-').reverse().slice(0, 2).join('/') : '')
 const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
+// O nome da nota sem acento/pontuação, minúsculo e com espaços simples: a chave da ligação (igual à do robô).
+const normApelido = (s) => norm(s).replace(/[^a-z0-9 ]/g, ' ').replace(/ +/g, ' ').trim()
+
 const FORMAS = [['pix', 'PIX'], ['dinheiro', 'Dinheiro'], ['transferencia', 'Transferência'], ['boleto', 'Boleto'],
   ['debito', 'Débito'], ['credito', 'Crédito'], ['cheque', 'Cheque'], ['outro', 'Outro']]
 const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
@@ -75,7 +78,9 @@ export default function LancarCompra({ empresaId }) {
   const [totalNota, setTotalNota] = useState('')
   const [catConta, setCatConta] = useState('')          // '' = automática
   const [busca, setBusca] = useState('')
-  const [novo, setNovo] = useState(null)                // { nome, tipo, unidade } = cadastro rápido aberto
+  const [novo, setNovo] = useState(null)                // cadastro rápido de MATÉRIA-PRIMA aberto
+  const [apelidos, setApelidos] = useState([])          // ligações nome-da-nota → item
+  const [ligando, setLigando] = useState(null)          // { texto, q } = escolhendo a que item ligar
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
   const [ok, setOk] = useState(null)
@@ -88,7 +93,7 @@ export default function LancarCompra({ empresaId }) {
     if (!empresaId) return
     setCarregando(true)
     try {
-      const [pr, mp, ap, fo, hi, ct] = await Promise.all([
+      const [pr, mp, ap, fo, hi, ct, ape] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque')
           .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null).order('nome').order('id')),
@@ -100,10 +105,12 @@ export default function LancarCompra({ empresaId }) {
           .select('id, fornecedor, data, total, pago, status, itens, created_at')
           .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(15),
         supabase.from('categorias').select('nome, ordem').eq('empresa_id', empresaId).order('ordem'),
+        supabase.from('item_apelidos').select('apelido, apelido_norm, tipo, item_id').eq('empresa_id', empresaId).limit(5000),
       ])
       if (pr.error) throw pr.error
       if (mp.error) throw mp.error
       setProdutos(pr.data || [])
+      setApelidos(ape.data || [])
       // Categorias do catálogo: as cadastradas + as que os produtos usam (sem repetir "Self service"/"self service").
       const vistas = new Map()
       for (const n of [...(ct.data || []).map(x => x.nome), ...(pr.data || []).map(x => x.categoria)]) {
@@ -144,6 +151,7 @@ export default function LancarCompra({ empresaId }) {
         key, tipo: item.tipo, id: item.id, nome: item.nome, unidade: item.unidade || 'un',
         estoque: item.tipo === 'materia' ? true : item.controla_estoque !== false,
         qtd: item.qtd && num(item.qtd) > 0 ? String(item.qtd).replace('.', ',') : '1', custo, total: null,
+        apelido: item.via || item.apelido || null,      // o nome como veio na nota, se foi ligado
         // Produto de revenda: manda a categoria do catálogo (Picolé, Sucos…). Matéria-prima não tem
         // categoria de venda, então fica com o palpite entre os tipos de gasto.
         cat: aprendidas[chaveDoItem(item.nome)]
@@ -164,22 +172,75 @@ export default function LancarCompra({ empresaId }) {
     })
   }, [produtos, poeItem])
 
-  const achados = useMemo(() => {
-    const t = norm(busca).trim()
+  const paraItem = useCallback((tipo, id) => {
+    if (tipo === 'produto') {
+      const x = produtos.find(q => q.id === id)
+      return x && { tipo: 'produto', id: x.id, nome: x.nome, custo: x.preco_custo, categoria: x.categoria, controla_estoque: x.controla_estoque }
+    }
+    const x = materias.find(q => q.id === id)
+    return x && { tipo: 'materia', id: x.id, nome: x.nome, custo: x.custo, unidade: x.unidade }
+  }, [produtos, materias])
+
+  // Ligações que combinam com o que foi digitado vêm PRIMEIRO: se a loja já disse que
+  // "coca cola lata zero" é a Coca zero lata, é ela que tem que aparecer no topo.
+  const ligados = useMemo(() => {
+    const t = normApelido(busca)
     if (!t) return []
-    const p = produtos.filter(x => norm(x.nome).includes(t) || combinaCodigo(x, busca))
+    return apelidos.filter(a => a.apelido_norm.includes(t) || t.includes(a.apelido_norm))
+      .map(a => { const it = paraItem(a.tipo, a.item_id); return it && { ...it, via: a.apelido, exato: a.apelido_norm === t } })
+      .filter(Boolean)
+  }, [busca, apelidos, paraItem])
+
+  const procura = useCallback((texto) => {
+    const t = norm(texto).trim()
+    if (!t) return []
+    const p = produtos.filter(x => norm(x.nome).includes(t) || combinaCodigo(x, texto))
       .map(x => ({ tipo: 'produto', id: x.id, nome: x.nome, custo: x.preco_custo, categoria: x.categoria, controla_estoque: x.controla_estoque }))
     const m = materias.filter(x => norm(x.nome).includes(t))
       .map(x => ({ tipo: 'materia', id: x.id, nome: x.nome, custo: x.custo, unidade: x.unidade }))
-    return [...m, ...p].slice(0, 10)
-  }, [busca, produtos, materias])
+    return [...m, ...p]
+  }, [produtos, materias])
+
+  const achados = useMemo(() => {
+    const vistos = new Set(ligados.map(a => `${a.tipo}:${a.id}`))
+    return [...ligados, ...procura(busca).filter(a => !vistos.has(`${a.tipo}:${a.id}`))].slice(0, 10)
+  }, [busca, ligados, procura])
+
+  const achadosLigar = useMemo(() => (ligando ? procura(ligando.q).slice(0, 8) : []), [ligando, procura])
 
   function teclaBusca(e) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     const por = acharPorCodigo(produtos, busca)
     if (por) return poeItem({ tipo: 'produto', id: por.id, nome: por.nome, custo: por.preco_custo, categoria: por.categoria, controla_estoque: por.controla_estoque })
+    const exato = ligados.find(a => a.exato)
+    if (exato) return poeItem(exato)
     if (achados.length === 1) poeItem(achados[0])
+  }
+
+  // Liga o nome da nota ao item e já põe na nota. Fica guardado: na próxima vez, o nome já é conhecido.
+  async function ligarA(item) {
+    if (!ligando) return
+    setErro(null)
+    const texto = ligando.texto.trim()
+    const chave = normApelido(texto)
+    if (!chave) return
+    const { error } = await supabase.from('item_apelidos').upsert(
+      { empresa_id: empresaId, apelido: texto, apelido_norm: chave, tipo: item.tipo, item_id: item.id },
+      { onConflict: 'empresa_id,apelido_norm' })
+    if (error) { setErro(recadoDeErro(error, 'guardar a ligação')); return }
+    setApelidos(a => [...a.filter(x => x.apelido_norm !== chave), { apelido: texto, apelido_norm: chave, tipo: item.tipo, item_id: item.id }])
+    setLigando(null)
+    poeItem({ ...item, apelido: texto })
+  }
+
+  async function desligar(l) {
+    if (!l.apelido) return
+    const chave = normApelido(l.apelido)
+    const { error } = await supabase.from('item_apelidos').delete().eq('empresa_id', empresaId).eq('apelido_norm', chave)
+    if (error) { setErro(recadoDeErro(error, 'desfazer a ligação')); return }
+    setApelidos(a => a.filter(x => x.apelido_norm !== chave))
+    mudar(l.key, 'apelido', null)
   }
 
   // ── linhas ──────────────────────────────────────────────────────────────
@@ -216,26 +277,12 @@ export default function LancarCompra({ empresaId }) {
     const nome = novo.nome.trim()
     if (!nome) return
     try {
-      if (novo.tipo === 'materia') {
-        const { data: d, error } = await supabase.from('materias_primas')
-          .insert({ empresa_id: empresaId, nome, unidade: novo.unidade, custo: num(novo.custo), estoque_minimo: num(novo.minimo) })
-          .select('id, nome, unidade, custo').single()
-        if (error) throw error
-        setMaterias(m => [...m, d])
-        poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, qtd: novo.qtd })
-      } else {
-        // Nasce ESCONDIDO de todos os canais de venda: está sem preço, e produto com preço zero
-        // não pode aparecer na Loja Online. O preço de venda se define depois em Produtos.
-        const { data: d, error } = await supabase.from('produtos')
-          .insert({
-            empresa_id: empresaId, nome, preco_custo: num(novo.custo), preco_venda: 0, controla_estoque: true,
-            categoria: novo.categoria || 'outros', estoque_minimo: num(novo.minimo),
-            disponivel_delivery: false, vende_salao: false, vende_mesa: false, vende_online: false, vende_app: false,
-          }).select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque').single()
-        if (error) throw error
-        setProdutos(p => [...p, d])
-        poeItem({ tipo: 'produto', id: d.id, nome: d.nome, custo: d.preco_custo, categoria: d.categoria, controla_estoque: true, qtd: novo.qtd })
-      }
+      const { data: d, error } = await supabase.from('materias_primas')
+        .insert({ empresa_id: empresaId, nome, unidade: novo.unidade, custo: num(novo.custo), estoque_minimo: num(novo.minimo) })
+        .select('id, nome, unidade, custo').single()
+      if (error) throw error
+      setMaterias(m => [...m, d])
+      poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, qtd: novo.qtd })
       setNovo(null)
     } catch (e) {
       setErro(recadoDeErro(e, 'cadastrar o item'))
@@ -330,7 +377,7 @@ export default function LancarCompra({ empresaId }) {
           itens: linhas.map(l => ({
             tipo: l.tipo, id: l.id, nome: l.nome, quantidade: num(l.qtd), estoque: l.estoque,
             custo_unit: num(l.custo) > 0 ? num(l.custo) : (valorLinha(l) > 0 && num(l.qtd) > 0 ? valorLinha(l) / num(l.qtd) : null),
-            categoria: l.cat,
+            categoria: l.cat, descricao_nota: l.apelido || null,
           })),
         },
       })
@@ -442,7 +489,7 @@ export default function LancarCompra({ empresaId }) {
       {/* 2. os itens */}
       <div className="card">
         <label style={{ ...lbl, fontSize: 13, color: 'var(--text)' }}>Adicionar item (produto ou matéria-prima)</label>
-        <input ref={buscaRef} value={busca} onChange={e => { setBusca(e.target.value); setNovo(null) }} onKeyDown={teclaBusca}
+        <input ref={buscaRef} value={busca} onChange={e => { setBusca(e.target.value); setNovo(null); setLigando(null) }} onKeyDown={teclaBusca}
           disabled={carregando} placeholder="Digite o nome ou passe o leitor… (ex.: coca, carne de sol)"
           style={{ width: '100%', fontSize: 16, padding: '12px 14px' }} />
 
@@ -454,7 +501,7 @@ export default function LancarCompra({ empresaId }) {
                 <button key={`${a.tipo}:${a.id}`} type="button" className="btn btn-secondary" disabled={ja}
                   onClick={() => poeItem(a)}
                   style={{ display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '10px 12px' }}>
-                  <span>{a.nome}{ja ? ' — já está na nota' : ''}</span>
+                  <span>{a.via && <span title="ligação salva">🔗 </span>}{a.nome}{a.via && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}> (na nota: “{a.via}”)</span>}{ja ? ' — já está na nota' : ''}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
                     background: a.tipo === 'materia' ? '#fef3c7' : '#dbeafe', color: a.tipo === 'materia' ? '#92400e' : '#1e40af' }}>
                     {a.tipo === 'materia' ? `Matéria-prima · ${a.unidade}` : 'Produto'}
@@ -462,47 +509,67 @@ export default function LancarCompra({ empresaId }) {
                 </button>
               )
             })}
-            {!novo && (
-              <button type="button" className="btn btn-secondary"
-                onClick={() => setNovo({ nome: busca.trim(), tipo: 'materia', unidade: 'kg', qtd: '', custo: '', minimo: '', categoria: '' })}
-                style={{ textAlign: 'left', padding: '10px 12px', borderStyle: 'dashed' }}>
-                ➕ Cadastrar “{busca.trim()}” como item novo
-              </button>
+            {!novo && !ligando && (
+              <>
+                <button type="button" className="btn btn-secondary"
+                  onClick={() => setLigando({ texto: busca.trim(), q: '' })}
+                  style={{ textAlign: 'left', padding: '10px 12px', borderStyle: 'dashed' }}>
+                  🔗 “{busca.trim()}” é um item que já existe com outro nome — ligar
+                </button>
+                <button type="button" className="btn btn-secondary"
+                  onClick={() => setNovo({ nome: busca.trim(), unidade: 'kg', qtd: '', custo: '', minimo: '' })}
+                  style={{ textAlign: 'left', padding: '10px 12px', borderStyle: 'dashed' }}>
+                  ➕ Cadastrar “{busca.trim()}” como matéria-prima nova
+                </button>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Produto novo se cadastra em Produtos. Aqui você só traz o que já está no cardápio.
+                </div>
+              </>
             )}
+
+            {ligando && (
+              <div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13.5 }}>
+                  Na nota veio: <strong>“{ligando.texto}”</strong>. Qual item seu é esse?
+                </div>
+                <input autoFocus value={ligando.q} onChange={e => setLigando({ ...ligando, q: e.target.value })}
+                  placeholder="Busque o item do cardápio ou do estoque (ex.: coca zero)" style={{ ...inp, width: '100%' }} />
+                {achadosLigar.map(a => (
+                  <button key={`${a.tipo}:${a.id}`} type="button" className="btn btn-secondary" onClick={() => ligarA(a)}
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 8, textAlign: 'left', padding: '10px 12px' }}>
+                    <span>{a.nome}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999,
+                      background: a.tipo === 'materia' ? '#fef3c7' : '#dbeafe', color: a.tipo === 'materia' ? '#92400e' : '#1e40af' }}>
+                      {a.tipo === 'materia' ? `Matéria-prima · ${a.unidade}` : 'Produto'}
+                    </span>
+                  </button>
+                ))}
+                {ligando.q.trim() && !achadosLigar.length && (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Nenhum item com esse nome. Tente outra palavra.</div>
+                )}
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  A ligação fica salva: da próxima vez que esse nome aparecer, já vem o item certo.
+                </div>
+                <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => setLigando(null)}>Cancelar</button></div>
+              </div>
+            )}
+
             {novo && (
               <div style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <input value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })} style={inp} />
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {[['materia', 'Matéria-prima (insumo da receita)'], ['produto', 'Produto (revende pronto)']].map(([v, t]) => (
-                    <button key={v} type="button" onClick={() => setNovo({ ...novo, tipo: v })}
-                      style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                        background: novo.tipo === v ? 'var(--primary)' : 'transparent', color: novo.tipo === v ? '#fff' : 'var(--text)' }}>{t}</button>
-                  ))}
-                </div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  {novo.tipo === 'materia' && (
-                    <div>
-                      <label style={lbl}>Compra por</label>
-                      <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
-                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {novo.tipo === 'produto' && (
-                    <div style={{ flex: '1 1 200px' }}>
-                      <label style={lbl}>Categoria no catálogo</label>
-                      <select value={novo.categoria} onChange={e => setNovo({ ...novo, categoria: e.target.value })} style={{ ...inp, width: '100%' }}>
-                        <option value="">Sem categoria</option>
-                        {catalogoCats.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  )}
                   <div>
-                    <label style={lbl}>Quantidade que está entrando{novo.tipo === 'materia' ? ` (${novo.unidade})` : ''}</label>
+                    <label style={lbl}>Compra por</label>
+                    <select value={novo.unidade} onChange={e => setNovo({ ...novo, unidade: e.target.value })} style={inp}>
+                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={lbl}>Quantidade que está entrando ({novo.unidade})</label>
                     <input inputMode="decimal" value={novo.qtd} placeholder="ex.: 2" onChange={e => setNovo({ ...novo, qtd: e.target.value })} style={{ ...inp, width: 150 }} />
                   </div>
                   <div>
-                    <label style={lbl}>Valor pago por {novo.tipo === 'materia' ? novo.unidade : 'unidade'} (R$)</label>
+                    <label style={lbl}>Valor pago por {novo.unidade} (R$)</label>
                     <input inputMode="decimal" value={novo.custo} placeholder="0,00" onChange={e => setNovo({ ...novo, custo: e.target.value })} style={{ ...inp, width: 130 }} />
                   </div>
                   <div>
@@ -510,11 +577,6 @@ export default function LancarCompra({ empresaId }) {
                     <input inputMode="decimal" value={novo.minimo} placeholder="opcional" onChange={e => setNovo({ ...novo, minimo: e.target.value })} style={{ ...inp, width: 130 }} />
                   </div>
                 </div>
-                {novo.tipo === 'produto' && (
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    O produto nasce escondido das vendas (sem preço de venda). Defina o preço em Produtos quando quiser vender.
-                  </div>
-                )}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" className="btn btn-primary btn-sm" onClick={criarItem}>Cadastrar e usar</button>
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNovo(null)}>Cancelar</button>
@@ -534,6 +596,12 @@ export default function LancarCompra({ empresaId }) {
                     background: l.tipo === 'materia' ? '#fef3c7' : '#dbeafe', color: l.tipo === 'materia' ? '#92400e' : '#1e40af' }}>
                     {l.tipo === 'materia' ? '→ Estoque de matéria-prima' : l.estoque ? '→ Estoque de produtos' : '→ Só na conta (produto sem controle de estoque)'}
                   </span>
+                  {l.apelido && (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      🔗 nota: “{l.apelido}”{' '}
+                      <button type="button" onClick={() => desligar(l)} style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', color: 'inherit', fontSize: 11.5, padding: 0 }}>desligar</button>
+                    </span>
+                  )}
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => tirar(l.key)}
                     style={{ marginLeft: 'auto' }} aria-label={`Tirar ${l.nome}`}>✕</button>
                 </div>
