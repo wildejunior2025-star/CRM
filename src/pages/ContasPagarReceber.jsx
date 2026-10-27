@@ -908,9 +908,26 @@ function FormConta({ form, setForm, sugestoes, clientes, hoje, onFechar, onSalvo
         pessoa: form.pessoa.trim() || null, categoria: form.categoria.trim() || null, observacao: form.observacao.trim() || null,
       }
       if (editando) {
+        // O RATEIO ACOMPANHA A EDIÇÃO (26/10/2026). A compra lançada guarda em que o dinheiro foi
+        // (rateio) e as telas leem ELE antes da categoria da conta. Trocar só a categoria aqui fazia
+        // a conta continuar na categoria velha em "Já pago". Então: categoria nova = a conta toda vai
+        // pra ela; valor novo = o rateio é reescalado pra continuar fechando com o valor.
+        const { data: atual } = await supabase.from('contas_financeiras').select('categoria, rateio, valor').eq('id', form.id).maybeSingle()
+        let rateioNovo
+        if (atual && Array.isArray(atual.rateio) && atual.rateio.length) {
+          if (comum.categoria && comum.categoria !== atual.categoria) {
+            rateioNovo = [{ categoria: comum.categoria, valor: valorNum }]
+          } else if (Math.abs(Number(atual.valor) - valorNum) > 0.005 && Number(atual.valor) > 0) {
+            const f = valorNum / Number(atual.valor)
+            rateioNovo = atual.rateio.map((r) => ({ ...r, valor: Math.round(Number(r.valor) * f * 100) / 100 }))
+            const dif = Math.round((valorNum - rateioNovo.reduce((s, r) => s + r.valor, 0)) * 100) / 100
+            if (dif) rateioNovo[0].valor = Math.round((rateioNovo[0].valor + dif) * 100) / 100
+          }
+        }
         const { error } = await supabase.from('contas_financeiras').update({
           descricao: comum.descricao, pessoa: comum.pessoa, categoria: comum.categoria, observacao: comum.observacao,
           valor: valorNum, vencimento: form.vencimento,
+          ...(rateioNovo ? { rateio: rateioNovo } : {}),
           ...(form.travadaRepeticao ? {} : { recorrencia: ['semanal', 'quinzenal', 'mensal', 'anual'].includes(form.repeticao) ? form.repeticao : 'nenhuma' }),
         }).eq('id', form.id)
         if (error) throw error
