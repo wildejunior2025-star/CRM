@@ -75,6 +75,9 @@ const MOTIVOS_PADRAO = {
 export default function Estoque({ embutido = false }) {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
+  // Vendedor só dá entrada e baixa de imprevisto (hambúrguer caiu no chão) — a política
+  // "Vendedor lanca entrada e perda" do banco já recusa o resto; a tela só oferece isso.
+  const dono = profile?.perfil === 'admin'
   // Loja que não conta estoque (restaurante, lanchonete): desligado, nenhum
   // movimento é gravado (trigger da migration 0126) e a tela some daqui.
   const [usaEstoque, setUsaEstoque] = useState(true)
@@ -251,7 +254,7 @@ export default function Estoque({ embutido = false }) {
     setMovForm((prev) => {
       const next = { ...prev, [name]: value }
       if (name === 'tipo') {
-        next.motivo = (motivos[value] ?? MOTIVOS_PADRAO[value] ?? [])[0] ?? ''
+        next.motivo = !dono && value === 'saida' ? 'imprevisto' : (motivos[value] ?? MOTIVOS_PADRAO[value] ?? [])[0] ?? ''
       }
       return next
     })
@@ -412,25 +415,31 @@ export default function Estoque({ embutido = false }) {
             No celular dava pra rolar a tela inteira pro lado e cair num vazio,
             com a tabela ficando pra tras (16/10/2026). */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button
-            className={`btn ${usaEstoque ? 'btn-secondary' : 'btn-primary'}`}
-            onClick={alternarUsoEstoque}
-            disabled={salvandoUso}
-            title={usaEstoque
-              ? 'Desligar o controle de estoque desta loja'
-              : 'Voltar a controlar estoque nesta loja'}
-          >
-            {salvandoUso ? 'Salvando...' : usaEstoque ? '🚫 Não trabalho com estoque' : '📦 Voltar a usar estoque'}
-          </button>
+          {dono && (
+            <button
+              className={`btn ${usaEstoque ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={alternarUsoEstoque}
+              disabled={salvandoUso}
+              title={usaEstoque
+                ? 'Desligar o controle de estoque desta loja'
+                : 'Voltar a controlar estoque nesta loja'}
+            >
+              {salvandoUso ? 'Salvando...' : usaEstoque ? '🚫 Não trabalho com estoque' : '📦 Voltar a usar estoque'}
+            </button>
+          )}
           {usaEstoque && (
             <>
-              <button className="btn btn-secondary" onClick={alternarPausaZerado} disabled={salvandoPausa}
-                title={pausaZerado ? 'Hoje: zerou, sai do cardápio. Clique pra deixar vender no negativo.' : 'Hoje: vende mesmo zerado (fica negativo). Clique pra pausar no zero.'}>
-                {salvandoPausa ? 'Salvando...' : pausaZerado ? '⏸ Zerou, pausa: SIM' : '➖ Zerou, pausa: NÃO'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
-                Motivos
-              </button>
+              {dono && (
+                <>
+                  <button className="btn btn-secondary" onClick={alternarPausaZerado} disabled={salvandoPausa}
+                    title={pausaZerado ? 'Hoje: zerou, sai do cardápio. Clique pra deixar vender no negativo.' : 'Hoje: vende mesmo zerado (fica negativo). Clique pra pausar no zero.'}>
+                    {salvandoPausa ? 'Salvando...' : pausaZerado ? '⏸ Zerou, pausa: SIM' : '➖ Zerou, pausa: NÃO'}
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
+                    Motivos
+                  </button>
+                </>
+              )}
               {usaCasco && (
                 <button className="btn btn-secondary" onClick={openCascoModal}>
                   + Movimento de casco
@@ -657,24 +666,30 @@ export default function Estoque({ embutido = false }) {
                   <label>Tipo</label>
                   <select name="tipo" value={movForm.tipo} onChange={handleMovChange}>
                     <option value="entrada">Entrada</option>
-                    <option value="saida">Saída</option>
-                    <option value="ajuste">Ajuste</option>
+                    <option value="saida">{dono ? 'Saída' : 'Saída por imprevisto'}</option>
+                    {dono && <option value="ajuste">Ajuste</option>}
                   </select>
                 </div>
 
                 <div className="form-field">
                   <label>Motivo</label>
-                  <select
-                    name="motivo"
-                    value={movForm.motivo}
-                    onChange={handleMovChange}
-                  >
-                    {(motivos[movForm.tipo] ?? MOTIVOS_PADRAO[movForm.tipo] ?? []).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                  {!dono && movForm.tipo === 'saida' ? (
+                    <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                      ⚠️ Imprevisto: caiu no chão, quebrou, estragou. Escreva o que foi na observação.
+                    </span>
+                  ) : (
+                    <select
+                      name="motivo"
+                      value={movForm.motivo}
+                      onChange={handleMovChange}
+                    >
+                      {(motivos[movForm.tipo] ?? MOTIVOS_PADRAO[movForm.tipo] ?? []).map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div className="form-field">
