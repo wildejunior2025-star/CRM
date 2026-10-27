@@ -132,12 +132,11 @@ const LinhaItem = memo(function LinhaItem({ l, ult, catalogoCats, onMudar, onTro
         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, ...tagTipo(l.tipo) }}>
           {l.tipo === 'materia' ? '→ Estoque de matéria-prima' : l.estoque ? '→ Estoque de produtos' : '→ Só na conta (produto sem controle de estoque)'}
         </span>
-        {l.apelido && (
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-            🔗 nota: “{l.apelido}”{' '}
-            <button type="button" onClick={() => onDesligar(l)} style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', color: 'inherit', fontSize: 11.5, padding: 0 }}>desligar</button>
-          </span>
-        )}
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+          {l.apelido ? <>🔗 nota: “{l.apelido}”{' '}</> : null}
+          <button type="button" onClick={() => onDesligar(l)} title="Ligou no item errado? Volta pro quadro de ligar, com a quantidade e o valor"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', color: 'inherit', fontSize: 11.5, padding: 0 }}>trocar item</button>
+        </span>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onTirar(l.key)}
           style={{ marginLeft: 'auto' }} aria-label={`Tirar ${l.nome}`}>✕</button>
       </div>
@@ -504,13 +503,29 @@ export default function LancarCompra({ empresaId }) {
     usarPendente(pend, base)
   }
 
+  // TROCAR ITEM: a linha caiu no item errado (matéria-prima no lugar de produto do cardápio, etc.). Esquece a
+  // ligação errada e devolve a linha pro quadro "não ligado", com quantidade e valor — lá ele escolhe o certo
+  // (produto, matéria-prima, cadastrar novo ou "só despesa") e a ligação nova fica aprendida.
   async function desligar(l) {
-    if (!l.apelido) return
-    const chave = normApelido(l.apelido)
-    const { error } = await supabase.from('item_apelidos').delete().eq('empresa_id', empresaId).eq('apelido_norm', chave)
-    if (error) { setErro(recadoDeErro(error, 'desfazer a ligação')); return }
-    setApelidos(a => a.filter(x => x.apelido_norm !== chave))
-    mudar(l.key, 'apelido', null)
+    setErro(null)
+    const texto = l.apelido || l.via || l.nome
+    if (l.apelido) {
+      const chave = normApelido(l.apelido)
+      const { error } = await supabase.from('item_apelidos').delete().eq('empresa_id', empresaId).eq('apelido_norm', chave)
+      if (error) { setErro(recadoDeErro(error, 'desfazer a ligação')); return }
+      setApelidos(a => a.filter(x => x.apelido_norm !== chave))
+    }
+    const q = qtdReal(l)
+    const id = `t${Date.now()}`
+    const c = casarItem({ descricao: texto }, { produtos, materias, apelidos: [] })
+    setPendentes(ps => [...ps, {
+      id, descricao: texto, nome: l.nome, quantidade: q, custo_unit: q > 0 ? Math.round((valorLinha(l) / q) * 10000) / 10000 : 0,
+      unidade: l.unidade, total: valorLinha(l),
+      sugestoes: (c?.sugestoes || []).filter(s => !(s.tipo === l.tipo && s.id === l.id)),
+    }])
+    setLinhas(ls => ls.filter(x => x.key !== l.key))
+    setNovo(null)
+    setLigando({ texto, q: '', pendente: id })
   }
 
   // Preço do mesmo item na ÚLTIMA compra lançada (ou o custo do cadastro, se nunca foi comprado por aqui).
@@ -566,7 +581,6 @@ export default function LancarCompra({ empresaId }) {
 
   // Versões ESTÁVEIS dos manipuladores: o React.memo da linha só funciona se a função não mudar a cada tecla.
   const fns = useRef({})
-  useEffect(() => { fns.current = { mudar, trocaEmb, tirar, desligar, trocaCategoria } })
   const hMudar = useCallback((...a) => fns.current.mudar(...a), [])
   const hTrocaEmb = useCallback((...a) => fns.current.trocaEmb(...a), [])
   const hTirar = useCallback((...a) => fns.current.tirar(...a), [])
@@ -582,6 +596,7 @@ export default function LancarCompra({ empresaId }) {
       empresa_id: empresaId, termo, categoria: cat, exemplo: l.nome, atualizado_em: new Date().toISOString(),
     }, { onConflict: 'empresa_id,termo' })
   }
+  useEffect(() => { fns.current = { mudar, trocaEmb, tirar, desligar, trocaCategoria } })
 
   // ── cadastro rápido ─────────────────────────────────────────────────────
   async function criarItem() {
