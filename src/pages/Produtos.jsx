@@ -925,7 +925,9 @@ export default function Produtos() {
   // assim, em 6 lojas.
   //
   // Agora os dois botões escrevem nos DOIS campos: pausou aqui, pausou lá.
-  const semEstoquePausado = (p) => !!p.pausado_por_estoque && p.controla_estoque !== false
+  // Só pra loja que escolheu "pausar quando zerar" (empresas.pausa_sem_estoque) — a que vende no negativo
+  // reativa normal.
+  const semEstoquePausado = (p) => !!empresa?.pausa_sem_estoque && !!p.pausado_por_estoque && p.controla_estoque !== false
     && Number(saldoLista.has(p.id) ? saldoLista.get(p.id) : 0) <= 0
 
   async function togglePausar(p) {

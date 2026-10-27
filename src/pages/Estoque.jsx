@@ -78,6 +78,10 @@ export default function Estoque({ embutido = false }) {
   // Loja que não conta estoque (restaurante, lanchonete): desligado, nenhum
   // movimento é gravado (trigger da migration 0126) e a tela some daqui.
   const [usaEstoque, setUsaEstoque] = useState(true)
+  // Zerou, sai do cardápio? (empresas.pausa_sem_estoque). Cada loja escolhe: tem quem prefira vender no
+  // negativo e acertar depois. Ligado, o produto pausa sozinho no zero e só volta quando entra mercadoria.
+  const [pausaZerado, setPausaZerado] = useState(false)
+  const [salvandoPausa, setSalvandoPausa] = useState(false)
   const [salvandoUso, setSalvandoUso] = useState(false)
   const [saldo, setSaldo] = useState([])
   const [produtos, setProdutos] = useState([])
@@ -149,8 +153,8 @@ export default function Estoque({ embutido = false }) {
 
   async function carregarUsoEstoque() {
     if (!empresaId) return
-    const { data } = await supabase.from('empresas').select('estoque_ativo').eq('id', empresaId).single()
-    if (data) setUsaEstoque(data.estoque_ativo ?? true)
+    const { data } = await supabase.from('empresas').select('estoque_ativo, pausa_sem_estoque').eq('id', empresaId).single()
+    if (data) { setUsaEstoque(data.estoque_ativo ?? true); setPausaZerado(!!data.pausa_sem_estoque) }
   }
 
   async function alternarUsoEstoque() {
@@ -163,6 +167,25 @@ export default function Estoque({ embutido = false }) {
     setUsaEstoque(novo)
     setError(null)
     if (novo) loadAll()
+  }
+
+  async function alternarPausaZerado() {
+    if (!empresaId || salvandoPausa) return
+    const novo = !pausaZerado
+    if (!window.confirm(novo
+      ? 'Pausar produto quando o estoque zerar?\n\nO que chegar a zero sai do cardápio sozinho (balcão, mesa, app, Loja Online e iFood) e só volta quando entrar mercadoria.'
+      : 'Vender mesmo com estoque zerado?\n\nO estoque pode ficar negativo. Os produtos que estão pausados por falta de estoque voltam a vender agora.')) return
+    setSalvandoPausa(true)
+    const { error: err } = await supabase.from('empresas').update({ pausa_sem_estoque: novo }).eq('id', empresaId)
+    // Desligou: quem estava fora do cardápio SÓ por estoque volta a vender.
+    if (!err && !novo) {
+      await supabase.from('produtos').update({ ativo: true, disponivel_delivery: true, pausado_por_estoque: false })
+        .eq('empresa_id', empresaId).eq('pausado_por_estoque', true)
+    }
+    setSalvandoPausa(false)
+    if (err) { setError(err.message); return }
+    setPausaZerado(novo)
+    loadAll()
   }
 
   async function loadAll() {
@@ -401,6 +424,10 @@ export default function Estoque({ embutido = false }) {
           </button>
           {usaEstoque && (
             <>
+              <button className="btn btn-secondary" onClick={alternarPausaZerado} disabled={salvandoPausa}
+                title={pausaZerado ? 'Hoje: zerou, sai do cardápio. Clique pra deixar vender no negativo.' : 'Hoje: vende mesmo zerado (fica negativo). Clique pra pausar no zero.'}>
+                {salvandoPausa ? 'Salvando...' : pausaZerado ? '⏸ Zerou, pausa: SIM' : '➖ Zerou, pausa: NÃO'}
+              </button>
               <button className="btn btn-secondary" onClick={() => setShowMotivosModal(true)}>
                 Motivos
               </button>
