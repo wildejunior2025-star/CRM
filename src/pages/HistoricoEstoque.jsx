@@ -37,7 +37,9 @@ const rotuloMotivo = (m, obs) => {
 const CORES = ['#2563eb', '#0891b2', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#ca8a04', '#64748b']
 
 export default function HistoricoEstoque({ empresaId }) {
-  const [dados, setDados] = useState({ prod: [], mp: [], produtos: new Map(), materias: new Map() })
+  const [dados, setDados] = useState({ prod: [], mp: [], produtos: new Map(), materias: new Map(), pessoas: new Map() })
+  const [agrupar, setAgrupar] = useState('categoria')  // 'categoria' | 'origem' (fornecedor / cozinha / contagem…)
+  const [apagando, setApagando] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
   const [periodo, setPeriodo] = useState('hoje')       // 'hoje' | '7d' | 'mes' | 'mes_passado' — abre em Hoje (pedido do AGV)
@@ -59,21 +61,23 @@ export default function HistoricoEstoque({ empresaId }) {
     setErro(null)
     try {
       const de = noInstante(ini), ate = noInstante(fim)
-      const [p, m, pr, mt] = await Promise.all([
+      const [p, m, pr, mt, pe] = await Promise.all([
         fetchAll(() => supabase.from('estoque_movimentos')
-          .select('id, produto_id, tipo, quantidade, motivo, observacao, custo_unit, valor_total, created_at')
+          .select('id, produto_id, tipo, quantidade, motivo, observacao, custo_unit, valor_total, created_at, created_by, contagem_id')
           .eq('empresa_id', empresaId).gte('created_at', de).lt('created_at', ate).order('created_at', { ascending: false }).order('id')),
         fetchAll(() => supabase.from('materia_prima_movimentos')
-          .select('id, materia_prima_id, tipo, quantidade, observacao, custo_unit, valor_total, created_at')
+          .select('id, materia_prima_id, tipo, quantidade, observacao, custo_unit, valor_total, created_at, created_by, contagem_id')
           .eq('empresa_id', empresaId).gte('created_at', de).lt('created_at', ate).order('created_at', { ascending: false }).order('id')),
         fetchAll(() => supabase.from('produtos').select('id, nome, categoria, preco_custo').eq('empresa_id', empresaId).order('id')),
         fetchAll(() => supabase.from('materias_primas').select('id, nome, unidade, custo, categoria').eq('empresa_id', empresaId).order('id')),
+        supabase.from('profiles').select('id, nome, email').eq('empresa_id', empresaId),
       ])
       for (const r of [p, m, pr, mt]) if (r.error) throw r.error
       setDados({
         prod: p.data || [], mp: m.data || [],
         produtos: new Map((pr.data || []).map((x) => [x.id, x])),
         materias: new Map((mt.data || []).map((x) => [x.id, x])),
+        pessoas: new Map((pe.data || []).map((x) => [x.id, (x.nome || '').trim() || x.email])),
       })
     } catch (e) {
       setErro(recadoDeErro(e, 'carregar o histórico de estoque'))
@@ -98,6 +102,7 @@ export default function HistoricoEstoque({ empresaId }) {
         unidade: 'un', dir: sentido(x.tipo, x.quantidade), qtd,
         valor: Number(x.valor_total) || qtd * unit, estimado: !(Number(x.valor_total) || Number(x.custo_unit)),
         motivo: rotuloMotivo(x.motivo, x.observacao), obs: x.observacao, quando: x.created_at,
+        quem: dados.pessoas.get(x.created_by) || null, contagem: !!x.contagem_id, venda: x.motivo === 'venda',
       })
     }
     for (const x of dados.mp) {
@@ -111,10 +116,35 @@ export default function HistoricoEstoque({ empresaId }) {
         valor: Number(x.valor_total) || qtd * unit, estimado: !(Number(x.valor_total) || Number(x.custo_unit)),
         motivo: dir === 'entrada' && /compra/i.test(x.observacao || '') ? 'Compra' : rotuloMotivo(null, x.observacao),
         obs: x.observacao, quando: x.created_at,
+        quem: dados.pessoas.get(x.created_by) || null, contagem: !!x.contagem_id, venda: false,
       })
+    }
+    // De onde veio / pra onde foi — o agrupamento "por fornecedor" da antiga aba Compras da Ficha Técnica.
+    for (const m of lista) {
+      const forn = /^Compra lançada — (.+)$/.exec(m.obs || '')?.[1]?.trim()
+      const obs = m.obs || ''
+      m.fonte = forn ? `🏪 ${forn}`
+        : m.contagem ? '📋 Contagem de estoque'
+        : /^Sobra da cozinha/.test(obs) ? '🍳 Sobra que voltou da cozinha'
+        : /^Cozinha —/.test(obs) ? '🍳 Entregue à cozinha'
+        : m.venda || /^Venda/i.test(obs) ? '🧾 Vendas'
+        : '✍️ Lançado à mão'
+      // Apagar aqui só o que foi lançado à mão. Compra, cozinha e contagem têm o "Desfazer" delas
+      // (apagar a linha solta deixaria a nota, a entrega ou a contagem pela metade).
+      m.apagavel = m.fonte === '✍️ Lançado à mão'
     }
     return lista.filter((m) => m.origem === qual)
   }, [dados, qual])
+
+  async function apagar(m) {
+    if (!window.confirm(`Apagar este lançamento?\n\n${m.nome} · ${m.dir === 'entrada' ? '+' : '−'}${qtdTxt(m.qtd)} ${m.unidade}${m.valor > 0 ? ` (${brl(m.valor)})` : ''}\n` +
+      `Feito em ${quandoTxt(m.quando)}.\n\nO estoque volta ao que era antes dele.`)) return
+    setApagando(m.id)
+    const { error } = await supabase.from(m.origem === 'materia' ? 'materia_prima_movimentos' : 'estoque_movimentos').delete().eq('id', m.id)
+    setApagando(null)
+    if (error) { setErro(recadoDeErro(error, 'apagar o lançamento')); return }
+    carregar()
+  }
 
   const resumo = useMemo(() => {
     const soma = (dir) => {
@@ -128,8 +158,10 @@ export default function HistoricoEstoque({ empresaId }) {
   const grupos = useMemo(() => {
     const mapa = new Map()
     for (const m of movs.filter((x) => x.dir === aba)) {
-      if (!mapa.has(m.grupo)) mapa.set(m.grupo, { grupo: m.grupo, emoji: m.emoji, valor: 0, itens: new Map() })
-      const g = mapa.get(m.grupo)
+      const nomeGrupo = agrupar === 'origem' ? m.fonte.slice(m.fonte.indexOf(' ') + 1) : m.grupo
+      const emoji = agrupar === 'origem' ? m.fonte.slice(0, m.fonte.indexOf(' ')) : m.emoji
+      if (!mapa.has(nomeGrupo)) mapa.set(nomeGrupo, { grupo: nomeGrupo, emoji, valor: 0, itens: new Map() })
+      const g = mapa.get(nomeGrupo)
       g.valor += m.valor
       const k = `${m.origem}:${m.itemId}`
       if (!g.itens.has(k)) g.itens.set(k, { key: k, nome: m.nome, unidade: m.unidade, qtd: 0, valor: 0, movs: [] })
@@ -142,7 +174,7 @@ export default function HistoricoEstoque({ empresaId }) {
       lista: [...mapa.values()].map((g) => ({ ...g, itens: [...g.itens.values()].sort((a, b) => b.valor - a.valor || b.qtd - a.qtd) }))
         .sort((a, b) => b.valor - a.valor),
     }
-  }, [movs, aba])
+  }, [movs, aba, agrupar])
 
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
   const s = resumo[aba]
@@ -196,8 +228,12 @@ export default function HistoricoEstoque({ empresaId }) {
         </div>
       ) : (
         <>
-          <div className="cp2-periodo" style={{ marginTop: 6 }}>
-            <span className="cp2-periodo-total" style={{ marginLeft: 0 }}>{aba === 'entrada' ? 'Total que entrou' : 'Custo do que saiu'} <strong>{brl(s.valor)}</strong></span>
+          <div className="cp2-periodo" style={{ marginTop: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Separar por</span>
+            {[['categoria', 'Categoria'], ['origem', aba === 'entrada' ? 'Fornecedor / de onde veio' : 'Pra onde foi']].map(([id, lb]) => (
+              <button key={id} type="button" className={`cp2-chip ${agrupar === id ? 'ativo' : ''}`} onClick={() => { setAgrupar(id); setAberto(null) }}>{lb}</button>
+            ))}
+            <span className="cp2-periodo-total">{aba === 'entrada' ? 'Total que entrou' : 'Custo do que saiu'} <strong>{brl(s.valor)}</strong></span>
           </div>
           <div className="cp2-familias">
             {grupos.lista.map((g, idx) => {
@@ -236,7 +272,15 @@ export default function HistoricoEstoque({ empresaId }) {
                                   <span className="ce-motivo">{m.motivo}</span>
                                   <span className="ce-qtd">{m.dir === 'entrada' ? '+' : '−'}{qtdTxt(m.qtd)}</span>
                                   <span className="ce-valor">{m.valor > 0 ? brl(m.valor) : '—'}{m.estimado && m.valor > 0 ? '*' : ''}</span>
-                                  {m.obs && m.motivo !== m.obs && <span className="ce-obs" title={m.obs}>{m.obs}</span>}
+                                  {m.apagavel && (
+                                    <button type="button" onClick={() => apagar(m)} disabled={apagando === m.id} title="Apagar (lancei errado)"
+                                      style={{ border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15, padding: '0 4px' }}>
+                                      {apagando === m.id ? '…' : '🗑'}
+                                    </button>
+                                  )}
+                                  {(m.obs && m.motivo !== m.obs) || m.quem ? (
+                                    <span className="ce-obs" title={m.obs || ''}>{[m.obs && m.motivo !== m.obs ? m.obs : null, m.quem ? `por ${m.quem}` : null].filter(Boolean).join(' · ')}</span>
+                                  ) : null}
                                 </li>
                               ))}
                               {i.movs.length > 40 && <li className="ce-mais">e mais {i.movs.length - 40} movimentos…</li>}

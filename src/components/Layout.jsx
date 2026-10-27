@@ -68,9 +68,16 @@ const links = [
       { to: '/cardapio-ifood', label: 'Cardápio iFood', roles: ['admin'], mod: 'produtos', ifood: true },
       { to: '/complementos', label: 'Complementos', roles: ['admin', 'vendedor'], mod: 'produtos' },
       { to: '/ficha-tecnica', label: 'Ficha Técnica', roles: ['admin', 'vendedor'], mod: 'produtos' },
-      // Estoque: o vendedor VÊ e dá entrada; saída continua só pela venda (mig 0319).
+    ],
+  },
+  // Estoque saiu de dentro do Catálogo (27/10/2026): virou a tela única de mercadoria — o que tem,
+  // compra, entrou/saiu, contagem, cozinha e conferência. O vendedor vê só "Tem agora" e dá entrada
+  // pela tela de balcão (leitor de código de barras); saída continua só pela venda (mig 0319).
+  {
+    to: '/estoque', label: 'Estoque', roles: ['admin', 'vendedor'], mod: 'estoque',
+    children: [
       { to: '/estoque', label: 'Estoque', roles: ['admin', 'vendedor'], mod: 'estoque' },
-      { to: '/entrada-estoque', label: 'Entrada de estoque', roles: ['admin', 'vendedor'], mod: 'estoque' },
+      { to: '/entrada-estoque', label: 'Entrada rápida (balcão)', roles: ['admin', 'vendedor'], mod: 'estoque' },
     ],
   },
 

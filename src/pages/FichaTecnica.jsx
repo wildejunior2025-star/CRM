@@ -1,10 +1,8 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import BuscaSelect from '../components/BuscaSelect'
-import LancarNotaIA from '../components/LancarNotaIA'
 import { useAuth } from '../hooks/useAuth'
-import { semanaDe, rotuloSemana, offsetDaSemana } from '../lib/semana'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
 import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
@@ -110,18 +108,15 @@ const emptyFicha = {
 
 const stepBtn = { width: 28, height: 28, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 16, lineHeight: 1, flexShrink: 0 }
 
-export default function FichaTecnica() {
+// modo 'fichas' (rota /ficha-tecnica): só as receitas. modo 'insumos' (dentro de Estoque → Tem agora):
+// o cadastro e o saldo das matérias-primas. Compras e histórico saíram daqui em 27/10/2026 — moram em
+// Estoque → Entrou e saiu (eram a terceira tela mostrando a mesma coisa).
+export default function FichaTecnica({ modo = 'fichas' }) {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id ?? null
-
-  // Aba fica no LINK (?aba=materias) pra sobreviver a refresh / sair e voltar.
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const abaUrl = searchParams.get('aba')
-  const aba = ['materias', 'compras', 'historico'].includes(abaUrl) ? abaUrl : 'fichas'
-  const setAba = (v) => setSearchParams(
-    (p) => { const n = new URLSearchParams(p); n.set('aba', v); return n },
-    { replace: true },
-  )
+  const aba = modo === 'insumos' ? 'materias' : 'fichas'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -161,31 +156,6 @@ export default function FichaTecnica() {
   const [baixaCart, setBaixaCart] = useState([]) // [{ id, nome, unidade, qtd, pago }]
   const [cartAtualizaCusto, setCartAtualizaCusto] = useState(true)
   const [salvandoBaixa, setSalvandoBaixa] = useState(false)
-
-  // ── Aba COMPRAS: o histórico do que ENTROU (insumo e produto de revenda) ──
-  // O saldo só diz quanto tem hoje; aqui fica o "de onde veio" — dia, item,
-  // quantidade e quanto foi pago, que agora vive na própria linha do movimento.
-  const hojeYMD = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-  const [compraDe, setCompraDe] = useState(hojeYMD)
-  const [compraAte, setCompraAte] = useState(hojeYMD)
-  const [compras, setCompras] = useState([])
-  const [loadingCompras, setLoadingCompras] = useState(false)
-  // HISTORICO (mig 0350): tudo que mexeu no estoque, nos dois sentidos.
-  // A aba Compras fala de DINHEIRO (o que entrou e quanto custou); esta fala de
-  // MOVIMENTO - entrada, baixa e acerto de contagem, com quem fez e quando.
-  const [hist, setHist] = useState([])
-  const [loadingHist, setLoadingHist] = useState(false)
-  // Saida de venda e automatica e numerosa (uma linha por item vendido): ligada
-  // por padrao, ela afogaria o que as pessoas lancaram na mao, que e o que o
-  // dono quer conferir.
-  const [histVendas, setHistVendas] = useState(false)
-  const [histAbertas, setHistAbertas] = useState(() => new Set())   // notas (compras) abertas no histórico
-  // Dia aberto na lista. Nasce tudo recolhido: num dia de feira dá 20+ linhas e
-  // quem só quer saber o total do dia não precisa rolar tudo isso.
-  const [diaAberto, setDiaAberto] = useState(null)
 
   const [showFicha, setShowFicha] = useState(false)
   const [fichaForm, setFichaForm] = useState(emptyFicha)
@@ -232,184 +202,6 @@ export default function FichaTecnica() {
 
   useEffect(() => { carregar() }, [carregar])
 
-  // Busca as entradas do período nas DUAS tabelas (insumo e produto) e junta
-  // numa lista só, da mais nova pra mais velha.
-  const carregarCompras = useCallback(async () => {
-    if (!empresaId) return
-    setLoadingCompras(true)
-    const ini = new Date(`${compraDe}T00:00:00`)
-    const fim = new Date(`${compraAte}T00:00:00`)
-    fim.setDate(fim.getDate() + 1)   // o "até" entra inteiro
-    const [mp, pr] = await Promise.all([
-      supabase.from('materia_prima_movimentos')
-        .select('id, created_at, quantidade, custo_unit, valor_total, observacao, materias_primas(nome, unidade)')
-        .eq('empresa_id', empresaId).eq('tipo', 'entrada')
-        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
-        .order('created_at', { ascending: false }),
-      supabase.from('estoque_movimentos')
-        .select('id, created_at, quantidade, custo_unit, valor_total, observacao, motivo, produtos(nome)')
-        .eq('empresa_id', empresaId).eq('tipo', 'entrada')
-        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
-        .order('created_at', { ascending: false }),
-    ])
-    const lista = [
-      ...(mp.data || []).map(r => ({
-        id: 'mp:' + r.id, quando: r.created_at, origem: 'insumo',
-        nome: r.materias_primas?.nome || '(insumo apagado)', unidade: r.materias_primas?.unidade || '',
-        quantidade: Number(r.quantidade || 0), custo_unit: r.custo_unit, valor_total: r.valor_total,
-        observacao: r.observacao, motivo: null,
-      })),
-      ...(pr.data || []).map(r => ({
-        id: 'pr:' + r.id, quando: r.created_at, origem: 'produto',
-        nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
-        quantidade: Number(r.quantidade || 0), custo_unit: r.custo_unit, valor_total: r.valor_total,
-        observacao: r.observacao, motivo: r.motivo,
-      })),
-    ].sort((a, b) => (a.quando < b.quando ? 1 : -1))
-    setCompras(lista)
-    setLoadingCompras(false)
-  }, [empresaId, compraDe, compraAte])
-
-  // Historico de movimento: materia-prima e produto, nos dois sentidos.
-  const carregarHistorico = useCallback(async () => {
-    if (!empresaId) return
-    setLoadingHist(true)
-    const ini = new Date(`${compraDe}T00:00:00`)
-    const fim = new Date(`${compraAte}T00:00:00`)
-    fim.setDate(fim.getDate() + 1)
-    const diaIni = compraDe, diaFim = compraAte
-    const [mp, pr, pessoas, comprasR] = await Promise.all([
-      supabase.from('materia_prima_movimentos')
-        .select('id, created_at, tipo, quantidade, valor_total, observacao, created_by, materias_primas(nome, unidade)')
-        .eq('empresa_id', empresaId)
-        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
-        .order('created_at', { ascending: false }).limit(1000),
-      supabase.from('estoque_movimentos')
-        .select('id, created_at, tipo, quantidade, valor_total, observacao, motivo, created_by, produtos(nome)')
-        .eq('empresa_id', empresaId)
-        .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
-        .order('created_at', { ascending: false }).limit(1000),
-      supabase.from('profiles').select('id, nome, email, perfil').eq('empresa_id', empresaId),
-      // Notas lançadas no período (pela data da compra OU pelo dia em que foram lançadas):
-      // o histórico mostra cada nota como UMA linha, com os itens dentro.
-      supabase.from('compras_lancadas')
-        .select('id, created_at, data, fornecedor, numero_nota, total, pago, itens, criado_por')
-        .eq('empresa_id', empresaId).eq('status', 'lancada')
-        .or(`and(created_at.gte.${ini.toISOString()},created_at.lt.${fim.toISOString()}),and(data.gte.${diaIni},data.lte.${diaFim})`)
-        .order('created_at', { ascending: false }).limit(300),
-    ])
-    // Quem lancou, pelo login. Sem autor = ninguem apertou nada (venda, robo,
-    // cron) - a tela escreve "automatico" em vez de deixar o campo vazio, que
-    // parece informacao perdida.
-    const quemFez = (id) => {
-      const u = (pessoas.data || []).find(x => x.id === id)
-      if (!u) return null
-      return { nome: u.nome || u.email, perfil: u.perfil || '', email: u.email || '' }
-    }
-    // Movimento que nasceu de uma nota (mov_id guardado nos itens) sai da lista solta e
-    // entra dentro da nota — senão dois lançamentos se misturam item por item.
-    const movDaNota = new Set()
-    const notas = (comprasR.data || []).map(c => {
-      const itensNota = Array.isArray(c.itens) ? c.itens : []
-      itensNota.forEach(i => { if (i.mov_id) movDaNota.add(i.mov_id) })
-      return {
-        id: 'nota:' + c.id, quando: c.created_at, tipo: 'entrada', origem: 'nota', nota: true,
-        fornecedor: c.fornecedor || 'Fornecedor', numeroNota: c.numero_nota, total: Number(c.total || 0), pago: c.pago,
-        itens: itensNota.map(i => ({
-          nome: i.nome, qtd: Number(i.quantidade || 0), unidade: i.tipo === 'materia' ? (i.emb || '') : (i.emb || 'un'),
-          unit: Number(i.custo_unit || 0), total: Number(i.linha_total || (Number(i.quantidade || 0) * Number(i.custo_unit || 0))),
-          estoque: i.mov_id ? true : false, tipoItem: i.tipo,
-        })),
-        quem: quemFez(c.criado_por), obs: '',
-      }
-    })
-    const lista = [
-      ...notas,
-      ...(mp.data || []).filter(r => !movDaNota.has(r.id)).map(r => ({
-        id: 'mp:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'insumo',
-        nome: r.materias_primas?.nome || '(insumo apagado)',
-        unidade: r.materias_primas?.unidade || '',
-        quantidade: Number(r.quantidade || 0), valor: r.valor_total,
-        obs: r.observacao || '', quem: quemFez(r.created_by),
-      })),
-      ...(pr.data || []).filter(r => !movDaNota.has(r.id)).map(r => ({
-        id: 'pr:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'produto',
-        nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
-        quantidade: Number(r.quantidade || 0), valor: r.valor_total,
-        obs: r.observacao || r.motivo || '', quem: quemFez(r.created_by),
-      })),
-    ].sort((a, b) => (a.quando < b.quando ? 1 : -1))
-    setHist(lista)
-    setLoadingHist(false)
-  }, [empresaId, compraDe, compraAte])
-
-  useEffect(() => { if (aba === 'historico') carregarHistorico() }, [aba, carregarHistorico])
-
-  useEffect(() => { if (aba === 'compras') carregarCompras() }, [aba, carregarCompras])
-
-  // Agrupa por dia e soma o que foi pago (linha sem valor entra como zero no total,
-  // mas a tela avisa que ela existe pra ninguém achar que gastou menos).
-  const comprasPorDia = useMemo(() => {
-    const dias = new Map()
-    for (const c of compras) {
-      const chave = new Date(c.quando).toLocaleDateString('pt-BR')
-      if (!dias.has(chave)) dias.set(chave, { dia: chave, itens: [], total: 0, semValor: 0 })
-      const g = dias.get(chave)
-      g.itens.push(c)
-      if (c.valor_total != null) g.total += Number(c.valor_total)
-      else g.semValor++
-    }
-    return [...dias.values()]
-  }, [compras])
-  const totalPeriodo = useMemo(
-    () => compras.reduce((s, c) => s + Number(c.valor_total || 0), 0),
-    [compras],
-  )
-  const semValorPeriodo = useMemo(() => compras.filter(c => c.valor_total == null).length, [compras])
-
-  // Apagar uma entrada lançada errado. O saldo é a soma dos movimentos, então
-  // tirar a linha já devolve o estoque pro que era antes — não precisa de acerto.
-  const [apagando, setApagando] = useState(null)
-  async function apagarEntrada(c) {
-    const quanto = c.valor_total != null ? ` (${brl(c.valor_total)})` : ''
-    if (!confirm(
-      `Apagar esta entrada?\n\n${c.nome} · ${fmtQtd(c.quantidade, c.unidade)}${quanto}\n` +
-      `Lançada em ${new Date(c.quando).toLocaleString('pt-BR')}.\n\n` +
-      `O estoque volta ao que era antes desse lançamento.`
-    )) return
-    const [tipo, id] = c.id.split(':')
-    setApagando(c.id)
-    const tabela = tipo === 'mp' ? 'materia_prima_movimentos' : 'estoque_movimentos'
-    const { error } = await supabase.from(tabela).delete().eq('id', id)
-    setApagando(null)
-    if (error) { alert('Não deu pra apagar: ' + error.message); return }
-    carregarCompras()
-    carregar()   // o saldo da lista de insumos muda junto
-  }
-
-  // Semana a semana, como no histórico de despesas e no caixa: as setas andam
-  // e o período segue junto. Quem escolhe data na mão sai do modo semana — aí
-  // o rótulo some, senão diria "esta semana" mostrando outro intervalo.
-  function irParaSemana(offset) {
-    const { inicio, fim } = semanaDe(offset)
-    setCompraDe(inicio)
-    setCompraAte(fim)
-  }
-  // Só é "semana cheia" quando as duas pontas batem com segunda e domingo.
-  const semanaAtualSel = (() => {
-    const off = offsetDaSemana(compraDe)
-    const s = semanaDe(off)
-    return (s.inicio === compraDe && s.fim === compraAte) ? off : null
-  })()
-
-  // Atalhos de período (o dono não quer digitar data).
-  function periodoRapido(qual) {
-    const d = new Date()
-    const ymd = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
-    if (qual === 'hoje') { setCompraDe(ymd(d)); setCompraAte(ymd(d)); return }
-    if (qual === '7') { const a = new Date(d); a.setDate(a.getDate() - 6); setCompraDe(ymd(a)); setCompraAte(ymd(d)); return }
-    if (qual === 'mes') { setCompraDe(ymd(new Date(d.getFullYear(), d.getMonth(), 1))); setCompraAte(ymd(d)) }
-  }
 
   // ── Matérias-primas ──────────────────────────────────────────────
   // Avisa (em vermelho) se já existe uma matéria-prima com esse nome — ignorando
@@ -441,6 +233,13 @@ export default function FichaTecnica() {
     setMateriaForm(inicial ? { ...emptyMateria, nome: inicial } : emptyMateria)
     setShowMateria(true)
   }
+  // "+ Cadastrar matéria-prima" da Ficha Técnica chega aqui com ?nova=1: já abre o formulário.
+  useEffect(() => {
+    if (modo !== 'insumos' || searchParams.get('nova') !== '1') return
+    abrirNovaMateria()
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('nova'); return n }, { replace: true })
+  }, [modo, searchParams, setSearchParams])
+
   function abrirEditarMateria(m) {
     setMateriaEdit(m)
     setMateriaForm({ nome: m.nome, unidade: m.unidade, custo: String(m.custo ?? ''), ativo: m.ativo, estoque_minimo: Number(m.estoque_minimo) > 0 ? String(m.estoque_minimo) : '', categoria: m.categoria || '' })
@@ -938,39 +737,22 @@ export default function FichaTecnica() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1>🧮 Ficha Técnica</h1>
-        {aba === 'fichas'
-          ? <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
-          : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <LancarNotaIA empresaId={empresaId} onDone={carregar} />
-              <button className="btn btn-secondary" onClick={() => abrirCarrinho('entrada')} title="Dar entrada rápida no que comprou/chegou">⬆️ Dar entrada</button>
-              <button className="btn btn-secondary" onClick={() => abrirCarrinho('saida')} title="Baixa por imprevisto (caiu, estragou, venceu) — exige motivo">⚠️ Baixa por imprevisto</button>
-              <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
-            </div>}
-      </div>
-
-      {/* Abas internas */}
-      <div className="toolbar" style={{ gap: 4 }}>
-        <button
-          className={'btn ' + (aba === 'fichas' ? 'btn-primary' : 'btn-secondary')}
-          onClick={() => setAba('fichas')}
-        >Fichas técnicas</button>
-        <button
-          className={'btn ' + (aba === 'materias' ? 'btn-primary' : 'btn-secondary')}
-          onClick={() => setAba('materias')}
-        >Matérias-primas</button>
-        <button
-          className={'btn ' + (aba === 'compras' ? 'btn-primary' : 'btn-secondary')}
-          onClick={() => setAba('compras')}
-          title="O histórico do que entrou: dia, item, quantidade e quanto foi pago"
-        >📥 Compras</button>
-        <button
-          className={'btn ' + (aba === 'historico' ? 'btn-primary' : 'btn-secondary')}
-          onClick={() => setAba('historico')}
-          title="Tudo que mexeu no estoque: entrada, baixa e acerto - com quem fez e quando"
-        >📜 Histórico</button>
-      </div>
+      {aba === 'fichas' ? (
+        <div className="page-header">
+          <h1>🧮 Ficha Técnica</h1>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* A matéria-prima é cadastrada no Estoque; aqui ela só aparece pra montar a receita. */}
+            <button className="btn btn-secondary" onClick={() => navigate('/estoque?aba=agora&item=mp')} title="Cadastro, custo e saldo dos insumos ficam no Estoque">🥩 Matérias-primas</button>
+            <button className="btn btn-secondary" onClick={() => navigate('/estoque?aba=agora&item=mp&nova=1')}>+ Cadastrar matéria-prima</button>
+            <button className="btn btn-primary" onClick={abrirNovaFicha}>+ Nova ficha</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button className="btn btn-secondary" onClick={() => abrirCarrinho('saida')} title="Baixa por imprevisto (caiu, estragou, venceu) — exige motivo">⚠️ Baixa por imprevisto</button>
+          <button className="btn btn-primary" onClick={abrirNovaMateria}>+ Nova matéria-prima</button>
+        </div>
+      )}
 
       {error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
       {loading && <div className="card">Carregando…</div>}
@@ -1158,300 +940,6 @@ export default function FichaTecnica() {
           )}
           </>
         )
-      )}
-
-      {/* ─────────────── ABA: COMPRAS (o que entrou) ─────────────── */}
-      {/* ────────────── ABA: HISTÓRICO ────────────── */}
-      {/* Nasceu porque o gestor ganhou o botão de ENTRADA de insumo (além da
-          baixa que já existia) e nada disso tinha onde ser conferido: a aba
-          Compras só mostra entrada, e fala de dinheiro. Aqui é o movimento. */}
-      {aba === 'historico' && (
-        <>
-          <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>De</label>
-              <input type="date" value={compraDe} max={compraAte} onChange={e => setCompraDe(e.target.value)}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Até</label>
-              <input type="date" value={compraAte} min={compraDe} onChange={e => setCompraAte(e.target.value)}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('hoje')}>Hoje</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('7')}>Últimos 7 dias</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('mes')}>Este mês</button>
-            </div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', marginLeft: 'auto' }}>
-              <input type="checkbox" checked={histVendas} onChange={e => setHistVendas(e.target.checked)} />
-              Mostrar também a saída das vendas
-            </label>
-          </div>
-
-          {loadingHist ? (
-            <div className="card">Carregando…</div>
-          ) : (() => {
-            const linhas = hist.filter(h => histVendas || !/^Venda /i.test(h.obs))
-            if (!linhas.length) {
-              return (
-                <div className="card empty-state">
-                  <strong>Nada movimentado nesse período</strong>
-                  <p>
-                    Aqui entra tudo que mexeu nos <b>dois estoques</b> — o insumo da ficha
-                    técnica e o produto do catálogo — nos dois sentidos: entrada, baixa do
-                    que se perdeu e acerto de contagem, com o nome e o login de quem fez.
-                  </p>
-                </div>
-              )
-            }
-            const selo = (t) => t === 'entrada'
-              ? { txt: 'Entrada', cor: '#16a34a', bg: 'rgba(22,163,74,.12)' }
-              : t === 'saida'
-                ? { txt: 'Baixa', cor: '#f59e0b', bg: 'rgba(245,158,11,.12)' }
-                : { txt: 'Acerto', cor: '#2563eb', bg: 'rgba(37,99,235,.12)' }
-            return (
-              <div className="data-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Quando</th><th>O quê</th><th>Tipo</th>
-                      <th style={{ textAlign: 'right' }}>Quantidade</th>
-                      <th>Quem</th><th>Observação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {linhas.map(h => {
-                      if (h.nota) {
-                        // UMA linha por nota: quanto foi, onde comprou e quem lançou; a seta abre os itens.
-                        const ab = histAbertas.has(h.id)
-                        const alternar = () => setHistAbertas(s => { const n = new Set(s); n.has(h.id) ? n.delete(h.id) : n.add(h.id); return n })
-                        return (
-                          <Fragment key={h.id}>
-                            <tr onClick={alternar} style={{ cursor: 'pointer', background: ab ? 'rgba(22,163,74,.06)' : undefined }}>
-                              <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
-                                {new Date(h.quando).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                              </td>
-                              <td>
-                                <div style={{ fontWeight: 700 }}>
-                                  <span style={{ display: 'inline-block', width: 16, color: 'var(--text-muted)' }}>{ab ? '▾' : '▸'}</span>
-                                  🧾 {h.fornecedor}
-                                </div>
-                                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 16 }}>
-                                  {h.numeroNota ? `NF ${h.numeroNota} · ` : ''}{h.itens.length} {h.itens.length === 1 ? 'item' : 'itens'} · {h.pago ? 'paga' : 'a pagar'}
-                                </div>
-                              </td>
-                              <td>
-                                <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 12, fontWeight: 700, color: '#16a34a', background: 'rgba(22,163,74,.12)', border: '1px solid #16a34a' }}>Compra</span>
-                              </td>
-                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800, color: '#16a34a' }}>{brl(h.total)}</td>
-                              <td style={{ fontSize: 13 }}>
-                                {h.quem ? <div style={{ fontWeight: 600 }}>{h.quem.nome}</div> : <span style={{ color: 'var(--text-muted)' }}>automático</span>}
-                              </td>
-                              <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>toque pra {ab ? 'fechar' : 'ver os itens'}</td>
-                            </tr>
-                            {ab && h.itens.map((i, k) => (
-                              <tr key={`${h.id}-${k}`} style={{ background: 'rgba(22,163,74,.03)' }}>
-                                <td />
-                                <td style={{ paddingLeft: 28 }}>
-                                  <div style={{ fontWeight: 600 }}>{i.nome}</div>
-                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                                    {i.tipoItem === 'materia' ? 'insumo' : 'produto'}{!i.estoque ? ' · sem controle de estoque' : ''}
-                                  </div>
-                                </td>
-                                <td />
-                                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>
-                                  +{fmtQtd(i.qtd, i.unidade)}
-                                  <div style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>{brl(i.unit)} cada · {brl(i.total)}</div>
-                                </td>
-                                <td /><td />
-                              </tr>
-                            ))}
-                          </Fragment>
-                        )
-                      }
-                      const sl = selo(h.tipo)
-                      return (
-                        <tr key={h.id}>
-                          <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
-                            {new Date(h.quando).toLocaleString('pt-BR', {
-                              day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-                            })}
-                          </td>
-                          <td>
-                            <div style={{ fontWeight: 600 }}>{h.nome}</div>
-                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                              {h.origem === 'insumo' ? 'insumo' : 'produto'}
-                            </div>
-                          </td>
-                          <td>
-                            <span style={{
-                              padding: '2px 9px', borderRadius: 20, fontSize: 12, fontWeight: 700,
-                              color: sl.cor, background: sl.bg, border: `1px solid ${sl.cor}`,
-                            }}>{sl.txt}</span>
-                          </td>
-                          <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 700,
-                            color: h.tipo === 'entrada' ? '#16a34a' : h.tipo === 'saida' ? '#f59e0b' : 'var(--text)' }}>
-                            {h.tipo === 'entrada' ? '+' : h.tipo === 'saida' ? '−' : ''}
-                            {fmtQtd(h.quantidade, h.unidade)}
-                            {h.valor ? <div style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>{brl(h.valor)}</div> : null}
-                          </td>
-                          <td style={{ fontSize: 13 }}>
-                            {h.quem ? (
-                              <>
-                                <div style={{ fontWeight: 600 }}>{h.quem.nome}</div>
-                                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                                  {h.quem.perfil === 'admin' ? 'administrador' : (h.quem.perfil || 'usuário')}
-                                  {h.quem.email ? ` · ${h.quem.email}` : ''}
-                                </div>
-                              </>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)' }}>automático</span>
-                            )}
-                          </td>
-                          <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{h.obs || '—'}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )
-          })()}
-        </>
-      )}
-
-      {aba === 'compras' && (
-        <>
-          <div className="card" style={{ marginBottom: 12, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>De</label>
-              <input type="date" value={compraDe} max={compraAte} onChange={e => setCompraDe(e.target.value)}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Até</label>
-              <input type="date" value={compraAte} min={compraDe} onChange={e => setCompraAte(e.target.value)}
-                style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }} />
-            </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('hoje')}>Hoje</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('7')}>Últimos 7 dias</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => periodoRapido('mes')}>Este mês</button>
-            </div>
-
-            {/* Uma semana por vez. As setas andam; a da direita para na semana
-                atual, que é até onde existe compra pra ver. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-              <button type="button" className="btn btn-secondary btn-sm" title="Semana anterior"
-                onClick={() => irParaSemana((semanaAtualSel ?? 0) - 1)}>←</button>
-              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 175, textAlign: 'center' }}>
-                {semanaAtualSel !== null ? rotuloSemana(semanaAtualSel) : 'Período escolhido'}
-              </span>
-              <button type="button" className="btn btn-secondary btn-sm"
-                disabled={semanaAtualSel !== null && semanaAtualSel >= 0}
-                title={semanaAtualSel !== null && semanaAtualSel >= 0 ? 'Você já está na semana atual' : 'Semana seguinte'}
-                onClick={() => irParaSemana(Math.min(0, (semanaAtualSel ?? -1) + 1))}>→</button>
-            </div>
-          </div>
-
-          <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))' }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>
-              🧾 Gasto em compras no período
-            </span>
-            <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalPeriodo)}</strong>
-          </div>
-
-          {semValorPeriodo > 0 && (
-            <div className="card" style={{ marginBottom: 12, fontSize: 13, color: 'var(--text-muted)' }}>
-              ⚠️ {semValorPeriodo} entrada{semValorPeriodo === 1 ? '' : 's'} sem valor informado — {semValorPeriodo === 1 ? 'ela não entra' : 'elas não entram'} nesse total.
-              Na hora de dar entrada, preencha "quanto pagou" pro número ficar completo.
-            </div>
-          )}
-
-          {loadingCompras ? (
-            <div className="card">Carregando…</div>
-          ) : comprasPorDia.length === 0 ? (
-            <div className="card empty-state">
-              <strong>Nenhuma entrada nesse período</strong>
-              <p>Aqui aparece tudo que entrou no estoque — insumo e produto de revenda — com a data e o valor pago.</p>
-            </div>
-          ) : comprasPorDia.map(g => {
-            const aberto = diaAberto === g.dia
-            // De ONDE veio: o Lançar compra grava "Compra lançada — <fornecedor>" na entrada. Agrupa o dia por loja.
-            const lojas = []
-            for (const c of g.itens) {
-              const forn = /^Compra lançada — (.+)$/.exec(c.observacao || '')?.[1]?.trim() || 'Sem fornecedor informado'
-              let gr = lojas.find(x => x.forn === forn)
-              if (!gr) { gr = { forn, itens: [], total: 0 }; lojas.push(gr) }
-              gr.itens.push(c)
-              gr.total += Number(c.valor_total || 0)
-            }
-            return (
-            <div className="card" key={g.dia} style={{ marginBottom: 12 }}>
-              <div
-                onClick={() => setDiaAberto(aberto ? null : g.dia)}
-                title={aberto ? 'Fechar' : 'Toque pra ver o que entrou nesse dia'}
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer',
-                  marginBottom: aberto ? 8 : 0, paddingBottom: aberto ? 8 : 0, borderBottom: aberto ? '1px solid var(--border)' : 'none' }}
-              >
-                <strong style={{ fontSize: 15 }}>
-                  <span style={{ color: 'var(--text-muted)', marginRight: 6 }}>{aberto ? '▲' : '▼'}</span>
-                  📅 {g.dia}
-                  <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 13 }}> · {g.itens.length} entrada{g.itens.length === 1 ? '' : 's'}</span>
-                  {!aberto && (
-                    <span style={{ display: 'block', fontWeight: 400, color: 'var(--text-muted)', fontSize: 12.5, marginTop: 2 }}>
-                      🏪 {lojas.map(x => x.forn).join(' · ')}
-                    </span>
-                  )}
-                </strong>
-                <strong style={{ fontSize: 16 }}>
-                  {brl(g.total)}
-                  {g.semValor > 0 && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}> (+{g.semValor} sem valor)</span>}
-                </strong>
-              </div>
-              <div style={{ display: aberto ? 'grid' : 'none', gap: 6 }}>
-                {lojas.map(lj => (
-                <div key={lj.forn} style={{ display: 'grid', gap: 6, paddingBottom: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontWeight: 800, fontSize: 14, marginTop: 4 }}>
-                    <span>🏪 {lj.forn}</span>
-                    <span>{brl(lj.total)}</span>
-                  </div>
-                {lj.itens.map(c => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12.5, width: 44 }}>
-                      {new Date(c.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <span className={'badge ' + (c.origem === 'insumo' ? 'badge-primary' : 'badge-neutral')}>
-                      {c.origem === 'insumo' ? 'Insumo' : 'Produto'}
-                    </span>
-                    <span style={{ flex: '1 1 140px', minWidth: 0, fontWeight: 600 }}>{c.nome}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{fmtQtd(c.quantidade, c.unidade)}</span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>
-                      {c.custo_unit != null ? `${brl(c.custo_unit)}/${c.unidade}` : ''}
-                    </span>
-                    <strong style={{ marginLeft: 'auto' }}>
-                      {c.valor_total != null
-                        ? brl(c.valor_total)
-                        : <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 12.5 }}>sem valor</span>}
-                    </strong>
-                    <button type="button" onClick={() => apagarEntrada(c)} disabled={apagando === c.id}
-                      title="Apagar esta entrada (lancei errado)"
-                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15, padding: '2px 4px', lineHeight: 1 }}>
-                      {apagando === c.id ? '…' : '🗑'}
-                    </button>
-                    {c.observacao && !/^Compra lançada — /.test(c.observacao) && (
-                      <span style={{ flexBasis: '100%', fontSize: 12, color: 'var(--text-muted)', paddingLeft: 52 }}>{c.observacao}</span>
-                    )}
-                  </div>
-                ))}
-                </div>
-                ))}
-              </div>
-            </div>
-            )
-          })}
-        </>
       )}
 
       {/* ─────────────── MODAL: MATÉRIA-PRIMA ─────────────── */}

@@ -57,7 +57,7 @@ const MOTIVOS_PADRAO = {
   ajuste: ['ajuste_inventario', 'quebra', 'perda', 'erro_de_lancamento', 'sobra'],
 }
 
-export default function Estoque() {
+export default function Estoque({ embutido = false }) {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
   // Loja que não conta estoque (restaurante, lanchonete): desligado, nenhum
@@ -350,8 +350,8 @@ export default function Estoque() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1>Estoque</h1>
+      <div className="page-header" style={embutido ? { justifyContent: 'flex-end' } : undefined}>
+        {!embutido && <h1>Estoque</h1>}
         {/* `flexWrap`: o .page-header ja quebra linha, mas esta caixa nao quebrava
             - ela segurava os quatro botoes numa fileira so e ESTICAVA a pagina.
             No celular dava pra rolar a tela inteira pro lado e cair num vazio,
@@ -377,7 +377,8 @@ export default function Estoque() {
                   + Movimento de casco
                 </button>
               )}
-              <LancarNotaIA empresaId={empresaId} onDone={loadAll} />
+              {/* Dentro do Estoque a nota se lança na aba "Lançar compra" (a única porta com valor). */}
+              {!embutido && <LancarNotaIA empresaId={empresaId} onDone={loadAll} />}
               <button className="btn btn-primary" onClick={openMovModal}>
                 + Movimento de estoque
               </button>

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { acharPorCodigo, combinaCodigo, ouvirBipada } from '../lib/codigoBarras'
 import { CATEGORIAS_COMPRA, CATEGORIAS_PAGAR, chaveDoItem } from '../lib/categoriasFinanceiro'
@@ -255,7 +255,7 @@ function lerRascunho(empresaId) {
 }
 
 export default function LancarCompra({ empresaId }) {
-  const [, setParams] = useSearchParams()
+  const navigate = useNavigate()
   // O rascunho é lido UMA vez, na montagem; a partir daí o estado manda.
   const [rascunho] = useState(() => lerRascunho(empresaId))
 
@@ -1149,8 +1149,8 @@ export default function LancarCompra({ empresaId }) {
             ))}
           </ul>
           <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setParams({ aba: 'lucro', sub: 'contas' })}>Ver em Contas a pagar</button>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setParams({ aba: 'lucro', sub: 'estoque' })}>Ver no histórico de estoque</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/financeiro?aba=lucro&sub=contas')}>Ver em Contas a pagar</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/estoque?aba=movimentos')}>Ver no que entrou e saiu</button>
           </div>
         </div>
       )}

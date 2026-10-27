@@ -185,7 +185,7 @@ const BannersIA = lazy(() => import('./pages/BannersIA'))
 const CardapioIfood = lazy(() => import('./pages/CardapioIfood'))
 const CategoriasComplemento = lazy(() => import('./pages/CategoriasComplemento'))
 const FichaTecnica = lazy(() => import('./pages/FichaTecnica'))
-const Estoque = lazy(() => import('./pages/Estoque'))
+const EstoqueHub = lazy(() => import('./pages/EstoqueHub'))
 const EntradaEstoque = lazy(() => import('./pages/EntradaEstoque'))
 const Caixa = lazy(() => import('./pages/Caixa'))
 const Financeiro = lazy(() => import('./pages/Financeiro'))
@@ -416,7 +416,7 @@ export default function App() {
             />
             <Route
               path="estoque"
-              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="estoque"><Estoque /></ProtectedRoute>}
+              element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="estoque"><EstoqueHub /></ProtectedRoute>}
             />
             {/* Receber mercadoria é trabalho de quem está no balcão, então o
                 vendedor entra aqui — e esta tela SÓ SOMA. Tirar do estoque sem
