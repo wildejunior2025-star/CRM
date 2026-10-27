@@ -530,8 +530,20 @@ const ANTES_DO_ENDERECO = "(?:pra|para|na|no|em|entregar?|entrega|moro|mora|fica
  * o endereço na tela ("Vou confirmar seu endereço: ...") e não guardava nada —
  * e, depois do cadastro, pedia o endereço de novo (teste da Agv, 25/10/2026).
  */
+// "Apt:103" — O DOIS-PONTOS COMIA O APARTAMENTO (27/10/2026)
+//
+// Elisabethe, Agv: escreveu "Condomínio Grécia." numa linha e "Apt:103" na
+// outra. O dois-pontos é separador aqui embaixo, então "Apt" e "103" viravam
+// pedaços diferentes: "Apt" virou o BAIRRO e o número do apartamento sumiu.
+// O entregador ia pro condomínio sem saber em qual porta bater.
+//
+// Dois-pontos entre a palavra do complemento e um número não separa nada —
+// é só pontuação. Vira espaço antes do corte; no resto do texto ele continua
+// valendo como separador ("a entrega hoje é em outro lugar: rua X 250").
+const RE_COMPL_DOIS_PONTOS = /\b(ap|apt|apto|apartamento|bl|bloco|casa|cs|qd|quadra|lote|lt|sala|torre|andar|box|kitnet|num|n[uú]mero)\s*:\s*(?=\d)/gi
+
 function recortarEnderecoNoTexto(txt: string): string {
-  const base = String(txt ?? "")
+  const base = String(txt ?? "").replace(RE_COMPL_DOIS_PONTOS, "$1 ")
   if (PREFIXO_RUA.test(base.trim())) return base
   // 1) Um pedaço separado por vírgula, dois-pontos ou linha que começa com
   //    rua/av/... Os dois-pontos entraram porque é assim que a pessoa avisa
