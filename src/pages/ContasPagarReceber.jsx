@@ -1161,3 +1161,6 @@ function ModalHistorico({ conta, onFechar, onMudou, avisar, confirmar }) {
     </div>
   )
 }
+
+// Peças reaproveitadas pela tela nova (ContasPagarReceberV2). A tela antiga segue funcionando como estava.
+export { brl, ymd, ddmm, ddmmaa, somaDias, somaMeses, situacaoDe, restanteDe, quandoTexto, FormConta, ModalBaixa, ModalHistorico }

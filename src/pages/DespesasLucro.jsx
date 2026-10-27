@@ -7,6 +7,7 @@ import { semanaDe, rotuloSemana } from '../lib/semana'
 import BuscaSelect from '../components/BuscaSelect'
 import ConsumoFuncionario from '../components/ConsumoFuncionario'
 import ContasPagarReceber from './ContasPagarReceber'
+import ContasPagarReceberV2 from './ContasPagarReceberV2'
 import LancarCompra from './LancarCompra'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
@@ -111,7 +112,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
 
   // A sub-aba mora na URL (?aba=lucro&sub=compra): F5 continua na tela certa e cada uma tem link próprio.
   const [params, setParams] = useSearchParams()
-  const SUBS = ['compra', 'hoje', 'historico', 'contas']
+  const SUBS = ['compra', 'hoje', 'historico', 'contas', 'contas_antiga']
   const sub = SUBS.includes(params.get('sub')) ? params.get('sub') : 'hoje'
   const setSub = (id) => setParams(prev => { const n = new URLSearchParams(prev); n.set('aba', 'lucro'); n.set('sub', id); return n })
   const [loading, setLoading] = useState(true)
@@ -716,17 +717,18 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
         {[['compra', '🛒 Lançar compra'], ['hoje', '📊 Dia a dia'], ['historico', '📜 Histórico de despesas diárias'], ['contas', '🗓️ Contas a pagar e receber']].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => setSub(id)}
             style={{ padding: '7px 14px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-              background: sub === id ? 'var(--primary)' : 'transparent', color: sub === id ? '#fff' : 'var(--text-muted)' }}>
+              background: (sub === id || (id === 'contas' && sub === 'contas_antiga')) ? 'var(--primary)' : 'transparent', color: (sub === id || (id === 'contas' && sub === 'contas_antiga')) ? '#fff' : 'var(--text-muted)' }}>
             {lb}
           </button>
         ))}
       </div>
 
       {sub === 'compra' && <LancarCompra empresaId={empresaId} />}
-      {sub === 'contas' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={onAbrirFiado} />}
+      {sub === 'contas' && <ContasPagarReceberV2 empresaId={empresaId} onAbrirFiado={onAbrirFiado} onTelaAntiga={() => setSub('contas_antiga')} />}
+      {sub === 'contas_antiga' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={onAbrirFiado} />}
 
-      {sub !== 'contas' && sub !== 'compra' && error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
-      {sub !== 'contas' && sub !== 'compra' && loading && <div className="card">Carregando…</div>}
+      {sub !== 'contas' && sub !== 'contas_antiga' && sub !== 'compra' && error && <div className="card error-text" style={{ marginBottom: 16 }}>{error}</div>}
+      {sub !== 'contas' && sub !== 'contas_antiga' && sub !== 'compra' && loading && <div className="card">Carregando…</div>}
 
       {/* ═══════════════ HOJE ═══════════════ */}
       {!loading && sub === 'hoje' && (

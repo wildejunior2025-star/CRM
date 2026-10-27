@@ -1,0 +1,127 @@
+/* Contas — tela arrumada (A pagar / A receber / Já pago). Usa os tokens do tema claro/escuro. */
+
+.cp2 { max-width: 1100px; }
+
+/* ── Topo ── */
+.cp2-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.cp2-titulo { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.cp2-sub { margin: 4px 0 0; color: var(--text-muted); font-size: 14px; }
+.cp2-acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Os três números ── */
+.cp2-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+@media (max-width: 760px) { .cp2-cards { grid-template-columns: 1fr; } }
+.cp2-card {
+  display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 16px 18px;
+  border-radius: 16px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+  border: 2px solid var(--border); box-shadow: var(--shadow-sm);
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.cp2-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.cp2-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.cp2-card-pagar.ativo { border-color: #dc2626; }
+.cp2-card-receber.ativo { border-color: #16a34a; }
+.cp2-card-pago.ativo { border-color: var(--primary); }
+.cp2-card-rotulo { font-size: 14px; font-weight: 700; }
+.cp2-card-valor { font-size: 28px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.cp2-card-pagar .cp2-card-valor { color: var(--danger); }
+.cp2-card-receber .cp2-card-valor { color: var(--success); }
+.cp2-card-nota { font-size: 13px; color: var(--text-muted); }
+.cp2-ruim { color: var(--danger) !important; font-weight: 700; }
+.cp2-bom { color: var(--success) !important; font-weight: 600; }
+
+/* ── Abas ── */
+.cp2-abas { display: flex; gap: 4px; padding: 4px; margin-bottom: 18px; background: var(--bg); border: 1px solid var(--border); border-radius: 14px; width: fit-content; max-width: 100%; }
+.cp2-aba {
+  display: inline-flex; align-items: center; gap: 8px; padding: 9px 20px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text-muted); font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
+}
+.cp2-aba.ativa { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.cp2-aba-n { font-size: 12px; font-weight: 800; padding: 1px 8px; border-radius: 999px; background: var(--border); color: var(--text); }
+@media (max-width: 520px) { .cp2-abas { width: 100%; } .cp2-aba { flex: 1; justify-content: center; padding: 9px 8px; } }
+
+/* ── Blocos por prazo ── */
+.cp2-bloco { margin-bottom: 22px; }
+.cp2-bloco-topo { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; padding: 0 4px; }
+.cp2-bloco-topo h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 800; }
+.cp2-bloco-topo strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.cp2-ponto { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.cp2-bloco-n { font-size: 12px; font-weight: 700; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); padding: 0 8px; border-radius: 999px; }
+
+/* ── Uma conta ── */
+.cp2-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cp2-linha {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border);
+}
+.cp2-sit-vencida { border-left: 4px solid #dc2626; }
+.cp2-sit-hoje { border-left: 4px solid #ea580c; }
+.cp2-bolha, .cp2-bolha-grande {
+  display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px;
+  background: var(--bg); font-size: 20px;
+}
+.cp2-info { min-width: 0; }
+.cp2-nome { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cp2-nome strong { font-size: 15px; overflow-wrap: anywhere; }
+.cp2-tag { font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text-muted); }
+.cp2-detalhe { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; font-size: 13px; color: var(--text-muted); }
+.cp2-quando-vencida { color: var(--danger); font-weight: 700; }
+.cp2-quando-hoje { color: #c2410c; font-weight: 700; }
+.cp2-cat-chip { font-size: 12px; font-weight: 600; padding: 1px 9px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+.cp2-cat-chip-btn { cursor: pointer; font-family: inherit; }
+.cp2-rateio { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--bg); font-size: 13px; }
+.cp2-valor { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp2-valor strong { font-size: 17px; }
+.cp2-valor span { font-size: 12px; color: var(--text-muted); }
+.cp2-botoes { display: flex; align-items: center; gap: 6px; }
+
+@media (max-width: 640px) {
+  .cp2-linha { grid-template-columns: 42px minmax(0, 1fr) auto; }
+  .cp2-botoes { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+/* ── Já pago: famílias ── */
+.cp2-periodo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.cp2-chip { padding: 7px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.cp2-chip.ativo { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cp2-periodo-total { margin-left: auto; font-size: 14px; color: var(--text-muted); }
+.cp2-periodo-total strong { color: var(--text); font-size: 17px; }
+
+.cp2-familias { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .cp2-familias { grid-template-columns: 1fr; } }
+.cp2-familia { padding: 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--fam); box-shadow: var(--shadow-sm); }
+.cp2-familia-topo { display: flex; align-items: center; gap: 12px; }
+.cp2-bolha-grande { background: color-mix(in srgb, var(--fam) 14%, transparent); }
+.cp2-familia-nome { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.cp2-familia-nome strong { font-size: 16px; }
+.cp2-familia-nome span { font-size: 12.5px; color: var(--text-muted); }
+.cp2-familia-valor { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.cp2-familia-valor strong { font-size: 19px; }
+.cp2-familia-valor span { font-size: 12px; color: var(--text-muted); }
+.cp2-barra { height: 8px; margin: 12px 0 8px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.cp2-barra i { display: block; height: 100%; border-radius: 999px; background: var(--fam); }
+
+.cp2-cats { list-style: none; margin: 0; padding: 0; }
+.cp2-cat {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) 70px auto; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 6px; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px;
+}
+.cp2-cat:hover { background: var(--bg); }
+.cp2-cat-seta { color: var(--text-muted); font-size: 12px; }
+.cp2-cat-nome { font-weight: 600; overflow-wrap: anywhere; }
+.cp2-cat-mini { height: 6px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+.cp2-cat-mini i { display: block; height: 100%; background: var(--fam); opacity: .75; border-radius: 999px; }
+.cp2-cat-valor { font-weight: 700; font-variant-numeric: tabular-nums; }
+.cp2-lista-dentro { margin: 6px 0 10px; }
+.cp2-lista-dentro .cp2-linha { background: var(--bg); }
+
+/* ── Avulsos ── */
+.cp2-fiado {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 14px; border-radius: 12px; font-size: 14px;
+  background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}
+.cp2-nota-rodape { margin: 4px 4px 0; font-size: 13.5px; color: var(--text-muted); }
+.cp2-rodape { margin: 26px 4px 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.cp2-link { background: none; border: 0; padding: 0; color: var(--primary); font: inherit; text-decoration: underline; cursor: pointer; }
