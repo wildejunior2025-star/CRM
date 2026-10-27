@@ -64,6 +64,7 @@ export default function LancarCompra({ empresaId }) {
   const [carregando, setCarregando] = useState(true)
 
   const [fornecedor, setFornecedor] = useState('')
+  const [fornAberto, setFornAberto] = useState(false)
   const [data, setData] = useState(hojeISO())
   const [pagoAgora, setPagoAgora] = useState(true)
   const [forma, setForma] = useState('pix')
@@ -93,8 +94,7 @@ export default function LancarCompra({ empresaId }) {
         fetchAll(() => supabase.from('materias_primas')
           .select('id, nome, unidade, custo').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
         supabase.from('categoria_item_aprendida').select('termo, categoria').eq('empresa_id', empresaId).limit(2000),
-        supabase.from('contas_financeiras').select('pessoa').eq('empresa_id', empresaId).eq('tipo', 'pagar')
-          .not('pessoa', 'is', null).order('created_at', { ascending: false }).limit(400),
+        supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
         supabase.from('compras_lancadas')
           .select('id, fornecedor, data, total, pago, status, itens, created_at')
           .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(15),
@@ -106,7 +106,7 @@ export default function LancarCompra({ empresaId }) {
       const m = {}
       for (const l of (ap.data || [])) m[l.termo] = l.categoria
       setAprendidas(m)
-      setFornecedores([...new Set((fo.data || []).map(x => String(x.pessoa).trim()).filter(Boolean))].slice(0, 60))
+      setFornecedores(fo.data || [])
       setHistorico(hi.data || [])
     } catch (e) {
       setErro(recadoDeErro(e, 'carregar a tela de compras'))
@@ -261,6 +261,40 @@ export default function LancarCompra({ empresaId }) {
   const semPreco = linhas.some(l => valorLinha(l) <= 0)
   const podeLancar = !salvando && linhas.length > 0 && fornecedor.trim() && total > 0 && !semQtd
 
+  // ── fornecedor: lista da loja + cadastro na hora ──────────────────────────
+  const fornExato = useMemo(() => {
+    const t = norm(fornecedor).trim()
+    return t ? fornecedores.find(f => norm(f.nome).trim() === t) || null : null
+  }, [fornecedor, fornecedores])
+  const fornSugestoes = useMemo(() => {
+    const t = norm(fornecedor).trim()
+    return (t ? fornecedores.filter(f => norm(f.nome).includes(t)) : fornecedores).slice(0, 8)
+  }, [fornecedor, fornecedores])
+
+  async function cadastrarFornecedor(nomeBruto) {
+    const nome = nomeBruto.trim().replace(/\s+/g, ' ')
+    if (!nome) return null
+    const { data: d, error } = await supabase.from('fornecedores')
+      .insert({ empresa_id: empresaId, nome }).select('id, nome').single()
+    if (error) {
+      if (error.code === '23505') {            // já existia com outra caixa/espaço: usa o que existe
+        const { data: ja } = await supabase.from('fornecedores').select('id, nome').eq('empresa_id', empresaId).ilike('nome', nome).maybeSingle()
+        if (ja) return ja
+      }
+      throw error
+    }
+    setFornecedores(f => [...f, d].sort((a, b) => a.nome.localeCompare(b.nome)))
+    return d
+  }
+  async function escolheNovoFornecedor() {
+    setErro(null)
+    try {
+      const d = await cadastrarFornecedor(fornecedor)
+      if (d) setFornecedor(d.nome)
+      setFornAberto(false)
+    } catch (e) { setErro(recadoDeErro(e, 'cadastrar o fornecedor')) }
+  }
+
   function aoMudarData(v) {
     setData(v)
     if (!vencMexido) setVencimento(maisDias(v || hojeISO(), 7))
@@ -272,9 +306,12 @@ export default function LancarCompra({ empresaId }) {
     setErro(null)
     setOk(null)
     try {
+      // Digitou um nome e não clicou em "cadastrar"? Cadastra agora — a compra não pode criar fornecedor fantasma.
+      let nomeForn = fornecedor.trim()
+      if (!fornExato) { const d = await cadastrarFornecedor(nomeForn); if (d) nomeForn = d.nome }
       const { error } = await supabase.rpc('lancar_compra', {
         p: {
-          fornecedor: fornecedor.trim(), data, vencimento, pago: pagoAgora, forma: pagoAgora ? forma : null,
+          fornecedor: nomeForn, data, vencimento, pago: pagoAgora, forma: pagoAgora ? forma : null,
           categoria: categoriaDaConta, total, rateio,
           itens: linhas.map(l => ({
             tipo: l.tipo, id: l.id, nome: l.nome, quantidade: num(l.qtd), estoque: l.estoque,
@@ -330,11 +367,29 @@ export default function LancarCompra({ empresaId }) {
       {/* 1. a nota */}
       <div className="card">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-          <div>
+          <div style={{ position: 'relative' }}>
             <label style={lbl}>Fornecedor</label>
-            <input list="lc-fornecedores" value={fornecedor} onChange={e => setFornecedor(e.target.value)}
-              placeholder="De quem comprou" style={{ ...inp, width: '100%' }} />
-            <datalist id="lc-fornecedores">{fornecedores.map(f => <option key={f} value={f} />)}</datalist>
+            <input value={fornecedor} onChange={e => { setFornecedor(e.target.value); setFornAberto(true) }}
+              onFocus={() => setFornAberto(true)} onBlur={() => setTimeout(() => setFornAberto(false), 150)}
+              placeholder="De quem comprou" autoComplete="off" style={{ ...inp, width: '100%' }} />
+            {fornExato && <div style={{ fontSize: 11.5, marginTop: 3, color: '#15803d' }}>✓ fornecedor cadastrado</div>}
+            {fornAberto && !fornExato && (fornSugestoes.length > 0 || fornecedor.trim()) && (
+              <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, top: '100%', marginTop: 2, background: 'var(--card, #fff)',
+                border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 6px 20px rgba(0,0,0,.12)', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {fornSugestoes.map(f => (
+                  <button key={f.id} type="button" className="btn btn-secondary"
+                    onMouseDown={e => { e.preventDefault(); setFornecedor(f.nome); setFornAberto(false) }}
+                    style={{ textAlign: 'left', padding: '9px 10px', fontSize: 13.5 }}>{f.nome}</button>
+                ))}
+                {fornecedor.trim() && (
+                  <button type="button" className="btn btn-secondary"
+                    onMouseDown={e => { e.preventDefault(); escolheNovoFornecedor() }}
+                    style={{ textAlign: 'left', padding: '9px 10px', fontSize: 13.5, borderStyle: 'dashed' }}>
+                    ➕ Cadastrar “{fornecedor.trim()}” como fornecedor novo
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div>
             <label style={lbl}>Data da compra</label>
