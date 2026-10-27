@@ -213,6 +213,26 @@ export default function PresencialSalao() {
   const [reimpSel, setReimpSel] = useState(() => new Set())
   const [salvandoCoz, setSalvandoCoz] = useState(false)
   const [salvandoObrig, setSalvandoObrig] = useState(false)
+  // As chaves da loja (complementos livres, sem cozinha) são do ADM e valem pra todos
+  // os garçons — mas a tela só lia isso ao abrir. Garçom com a tela já aberta seguia
+  // com a regra antiga e o "Falta escolher" aparecia mesmo com o cadeado aberto.
+  // Relê ao voltar pra tela e a cada minuto.
+  useEffect(() => {
+    if (!empresaId) return
+    let vivo = true
+    async function reler() {
+      if (document.visibilityState === 'hidden') return
+      const { data } = await supabase.from('empresas')
+        .select('presencial_sem_obrigatorios, presencial_sem_cozinha').eq('id', empresaId).single()
+      if (!vivo || !data) return
+      setSemObrigatorios(!!data.presencial_sem_obrigatorios)
+      setSemCozinha(!!data.presencial_sem_cozinha)
+    }
+    const t = setInterval(reler, 60000)
+    document.addEventListener('visibilitychange', reler)
+    window.addEventListener('focus', reler)
+    return () => { vivo = false; clearInterval(t); document.removeEventListener('visibilitychange', reler); window.removeEventListener('focus', reler) }
+  }, [empresaId])
   const [mesas, setMesas]     = useState([])
   const [comandas, setComandas] = useState([])
   // Comanda de balcão (mig 0143): comanda numerada que não é de mesa nenhuma —
