@@ -68,7 +68,7 @@ const doMes = (c, mes) => String(c.pago_em || c.vencimento || '').slice(0, 7) ==
 export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAntiga }) {
   const [confirmar, avisoConfirmar] = useConfirmar()
   const [contas, setContas] = useState([])
-  const [fiado, setFiado] = useState({ total: 0, clientes: 0 })
+  const [fiado, setFiado] = useState({ total: 0, clientes: 0, lista: [] })
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
   const [aviso, setAviso] = useState(null)
@@ -102,9 +102,17 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
         .order('vencimento').order('created_at').order('id'))
       if (dados.error) throw dados.error
       setContas(dados.data || [])
-      const f = await supabase.from('clientes_saldo_fiado').select('saldo_fiado')
+      const f = await supabase.from('clientes_saldo_fiado').select('cliente_id, saldo_fiado')
       const devedores = (f.data || []).filter((x) => Number(x.saldo_fiado) > 0)
-      setFiado({ total: devedores.reduce((s, x) => s + Number(x.saldo_fiado), 0), clientes: devedores.length })
+      // Os nomes: a visão de saldo só traz cliente_id e valor.
+      let lista = []
+      if (devedores.length) {
+        const nomes = await supabase.from('clientes').select('id, nome').in('id', devedores.map((x) => x.cliente_id))
+        const mapa = new Map((nomes.data || []).map((c) => [c.id, (c.nome || '').trim()]))
+        lista = devedores.map((x) => ({ id: x.cliente_id, nome: mapa.get(x.cliente_id) || 'Cliente sem nome', saldo: Number(x.saldo_fiado) }))
+          .sort((a, b) => b.saldo - a.saldo)
+      }
+      setFiado({ total: devedores.reduce((s, x) => s + Number(x.saldo_fiado), 0), clientes: devedores.length, lista })
     } catch (e) {
       setErro(recadoDeErro(e, 'carregar as contas'))
     } finally {
@@ -266,9 +274,12 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
             </button>
             <button type="button" className={`cp2-card cp2-card-receber ${aba === 'receber' ? 'ativo' : ''}`} onClick={() => setAba('receber')}>
               <span className="cp2-card-rotulo">💰 A receber</span>
-              <span className="cp2-card-valor">{brl(resumo.totalReceber)}</span>
+              {/* Fiado é dinheiro a receber: entra no total (antes ficava só num aviso e o cartão dizia R$ 0,00). */}
+              <span className="cp2-card-valor">{brl(resumo.totalReceber + fiado.total)}</span>
               <span className={`cp2-card-nota ${resumo.atrasReceber ? 'cp2-ruim' : ''}`}>
-                {resumo.atrasReceber ? `⚠️ ${brl(resumo.atrasReceber)} atrasado` : resumo.nReceber ? `${resumo.nReceber} ${resumo.nReceber === 1 ? 'conta' : 'contas'}` : 'nada a receber'}
+                {resumo.atrasReceber ? `⚠️ ${brl(resumo.atrasReceber)} atrasado` : fiado.total > 0
+                  ? `🧾 inclui ${brl(fiado.total)} de fiado (${fiado.clientes} ${fiado.clientes === 1 ? 'cliente' : 'clientes'})`
+                  : resumo.nReceber ? `${resumo.nReceber} ${resumo.nReceber === 1 ? 'conta' : 'contas'}` : 'nada a receber'}
               </span>
             </button>
             <button type="button" className={`cp2-card cp2-card-pago ${aba === 'pago' ? 'ativo' : ''}`} onClick={() => { setAba('pago'); setPeriodo('mes') }}>
@@ -290,7 +301,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
             <>
               {/* abas */}
               <div className="cp2-abas" role="tablist">
-                {[['pagar', 'A pagar', resumo.nPagar], ['receber', 'A receber', resumo.nReceber], ['pago', 'Já pago', null]].map(([id, lb, n]) => (
+                {[['pagar', 'A pagar', resumo.nPagar], ['receber', 'A receber', resumo.nReceber + fiado.clientes], ['pago', 'Já pago', null]].map(([id, lb, n]) => (
                   <button key={id} type="button" role="tab" aria-selected={aba === id} className={`cp2-aba ${aba === id ? 'ativa' : ''}`} onClick={() => setAba(id)}>
                     {lb}{n ? <span className="cp2-aba-n">{n}</span> : null}
                   </button>
@@ -300,13 +311,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
               {/* A PAGAR / A RECEBER */}
               {aba !== 'pago' && (
                 <>
-                  {aba === 'receber' && fiado.total > 0 && (
-                    <div className="cp2-fiado">
-                      <span>🧾 <strong>Fiado de clientes:</strong> {brl(fiado.total)} ({fiado.clientes} {fiado.clientes === 1 ? 'cliente' : 'clientes'}) — fica na aba Fiado.</span>
-                      {onAbrirFiado && <button type="button" className="btn btn-secondary btn-sm" onClick={onAbrirFiado}>Abrir Fiado</button>}
-                    </div>
-                  )}
-                  {blocos.length === 0 ? (
+                  {blocos.length === 0 && !(aba === 'receber' && fiado.total > 0) ? (
                     <div className="card cpr-vazio cpr-vazio-pequeno">
                       <div className="cpr-vazio-icone">{aba === 'pagar' ? '🎉' : '📭'}</div>
                       <p>{aba === 'pagar' ? 'Nada pra pagar. Tudo em dia!' : 'Nada pra receber no momento.'}</p>
@@ -320,6 +325,24 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
                       <ul className="cp2-lista">{b.itens.map(linha)}</ul>
                     </section>
                   ))}
+                  {aba === 'receber' && fiado.total > 0 && (
+                    <section className="cp2-bloco">
+                      <header className="cp2-bloco-topo">
+                        <h3><i className="cp2-ponto" style={{ background: '#d97706' }} />Fiado de clientes<span className="cp2-bloco-n">{fiado.clientes}</span></h3>
+                        <strong>{brl(fiado.total)}</strong>
+                      </header>
+                      <ul className="cp2-lista">
+                        {fiado.lista.map((f) => (
+                          <li key={f.id} className="cp2-linha cp2-linha-fiado">
+                            <span className="cp2-bolha" style={{ background: '#d977061f' }} aria-hidden="true">🧾</span>
+                            <div className="cp2-info"><div className="cp2-nome"><strong>{f.nome}</strong></div><div className="cp2-detalhe"><span>vendeu fiado</span></div></div>
+                            <div className="cp2-valor"><strong className="cpr-pos">{brl(f.saldo)}</strong></div>
+                            {onAbrirFiado ? <button type="button" className="btn btn-secondary btn-sm" onClick={onAbrirFiado}>Receber no Fiado</button> : <span />}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   {aba === 'receber' && resumo.recebidoMes > 0 && (
                     <p className="cp2-nota-rodape">Já recebido este mês: <strong>{brl(resumo.recebidoMes)}</strong></p>
                   )}
