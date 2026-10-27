@@ -38,7 +38,7 @@ export default function HistoricoEstoque({ empresaId }) {
   const [dados, setDados] = useState({ prod: [], mp: [], produtos: new Map(), materias: new Map() })
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
-  const [periodo, setPeriodo] = useState('mes')        // 'hoje' | '7d' | 'mes' | 'mes_passado'
+  const [periodo, setPeriodo] = useState('hoje')       // 'hoje' | '7d' | 'mes' | 'mes_passado' — abre em Hoje (pedido do AGV)
   const [aba, setAba] = useState('entrada')            // 'entrada' | 'saida'
   const [aberto, setAberto] = useState(null)           // item aberto: `${origem}:${id}`
 
