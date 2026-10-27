@@ -84,13 +84,19 @@ export default function CozinhaRequisicao({ empresaId }) {
       if (m.error) throw m.error
       if (r.error) throw r.error
       // As duas listas numa só, sem repetir o mesmo nome. Dono (admin) e entregador não pedem insumo.
-      const pessoas = (f.data || []).map(x => ({ id: `f:${x.id}`, nome: x.nome, cargo: x.cargo || '' }))
-      const nomes = new Set(pessoas.map(x => norm(x.nome).trim()))
+      // "Mesma pessoa" quando todas as palavras do nome mais curto estão no mais comprido — o login
+      // "Waleska" é a "Germânia Waleska Silva Matias" da folha, e "Raurison Lima  da SIlva" (dois
+      // espaços) é o "Raurison Lima da Silva" do login (AGV, 27/10).
+      const palavras = (s) => norm(s).split(/\s+/).filter(w => w.length > 2 && !['das', 'dos'].includes(w))
+      const mesma = (a, b) => {
+        const [pa, pb] = [palavras(a), palavras(b)].sort((x, y) => x.length - y.length)
+        return pa.length > 0 && pa.every(w => pb.includes(w))
+      }
+      const pessoas = (f.data || []).map(x => ({ id: `f:${x.id}`, nome: x.nome.replace(/\s+/g, ' ').trim(), cargo: x.cargo || '' }))
       for (const x of (pf.error ? [] : (pf.data || []))) {
         if (x.ativo === false || ['admin', 'super_admin', 'cliente', 'entregador'].includes(x.perfil)) continue
-        const nome = (x.nome || '').trim() || x.email
-        if (!nome || nomes.has(norm(nome).trim())) continue
-        nomes.add(norm(nome).trim())
+        const nome = ((x.nome || '').trim() || x.email).replace(/\s+/g, ' ')
+        if (!nome || pessoas.some(p => mesma(p.nome, nome))) continue
         pessoas.push({ id: `p:${x.id}`, nome, cargo: x.cargo || x.perfil || '' })
       }
       setFuncs(pessoas)
@@ -106,10 +112,16 @@ export default function CozinhaRequisicao({ empresaId }) {
   useEffect(() => { carregar() }, [carregar])
 
   // Cozinheiros primeiro na fila de "quem pediu": é quem pede insumo todo dia.
+  // Só o pessoal da cozinha aparece de cara; garçom, segurança e gerente ficam em "+ outros".
+  // "zinh" pega também o cargo escrito "Conzinheiro" (AGV).
+  const [verTodos, setVerTodos] = useState(false)
+  const ehCozinha = (f) => /zinh|churrasq|chef|auxiliar|cozinheiro/i.test(f.cargo || '')
   const funcsOrdenados = useMemo(() => {
-    const ehCozinha = (f) => /cozinh|churrasq|chef|auxiliar/i.test(f.cargo || '')
-    return [...funcs].sort((a, b) => (ehCozinha(b) ? 1 : 0) - (ehCozinha(a) ? 1 : 0) || a.nome.localeCompare(b.nome))
-  }, [funcs])
+    const ordem = [...funcs].sort((a, b) => (ehCozinha(b) ? 1 : 0) - (ehCozinha(a) ? 1 : 0) || a.nome.localeCompare(b.nome))
+    const daCozinha = ordem.filter(ehCozinha)
+    return verTodos || daCozinha.length === 0 ? ordem : ordem.filter(f => ehCozinha(f) || f.id === funcId)
+  }, [funcs, verTodos, funcId])
+  const outros = funcs.filter(f => !ehCozinha(f)).length
 
   // Última entrega do cozinheiro escolhido — pra repetir o pedido de sempre com um toque.
   useEffect(() => {
@@ -289,6 +301,11 @@ export default function CozinhaRequisicao({ empresaId }) {
                 {f.nome.split(' ').slice(0, 2).join(' ')}
               </button>
             ))}
+            {outros > 0 && funcs.length > outros && (
+              <button type="button" style={{ ...pilula(false), borderStyle: 'dashed', color: 'var(--text-muted)' }} onClick={() => setVerTodos(v => !v)}>
+                {verTodos ? 'só a cozinha' : `+ outros (${outros})`}
+              </button>
+            )}
           </div>
 
           {funcId && ultima?.requisicao_itens?.length > 0 && linhas.length === 0 && (
