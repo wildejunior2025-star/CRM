@@ -10,6 +10,7 @@ import ContasPagarReceber from './ContasPagarReceber'
 import ContasPagarReceberV2 from './ContasPagarReceberV2'
 import HistoricoEstoque from './HistoricoEstoque'
 import LancarCompra from './LancarCompra'
+import CozinhaRequisicao from './CozinhaRequisicao'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
 
@@ -113,7 +114,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
 
   // A sub-aba mora na URL (?aba=lucro&sub=compra): F5 continua na tela certa e cada uma tem link próprio.
   const [params, setParams] = useSearchParams()
-  const SUBS = ['compra', 'hoje', 'historico', 'estoque', 'contas', 'contas_antiga']
+  const SUBS = ['compra', 'cozinha', 'hoje', 'historico', 'estoque', 'contas', 'contas_antiga']
   const sub = SUBS.includes(params.get('sub')) ? params.get('sub') : 'hoje'
   const setSub = (id) => setParams(prev => { const n = new URLSearchParams(prev); n.set('aba', 'lucro'); n.set('sub', id); return n })
   const [loading, setLoading] = useState(true)
@@ -715,7 +716,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
     <div>
       {/* sub-abas */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
-        {[['compra', '🛒 Lançar compra'], ['hoje', '📊 Dia a dia'], ['historico', '📜 Lucro dos dias fechados'], ['estoque', '📦 Histórico de estoque'], ['contas', '🗓️ Contas a pagar e receber']].map(([id, lb]) => (
+        {[['compra', '🛒 Lançar compra'], ['cozinha', '🍳 Cozinha'], ['hoje', '📊 Dia a dia'], ['historico', '📜 Lucro dos dias fechados'], ['estoque', '📦 Histórico de estoque'], ['contas', '🗓️ Contas a pagar e receber']].map(([id, lb]) => (
           <button key={id} type="button" onClick={() => setSub(id)}
             style={{ padding: '7px 14px', borderRadius: 999, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
               background: (sub === id || (id === 'contas' && sub === 'contas_antiga')) ? 'var(--primary)' : 'transparent', color: (sub === id || (id === 'contas' && sub === 'contas_antiga')) ? '#fff' : 'var(--text-muted)' }}>
@@ -725,6 +726,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
       </div>
 
       {sub === 'compra' && <LancarCompra empresaId={empresaId} />}
+      {sub === 'cozinha' && <CozinhaRequisicao empresaId={empresaId} />}
       {sub === 'estoque' && <HistoricoEstoque empresaId={empresaId} />}
       {sub === 'contas' && <ContasPagarReceberV2 empresaId={empresaId} onAbrirFiado={onAbrirFiado} onTelaAntiga={() => setSub('contas_antiga')} />}
       {sub === 'contas_antiga' && <ContasPagarReceber empresaId={empresaId} onAbrirFiado={onAbrirFiado} />}
