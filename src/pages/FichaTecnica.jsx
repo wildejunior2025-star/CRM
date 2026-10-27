@@ -1378,6 +1378,15 @@ export default function FichaTecnica() {
             </div>
           ) : comprasPorDia.map(g => {
             const aberto = diaAberto === g.dia
+            // De ONDE veio: o Lançar compra grava "Compra lançada — <fornecedor>" na entrada. Agrupa o dia por loja.
+            const lojas = []
+            for (const c of g.itens) {
+              const forn = /^Compra lançada — (.+)$/.exec(c.observacao || '')?.[1]?.trim() || 'Sem fornecedor informado'
+              let gr = lojas.find(x => x.forn === forn)
+              if (!gr) { gr = { forn, itens: [], total: 0 }; lojas.push(gr) }
+              gr.itens.push(c)
+              gr.total += Number(c.valor_total || 0)
+            }
             return (
             <div className="card" key={g.dia} style={{ marginBottom: 12 }}>
               <div
@@ -1390,6 +1399,11 @@ export default function FichaTecnica() {
                   <span style={{ color: 'var(--text-muted)', marginRight: 6 }}>{aberto ? '▲' : '▼'}</span>
                   📅 {g.dia}
                   <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 13 }}> · {g.itens.length} entrada{g.itens.length === 1 ? '' : 's'}</span>
+                  {!aberto && (
+                    <span style={{ display: 'block', fontWeight: 400, color: 'var(--text-muted)', fontSize: 12.5, marginTop: 2 }}>
+                      🏪 {lojas.map(x => x.forn).join(' · ')}
+                    </span>
+                  )}
                 </strong>
                 <strong style={{ fontSize: 16 }}>
                   {brl(g.total)}
@@ -1397,7 +1411,13 @@ export default function FichaTecnica() {
                 </strong>
               </div>
               <div style={{ display: aberto ? 'grid' : 'none', gap: 6 }}>
-                {g.itens.map(c => (
+                {lojas.map(lj => (
+                <div key={lj.forn} style={{ display: 'grid', gap: 6, paddingBottom: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontWeight: 800, fontSize: 14, marginTop: 4 }}>
+                    <span>🏪 {lj.forn}</span>
+                    <span>{brl(lj.total)}</span>
+                  </div>
+                {lj.itens.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
                     <span style={{ color: 'var(--text-muted)', fontSize: 12.5, width: 44 }}>
                       {new Date(c.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -1420,10 +1440,12 @@ export default function FichaTecnica() {
                       style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15, padding: '2px 4px', lineHeight: 1 }}>
                       {apagando === c.id ? '…' : '🗑'}
                     </button>
-                    {c.observacao && (
+                    {c.observacao && !/^Compra lançada — /.test(c.observacao) && (
                       <span style={{ flexBasis: '100%', fontSize: 12, color: 'var(--text-muted)', paddingLeft: 52 }}>{c.observacao}</span>
                     )}
                   </div>
+                ))}
+                </div>
                 ))}
               </div>
             </div>
