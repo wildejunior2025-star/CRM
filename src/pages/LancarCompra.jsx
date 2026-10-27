@@ -70,6 +70,23 @@ function palpiteDaCategoria(nome, categoriaVenda) {
   return 'Mercearia'
 }
 
+// Linha da nota que NÃO é estoque (gasolina, estacionamento, vassoura…): só vira dinheiro na conta, na categoria
+// certa. Palpite pelo nome; o dono troca na hora se errar.
+const PALPITES_GASTO = [
+  ['Combustível e entrega', /\b(gasolina|diesel|etanol|alcool comb|combustivel|estacionamento|pedagio|frete|motoboy)\b/],
+  ['Energia', /\b(energia|luz)\b/],
+  ['Água', /\b(agua e esgoto|caern|conta de agua)\b/],
+  ['Internet e telefone', /\b(internet|telefone|celular|recarga)\b/],
+  ['Manutenção', /\b(manta|torneira|cimento|tinta|cano|registro|lampada|tomada|disjuntor|parafuso|conserto|reparo)\b/],
+  ['Equipamentos e utensílios', /\b(vassoura|rodo|panela|faca|tabua|balde|cabo|pilha|utensilio|ferramenta)\b/],
+]
+function palpiteDoGasto(nome) {
+  const n = norm(nome)
+  for (const [cat, re] of PALPITES_GASTO) if (re.test(n)) return cat
+  return 'Outros'
+}
+const valorGasto = (g) => r2(num(g.valor))
+
 // ── contas da linha (puras: a linha isolada e a tela usam as mesmas) ──────────
 // Quantidade REAL em unidades (caixa × unidades por caixa). É ela que entra no estoque.
 const qtdReal = (l) => (l.emb === 'cx' ? num(l.qtd) * Math.max(1, num(l.porCx)) : num(l.qtd))
@@ -278,6 +295,7 @@ export default function LancarCompra({ empresaId }) {
   const [chaveNota, setChaveNota] = useState(rascunho?.chaveNota ?? '')      // 44 dígitos da nota que está sendo lançada
   const [cnpjNota, setCnpjNota] = useState(rascunho?.cnpjNota ?? '')          // CNPJ do emitente (vira o do fornecedor)
   const [pendentes, setPendentes] = useState(rascunho?.pendentes ?? [])        // itens da nota que ainda não acharam item no cadastro
+  const [gastos, setGastos] = useState(rascunho?.gastos ?? [])                 // linhas que não são estoque: só conta, na categoria certa
   const [totalEsperado, setTotalEsperado] = useState(rascunho?.totalEsperado ?? null)  // total impresso na nota
   const [importando, setImportando] = useState(null)    // texto enquanto trabalha
   const [avisoImport, setAvisoImport] = useState(null)  // { tipo, texto, chave?, ciencia?, tentar?, foto? }
@@ -593,7 +611,7 @@ export default function LancarCompra({ empresaId }) {
   }
 
   // ── totais e rateio ─────────────────────────────────────────────────────
-  const soma = r2(linhas.reduce((s, l) => s + valorLinha(l), 0))
+  const soma = r2(linhas.reduce((s, l) => s + valorLinha(l), 0) + gastos.reduce((s, g) => s + valorGasto(g), 0))
   const total = totalNota.trim() === '' ? soma : r2(num(totalNota))
   const diferenca = r2(total - soma)
 
@@ -604,6 +622,7 @@ export default function LancarCompra({ empresaId }) {
     if (catConta) return [{ categoria: catConta, valor: total }]
     const mapa = new Map()
     for (const l of linhas) mapa.set(l.cat, r2((mapa.get(l.cat) || 0) + valorLinha(l)))
+    for (const g of gastos) mapa.set(g.cat, r2((mapa.get(g.cat) || 0) + valorGasto(g)))
     let lista = [...mapa.entries()].map(([categoria, valor]) => ({ categoria, valor })).filter(x => x.valor > 0)
     if (!lista.length) return [{ categoria: 'Fornecedores', valor: total }]
     lista.sort((a, b) => b.valor - a.valor)
@@ -616,7 +635,7 @@ export default function LancarCompra({ empresaId }) {
     const fecha = r2(total - lista.reduce((s, x) => s + x.valor, 0))   // sobra de arredondamento vai no maior
     if (fecha !== 0 && lista.length) lista[0].valor = r2(lista[0].valor + fecha)
     return lista
-  }, [linhas, total, diferenca, catConta])
+  }, [linhas, gastos, total, diferenca, catConta])
 
   // Parcelas: o total dividido igual (a última leva a sobra), vencendo de mês em mês a partir da primeira.
   const parcelas = useMemo(() => {
@@ -633,7 +652,9 @@ export default function LancarCompra({ empresaId }) {
   const nMaterias = linhas.filter(l => l.tipo === 'materia').length
   const semQtd = linhas.some(l => qtdReal(l) <= 0)
   const semPreco = linhas.some(l => valorLinha(l) <= 0)
-  const podeLancar = !salvando && linhas.length > 0 && fornecedor.trim() && total > 0 && !semQtd
+  const gastoSemValor = gastos.some(g => valorGasto(g) <= 0 || !String(g.descricao || '').trim())
+  const temConteudo = linhas.length > 0 || gastos.length > 0
+  const podeLancar = !salvando && temConteudo && fornecedor.trim() && total > 0 && !semQtd && !gastoSemValor
 
   // ── avisos que evitam erro ──────────────────────────────────────────────
   // Mesma compra já lançada? (mesmo fornecedor e mesmo valor, até 3 dias de diferença)
@@ -707,6 +728,7 @@ export default function LancarCompra({ empresaId }) {
     }
     setLinhas(novas)
     setPendentes(pend)
+    setGastos([])
     setEditandoId(null)
     setRecuperado(false)
     if (n.fornecedor) {
@@ -862,18 +884,18 @@ export default function LancarCompra({ empresaId }) {
   // ── rascunho: a nota em andamento sobrevive a F5, aba fechada e queda de internet ──
   useEffect(() => {
     if (!empresaId) return
-    const temAlgo = linhas.length > 0 || pendentes.length > 0 || fornecedor.trim() || numeroNota.trim() || observacao.trim()
+    const temAlgo = linhas.length > 0 || pendentes.length > 0 || gastos.length > 0 || fornecedor.trim() || numeroNota.trim() || observacao.trim()
     const t = setTimeout(() => {
       try {
         if (!temAlgo) localStorage.removeItem(chaveRascunho(empresaId))
         else localStorage.setItem(chaveRascunho(empresaId), JSON.stringify({
           fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas,
-          linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, totalEsperado, salvoEm: new Date().toISOString(),
+          linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, gastos, totalEsperado, salvoEm: new Date().toISOString(),
         }))
       } catch { /* sem storage (janela anônima): segue sem rascunho */ }
     }, 400)
     return () => clearTimeout(t)
-  }, [empresaId, fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas, linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, totalEsperado])
+  }, [empresaId, fornecedor, numeroNota, observacao, data, modoPag, forma, vencimento, vencMexido, nParc, parcDatas, linhas, totalNota, catConta, editandoId, chaveNota, cnpjNota, pendentes, gastos, totalEsperado])
 
   function limpar() {
     setLinhas([]); setTotalNota(''); setCatConta(''); setFornecedor(''); setNumeroNota(''); setObservacao('')
@@ -881,7 +903,7 @@ export default function LancarCompra({ empresaId }) {
     setModoPag('avista')
     setData(hojeISO()); setVencimento(maisDias(hojeISO(), 7)); setVencMexido(false); setNParc(2); setParcDatas({})
     setEditandoId(null); setRecuperado(false); setBusca(''); setNovo(null); setLigando(null)
-    setChaveNota(''); setCnpjNota(''); setPendentes([]); setTotalEsperado(null); setAvisoImport(null); setChaveInput('')
+    setChaveNota(''); setCnpjNota(''); setPendentes([]); setGastos([]); setTotalEsperado(null); setAvisoImport(null); setChaveInput('')
     try { localStorage.removeItem(chaveRascunho(empresaId)) } catch { /* ignora */ }
   }
 
@@ -900,7 +922,9 @@ export default function LancarCompra({ empresaId }) {
     })
     return {
       fornecedor: nomeForn, data, vencimento, pago: modoPag === 'avista', forma: modoPag === 'avista' ? forma : null,
-      categoria: categoriaDaConta, total, rateio, itens, numero_nota: numeroNota.trim(), observacao: observacao.trim(), chave_nfe: chaveNota || '',
+      categoria: categoriaDaConta, total, rateio, itens,
+      gastos: gastos.map(g => ({ descricao: String(g.descricao).trim(), valor: valorGasto(g), categoria: g.cat })),
+      numero_nota: numeroNota.trim(), observacao: observacao.trim(), chave_nfe: chaveNota || '',
       ...(modoPag === 'parcelado' ? { parcelas } : {}),
     }
   }
@@ -993,9 +1017,13 @@ export default function LancarCompra({ empresaId }) {
         saldo: saldoBase, custoAtual: custoBase,
       }))
     }
-    if (!novas.length) { setErro('Não consegui reabrir essa compra: os itens dela não existem mais no cadastro.'); return }
-    const soma0 = r2(novas.reduce((s, l) => s + valorLinha(l), 0))
+    const gastos0 = (Array.isArray(pl.gastos) ? pl.gastos : []).map((g, i) => ({
+      id: `g${Date.now()}${i}`, descricao: g.descricao, valor: String(g.valor).replace('.', ','), cat: g.categoria || 'Outros',
+    }))
+    if (!novas.length && !gastos0.length) { setErro('Não consegui reabrir essa compra: os itens dela não existem mais no cadastro.'); return }
+    const soma0 = r2(novas.reduce((s, l) => s + valorLinha(l), 0) + gastos0.reduce((s, g) => s + valorGasto(g), 0))
     setLinhas(novas)
+    setGastos(gastos0)
     setFornecedor(reg.fornecedor)
     setNumeroNota(pl.numero_nota || c.numero_nota || '')
     setObservacao(pl.observacao || c.observacao || '')
@@ -1188,7 +1216,12 @@ export default function LancarCompra({ empresaId }) {
                   onClick={() => { setLigando(null); setNovo({ nome: pd.nome || pd.descricao.toLowerCase(), descricao: pd.descricao, unidade: pd.unidade, qtd: String(pd.quantidade ?? '').replace('.', ','), custo: String(pd.custo_unit ?? '').replace('.', ','), minimo: '', pendente: pd.id }) }}>
                   ➕ Cadastrar como matéria-prima
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPendentes(ps => ps.filter(x => x.id !== pd.id))}>Não é item de estoque</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+                  // Não some: vira gasto sem estoque (gasolina, estacionamento…) e entra só na conta, na categoria certa.
+                  const v = pd.total ?? r2((pd.quantidade || 0) * (pd.custo_unit || 0))
+                  setGastos(gs => [...gs, { id: pd.id, descricao: pd.nome || pd.descricao, valor: v > 0 ? String(v).replace('.', ',') : '', cat: palpiteDoGasto(pd.descricao) }])
+                  setPendentes(ps => ps.filter(x => x.id !== pd.id))
+                }}>🧾 Não é estoque (só despesa)</button>
               </div>
               {(ligando?.pendente === pd.id || novo?.pendente === pd.id) && (
                 <div style={{ marginTop: 10 }}>
@@ -1384,7 +1417,37 @@ export default function LancarCompra({ empresaId }) {
           </div>
         )}
 
-        {!linhas.length && !busca.trim() && !carregando && itensDoFornecedor.length === 0 && (
+        {/* Gastos que não são estoque: entram só na conta, cada um na sua categoria. */}
+        {gastos.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>🧾 Só despesa (não entra no estoque)</div>
+            {gastos.map(g => (
+              <div key={g.id} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+                <input value={g.descricao} placeholder="O que foi (ex.: gasolina)" aria-label="Descrição do gasto"
+                  onChange={e => setGastos(gs => gs.map(x => x.id === g.id
+                    // Enquanto ele não escolheu a categoria na mão, ela acompanha o que está escrito.
+                    ? { ...x, descricao: e.target.value, cat: x.catManual ? x.cat : palpiteDoGasto(e.target.value) } : x))}
+                  style={{ ...inp, flex: '2 1 180px', minWidth: 0 }} />
+                <input inputMode="decimal" value={g.valor} placeholder="Valor" aria-label="Valor do gasto"
+                  onChange={e => setGastos(gs => gs.map(x => x.id === g.id ? { ...x, valor: e.target.value } : x))}
+                  style={{ ...inp, flex: '1 1 90px', minWidth: 0, textAlign: 'right' }} />
+                <select value={g.cat} aria-label="Categoria do gasto"
+                  onChange={e => setGastos(gs => gs.map(x => x.id === g.id ? { ...x, cat: e.target.value, catManual: true } : x))}
+                  style={{ ...inp, flex: '2 1 170px', minWidth: 0 }}>
+                  {CATEGORIAS_PAGAR.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button type="button" className="btn btn-secondary btn-sm" aria-label="Tirar gasto"
+                  onClick={() => setGastos(gs => gs.filter(x => x.id !== g.id))}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}
+          onClick={() => setGastos(gs => [...gs, { id: `g${Date.now()}`, descricao: '', valor: '', cat: 'Outros' }])}>
+          + Gasto que não é estoque (gasolina, estacionamento…)
+        </button>
+
+        {!linhas.length && !gastos.length && !busca.trim() && !carregando && itensDoFornecedor.length === 0 && (
           <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-muted)' }}>
             Comece digitando o primeiro item da nota.
           </div>
@@ -1392,7 +1455,7 @@ export default function LancarCompra({ empresaId }) {
       </div>
 
       {/* 3. fechamento */}
-      {linhas.length > 0 && (
+      {temConteudo && (
         <div className="card">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, alignItems: 'end' }}>
             <div>
@@ -1440,6 +1503,7 @@ export default function LancarCompra({ empresaId }) {
             <strong>Ao lançar:</strong>
             <div>📦 Estoque de produtos: {nProdutos ? `${nProdutos} ${nProdutos === 1 ? 'item' : 'itens'}` : 'nada'}</div>
             <div>🥩 Estoque de matéria-prima: {nMaterias ? `${nMaterias} ${nMaterias === 1 ? 'item' : 'itens'}` : 'nada'}</div>
+            {gastos.length > 0 && <div>🧾 Só despesa: {gastos.length} {gastos.length === 1 ? 'gasto' : 'gastos'} ({[...new Set(gastos.map(g => g.cat))].join(', ')})</div>}
             <div>💸 Conta: {brl(total)} a <strong>{fornecedor.trim() || '—'}</strong>{numeroNota.trim() ? ` (NF ${numeroNota.trim()})` : ''} — {
               modoPag === 'avista' ? `paga ${data === hoje ? 'hoje' : `em ${ddmm(data)}`} (${(FORMAS.find(([i]) => i === forma) || [0, forma])[1]})`
                 : modoPag === 'parcelado' ? `${parcelas.length}x, a 1ª vence ${ddmm(parcelas[0]?.vencimento || vencimento)}`
@@ -1462,6 +1526,7 @@ export default function LancarCompra({ empresaId }) {
             </div>
           )}
           {semQtd && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Tem item com quantidade zerada — ajuste ou tire da nota.</div>}
+          {gastoSemValor && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Tem gasto sem descrição ou sem valor.</div>}
           {!fornecedor.trim() && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Falta dizer o fornecedor.</div>}
           {fornecedor.trim() && !semQtd && total <= 0 && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Falta o valor da compra.</div>}
 
@@ -1488,7 +1553,7 @@ export default function LancarCompra({ empresaId }) {
                     style={{ flex: '1 1 200px', minWidth: 0, textAlign: 'left', background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'inherit', font: 'inherit', textDecoration: desfeita ? 'line-through' : 'none' }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>{abre ? '▾' : '▸'} {c.fornecedor}{c.numero_nota ? ` · NF ${c.numero_nota}` : ''}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {ddmm(c.data)} · {(c.itens || []).length} {(c.itens || []).length === 1 ? 'item' : 'itens'} · {c.pago ? 'paga' : 'a prazo'}
+                      {ddmm(c.data)} · {(c.itens || []).length ? `${c.itens.length} ${c.itens.length === 1 ? 'item' : 'itens'}` : 'só despesa'} · {c.pago ? 'paga' : 'a prazo'}
                     </div>
                   </button>
                   <strong style={{ fontSize: 14 }}>{brl(c.total)}</strong>
