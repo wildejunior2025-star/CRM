@@ -147,6 +147,7 @@ Deno.serve(async (req) => {
     if (acao === "diagnostico")       return json(await diagnostico(sb, body?.empresa_id))
     if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
     if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf, body?.comanda_id))
+    if (acao === "simular")           return json(await simular(sb, req, body?.empresa_id, body?.itens))
     if (acao === "consultar")         return json(await consultar(sb, body?.nota_id, body?.ref))
     if (acao === "cancelar")          return json(await cancelar(sb, req, body?.nota_id, body?.justificativa))
     return json({ ok: false, error: `ação desconhecida: ${acao}` }, 400)
@@ -414,10 +415,23 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   const ehUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
   const idsProd = [...new Set(itensPed.map(it => String(it.produto_id ?? it.id ?? "")).filter(ehUuid))]
   const ncmPorProduto: Record<string, string> = {}
+  // TRIBUTAÇÃO POR PRODUTO (27/10/2026, contador da Agv): bebida e picolé vêm com
+  // ICMS-ST pago na compra, e saem com CSOSN 500, CFOP 5405 e CEST. Cada produto
+  // pode ter cfop/csosn/origem/cest próprios; o que ficar vazio usa o padrão da loja.
+  const fiscalPorProduto: Record<string, { cfop?: string; csosn?: string; origem?: string; cest?: string }> = {}
   if (idsProd.length) {
-    const { data: prods } = await sb.from("produtos").select("id, ncm").in("id", idsProd).eq("empresa_id", ped.empresa_id)
-    for (const p of prods ?? []) { const n = soDigitos(p.ncm); if (n.length === 8) ncmPorProduto[p.id] = n }
+    const { data: prods } = await sb.from("produtos").select("id, ncm, cfop, csosn, origem, cest").in("id", idsProd).eq("empresa_id", ped.empresa_id)
+    for (const p of prods ?? []) {
+      const n = soDigitos(p.ncm); if (n.length === 8) ncmPorProduto[p.id] = n
+      const f: { cfop?: string; csosn?: string; origem?: string; cest?: string } = {}
+      if (soDigitos(p.cfop).length === 4) f.cfop = soDigitos(p.cfop)
+      if (soDigitos(p.csosn).length === 3) f.csosn = soDigitos(p.csosn)
+      if (/^[0-2]$/.test(String(p.origem ?? ""))) f.origem = String(p.origem)
+      if (soDigitos(p.cest).length === 7) f.cest = soDigitos(p.cest)
+      fiscalPorProduto[p.id] = f
+    }
   }
+  const fiscalDoItem = (it: any) => fiscalPorProduto[String(it.produto_id ?? it.id ?? "")] ?? {}
 
   const uf = String(emp?.estado ?? "RN").toUpperCase()
   const ncmDoItem = (it: any) => ncmPorProduto[String(it.produto_id ?? it.id ?? "")] ?? ncm
@@ -437,12 +451,14 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     const qtd = Number(it.quantidade ?? it.qtd ?? 1) || 1
     const unit = Number(it.preco_unitario ?? it.preco ?? 0) || 0
     const bruto = Number(it.subtotal ?? (unit * qtd)) || unit * qtd
+    const fi = fiscalDoItem(it)
     return {
       numero_item: String(idx + 1),
       codigo_produto: String(it.codigo ?? it.id ?? idx + 1),
       descricao: descricaoDoItem(String(it.nome ?? it.descricao ?? "Item")),
       codigo_ncm: ncmDoItem(it),
-      cfop,
+      ...(fi.cest ? { cest: fi.cest } : {}),
+      cfop: fi.cfop ?? cfop,
       unidade_comercial: "UN",
       unidade_tributavel: "UN",
       quantidade_comercial: qtd,
@@ -450,8 +466,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       valor_unitario_comercial: unit,
       valor_unitario_tributavel: unit,
       valor_bruto: Number(bruto.toFixed(2)),
-      icms_origem: origem,
-      icms_situacao_tributaria: csosn,
+      icms_origem: fi.origem ?? origem,
+      icms_situacao_tributaria: fi.csosn ?? csosn,
       valor_total_tributos: Number((bruto * pctDoItem(it) / 100).toFixed(2)),
     }
   })
@@ -556,6 +572,67 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
 
   const okStatus = patch.status === "autorizada"
   return { ok: okStatus, status: patch.status, nota, mensagem: patch.motivo_rejeicao ?? undefined }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SIMULAR — manda uma nota de TESTE pro ambiente de HOMOLOGAÇÃO da SEFAZ
+// ─────────────────────────────────────────────────────────────────────
+// Pra provar uma regra fiscal nova (ex.: ICMS-ST com CSOSN 500 e CEST) sem emitir
+// documento de verdade numa loja em produção. Só aceita a chave de serviço (quem
+// roda isto é o desenvolvedor, não a loja); não grava nada em nfce_notas. A nota
+// de homologação não tem valor fiscal.
+// itens: [{ nome, preco, quantidade, ncm, cfop, csosn, cest, origem }]
+async function simular(sb: any, req: Request, empresaId: string, itensIn: any[]) {
+  const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")
+  // O gateway já conferiu a assinatura do JWT (verify_jwt); aqui só olho o papel.
+  // Cobre as duas chaves de serviço do projeto (a antiga em JWT e a que o servidor injeta).
+  let papel = ""
+  try { papel = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")))?.role ?? "" } catch { papel = "" }
+  if (papel !== "service_role") return { ok: false, error: "só com a chave de serviço" }
+  if (!empresaId || !Array.isArray(itensIn) || !itensIn.length) return { ok: false, error: "empresa_id e itens obrigatórios" }
+
+  const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", empresaId).maybeSingle()
+  const { data: fis } = await sb.from("empresa_fiscal").select("*").eq("empresa_id", empresaId).maybeSingle()
+  const cnpj = soDigitos(emp?.cnpj)
+  const token = await tokenDaLoja(sb, empresaId, cnpj, "homologacao")
+  if (!token) return { ok: false, error: "sem token de homologação desta loja" }
+
+  let total = 0
+  const items = itensIn.map((it: any, idx: number) => {
+    const qtd = Number(it.quantidade ?? 1) || 1
+    const unit = Number(it.preco ?? 0) || 0
+    const bruto = Number((qtd * unit).toFixed(2))
+    total += bruto
+    return {
+      numero_item: String(idx + 1),
+      codigo_produto: String(idx + 1),
+      descricao: descricaoDoItem(String(it.nome ?? "Item")),
+      codigo_ncm: soDigitos(it.ncm) || (fis?.ncm_padrao ?? "21069090"),
+      ...(soDigitos(it.cest).length === 7 ? { cest: soDigitos(it.cest) } : {}),
+      cfop: soDigitos(it.cfop) || (fis?.cfop_padrao ?? "5102"),
+      unidade_comercial: "UN", unidade_tributavel: "UN",
+      quantidade_comercial: qtd, quantidade_tributavel: qtd,
+      valor_unitario_comercial: unit, valor_unitario_tributavel: unit,
+      valor_bruto: bruto,
+      icms_origem: String(it.origem ?? fis?.origem_padrao ?? "0"),
+      icms_situacao_tributaria: soDigitos(it.csosn) || (fis?.csosn_padrao ?? "102"),
+      valor_total_tributos: Number((bruto * 0.35).toFixed(2)),
+    }
+  })
+
+  const ref = `teste-${Date.now()}`
+  const res = await fetch(`${FOCUS_HOST.homologacao}/v2/nfce?ref=${ref}`, {
+    method: "POST",
+    headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      cnpj_emitente: cnpj, data_emissao: new Date().toISOString(),
+      natureza_operacao: "VENDA AO CONSUMIDOR", presenca_comprador: "1", modalidade_frete: "9", local_destino: "1",
+      items, formas_pagamento: [{ forma_pagamento: "01", valor_pagamento: Number(total.toFixed(2)) }],
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  const patch = mapearRetornoFocus(data, "homologacao")
+  return { ok: patch.status === "autorizada", status: patch.status, motivo: patch.motivo_rejeicao ?? null, ref, resposta: data }
 }
 
 // ─────────────────────────────────────────────────────────────────────
