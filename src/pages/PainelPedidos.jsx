@@ -3627,21 +3627,65 @@ const FORMAS_TROCA = [
   { id: 'fiado', label: '\ud83d\udcd2 Fiado', soBalcao: true },
 ]
 
+// Formas que podem entrar numa divisao (fiado fica de fora: divida e do pedido inteiro).
+const FORMAS_DIVIDIR = FORMAS_TROCA.filter(f => f.id !== 'fiado')
+const paraNum = (v) => Math.round(parseFloat(String(v ?? '').replace(',', '.')) * 100) / 100
+const paraTxt = (n) => (Number.isFinite(n) ? n.toFixed(2).replace('.', ',') : '')
+
 function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
-  const [forma, setForma] = useState(pedido?.forma_pagamento || 'dinheiro')
+  const [forma, setForma] = useState(pedido?.forma_pagamento && pedido.forma_pagamento !== 'dividido' ? pedido.forma_pagamento : 'dinheiro')
   const [troco, setTroco] = useState(pedido?.troco_para ? String(pedido.troco_para).replace('.', ',') : '')
   const [salvando, setSalvando] = useState(false)
+  // Dividir em 2 formas (o cliente pediu com uma e pagou com duas na porta).
+  const partesAntes = Array.isArray(pedido?.pagamentos) && pedido.pagamentos.length === 2 ? pedido.pagamentos : null
+  const [dividir, setDividir] = useState(!!partesAntes)
+  const [formaA, setFormaA] = useState(partesAntes?.[0]?.forma ?? 'debito')
+  const [formaB, setFormaB] = useState(partesAntes?.[1]?.forma ?? 'dinheiro')
+  const [valorA, setValorA] = useState(partesAntes ? paraTxt(Number(partesAntes[0].valor)) : '')
+  const [trocoDiv, setTrocoDiv] = useState(() => {
+    const t = partesAntes?.find(x => x.forma === 'dinheiro')?.troco_para
+    return t ? String(t).replace('.', ',') : ''
+  })
   if (!pedido) return null
 
-  const trocoNum = Math.round(parseFloat(String(troco).replace(',', '.')) * 100) / 100
+  const totalPed = Math.round(Number(pedido.total || 0) * 100) / 100
+  const trocoNum = paraNum(troco)
   const trocoValido = !troco || (Number.isFinite(trocoNum) && trocoNum >= Number(pedido.total || 0))
 
+  // Divisao: a parte B e sempre o que sobra, entao a soma fecha sozinha.
+  const vA = paraNum(valorA)
+  const vB = Number.isFinite(vA) ? Math.round((totalPed - vA) * 100) / 100 : NaN
+  const divOk = dividir && Number.isFinite(vA) && vA > 0 && vB > 0 && formaA !== formaB
+  const formaDin = formaA === 'dinheiro' ? 'A' : formaB === 'dinheiro' ? 'B' : null
+  const valorDin = formaDin === 'A' ? vA : formaDin === 'B' ? vB : 0
+  const trocoDivNum = paraNum(trocoDiv)
+  const trocoDivValido = !trocoDiv || !formaDin || (Number.isFinite(trocoDivNum) && trocoDivNum >= valorDin)
+  const podeSalvar = dividir ? (divOk && trocoDivValido) : trocoValido
+
   async function confirmar() {
-    if (!trocoValido) return
+    if (!podeSalvar) return
     setSalvando(true)
-    await onSalvar(pedido, forma, forma === 'dinheiro' && troco ? trocoNum : null)
+    if (dividir) {
+      const partes = [
+        { forma: formaA, valor: vA, ...(formaA === 'dinheiro' && trocoDiv ? { troco_para: trocoDivNum } : {}) },
+        { forma: formaB, valor: vB, ...(formaB === 'dinheiro' && trocoDiv ? { troco_para: trocoDivNum } : {}) },
+      ]
+      await onSalvar(pedido, 'dividido', null, partes)
+    } else {
+      await onSalvar(pedido, forma, forma === 'dinheiro' && troco ? trocoNum : null)
+    }
     setSalvando(false)
   }
+
+  const seletorForma = (valor, onChange) => (
+    <select value={valor} onChange={e => onChange(e.target.value)}
+      style={{ flex: 1, minWidth: 0, padding: '9px 8px', borderRadius: 8, border: '1.5px solid var(--border)',
+        background: 'var(--surface)', color: 'var(--text)', fontSize: 14, fontWeight: 700 }}>
+      {FORMAS_DIVIDIR.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+    </select>
+  )
+  const campoValor = { width: 110, padding: '9px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+    background: 'var(--surface)', color: 'var(--text)', fontSize: 14, fontWeight: 700, textAlign: 'right' }
 
   return (
     <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 220 }}>
@@ -3653,6 +3697,7 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
           Estava como <strong>{nomeForma(pedido.forma_pagamento)}</strong> &middot; total {fmt(pedido.total)}
         </p>
 
+        {!dividir && (
         <div style={{ display: 'grid', gap: 8 }}>
           {FORMAS_TROCA.filter(f => !f.soBalcao || pedido.origem !== 'ifood').map(f => (
             <button key={f.id} type="button" onClick={() => setForma(f.id)}
@@ -3665,8 +3710,55 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
             </button>
           ))}
         </div>
+        )}
 
-        {forma === 'dinheiro' && (
+        {pedido.origem !== 'ifood' && (
+          <button type="button" onClick={() => setDividir(d => !d)}
+            style={{ marginTop: 10, width: '100%', padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
+              fontSize: 13.5, fontWeight: 800, border: `1.5px dashed ${dividir ? 'var(--primary)' : 'var(--border)'}`,
+              background: dividir ? 'var(--primary-bg)' : 'transparent', color: dividir ? 'var(--primary)' : 'var(--text)' }}>
+            {dividir ? '✔ Dividido em 2 formas (toque pra voltar a 1 só)' : '✂️ Pagou em 2 formas? Dividir'}
+          </button>
+        )}
+
+        {dividir && (
+          <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {seletorForma(formaA, setFormaA)}
+              <input value={valorA} onChange={e => setValorA(e.target.value)} placeholder="R$" inputMode="decimal" style={campoValor} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {seletorForma(formaB, setFormaB)}
+              <div style={{ ...campoValor, border: '1.5px solid transparent', background: 'transparent' }}>
+                {vB > 0 ? fmt(vB) : '—'}
+              </div>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+              Digite só a primeira parte; a segunda é o que sobra do total ({fmt(totalPed)}).
+            </p>
+            {formaA === formaB && <p style={{ fontSize: 12, color: 'var(--danger)', margin: 0 }}>Escolha duas formas diferentes.</p>}
+            {Number.isFinite(vA) && vA > 0 && !(vB > 0) && (
+              <p style={{ fontSize: 12, color: 'var(--danger)', margin: 0 }}>A primeira parte tem que ser menor que o total.</p>
+            )}
+            {formaDin && (
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 700 }}>Dinheiro: pagou com quanto? (troco)</label>
+                <input value={trocoDiv} onChange={e => setTrocoDiv(e.target.value)} placeholder="deixe vazio se pagou certo"
+                  inputMode="decimal"
+                  style={{ width: '100%', marginTop: 4, padding: '9px 11px', borderRadius: 8,
+                    border: `1.5px solid ${trocoDivValido ? 'var(--border)' : 'var(--danger)'}`,
+                    background: 'var(--surface)', color: 'var(--text)', fontSize: 14 }} />
+                {!trocoDivValido && (
+                  <p style={{ fontSize: 12, color: 'var(--danger)', margin: '4px 0 0' }}>
+                    Tem que ser pelo menos a parte em dinheiro ({fmt(valorDin)}).
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!dividir && forma === 'dinheiro' && (
           <div style={{ marginTop: 12 }}>
             <label style={{ fontSize: 13, fontWeight: 700 }}>Pagou com quanto? (troco)</label>
             <input value={troco} onChange={e => setTroco(e.target.value)} placeholder="deixe vazio se pagou certo"
@@ -3688,9 +3780,9 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
               border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
             Cancelar
           </button>
-          <button type="button" onClick={confirmar} disabled={salvando || !trocoValido}
+          <button type="button" onClick={confirmar} disabled={salvando || !podeSalvar}
             style={{ flex: 1, padding: 11, borderRadius: 9, cursor: salvando ? 'wait' : 'pointer', fontWeight: 800,
-              border: 'none', background: 'var(--primary)', color: '#fff', opacity: salvando || !trocoValido ? 0.6 : 1 }}>
+              border: 'none', background: 'var(--primary)', color: '#fff', opacity: salvando || !podeSalvar ? 0.6 : 1 }}>
             {salvando ? 'Salvando...' : 'Confirmar'}
           </button>
         </div>
@@ -7353,7 +7445,7 @@ export default function PainelPedidos() {
 
   // Corrige o que o cliente REALMENTE pagou. Mexe so no pagamento: a conta do
   // caixa (mig 0334) le este campo, entao e isto que faz o dia fechar.
-  async function salvarTrocaPagamento(pedido, forma, trocoPara) {
+  async function salvarTrocaPagamento(pedido, forma, trocoPara, partes = null) {
     // Fiado so vira por aqui no pedido de balcao COM cliente, e a divida entra
     // junto (mesma regra do + Vender): sem a linha em `vendas` ninguem cobra.
     if (forma === 'fiado') {
@@ -7396,7 +7488,11 @@ export default function PainelPedidos() {
         }
       }
     }
-    const { error } = await supabase.from('pedidos_delivery').update({
+    // Com `partes` (2 formas) o gatilho do banco valida a soma e marca 'dividido'.
+    const { error } = await supabase.from('pedidos_delivery').update(partes ? {
+      forma_pagamento: 'dividido',
+      pagamentos: partes,
+    } : {
       forma_pagamento: forma,
       // Pagamento dividido deixa de existir quando se escolhe uma forma unica —
       // senao o caixa somaria as partes antigas E a nova.
