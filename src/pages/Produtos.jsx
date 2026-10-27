@@ -925,8 +925,17 @@ export default function Produtos() {
   // assim, em 6 lojas.
   //
   // Agora os dois botões escrevem nos DOIS campos: pausou aqui, pausou lá.
+  const semEstoquePausado = (p) => !!p.pausado_por_estoque && p.controla_estoque !== false
+    && Number(saldoLista.has(p.id) ? saldoLista.get(p.id) : 0) <= 0
+
   async function togglePausar(p) {
     const novo = !p.ativo
+    // Pausado porque o estoque zerou: não volta na mão (o banco também recusa, mig 0419). Volta sozinho
+    // quando entrar mercadoria — Lançar compra ou Contar estoque.
+    if (novo && semEstoquePausado(p)) {
+      window.alert(`"${p.nome}" está pausado porque o estoque zerou.\n\nPra voltar a vender, lance a compra (Estoque → Lançar compra) ou acerte na contagem — ele volta sozinho quando tiver estoque.`)
+      return
+    }
     setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: novo, disponivel_delivery: novo } : x))
     const { error } = await supabase.from('produtos')
       .update({ ativo: novo, disponivel_delivery: novo }).eq('id', p.id)
@@ -2158,6 +2167,12 @@ export default function Produtos() {
                     >
                       {p.ativo ? '⏸' : '▶'}<span className="btn-label">{p.ativo ? ' Pausar' : ' Ativar'}</span>
                     </button>
+                    {!p.ativo && semEstoquePausado(p) && (
+                      <span title="Pausado porque o estoque zerou — volta sozinho quando entrar mercadoria"
+                        style={{ display: 'block', marginTop: 4, fontSize: 11.5, fontWeight: 700, color: 'var(--danger, #dc2626)' }}>
+                        📦 sem estoque
+                      </span>
+                    )}
                   </td>
                   <td className="prod-acoes-cell">
                     <div className="prod-acoes">
@@ -2782,7 +2797,14 @@ export default function Produtos() {
                   <label style={{ display: 'block', marginBottom: 6 }}>Disponibilidade</label>
                   <button
                     type="button"
-                    onClick={() => setForm(f => ({ ...f, ativo: !f.ativo }))}
+                    onClick={() => {
+                      const orig = editingId ? produtos.find(x => x.id === editingId) : null
+                      if (!form.ativo && orig && !orig.ativo && semEstoquePausado(orig)) {
+                        window.alert(`"${orig.nome}" está pausado porque o estoque zerou.\n\nPra voltar a vender, lance a compra (Estoque → Lançar compra) ou acerte na contagem — ele volta sozinho quando tiver estoque.`)
+                        return
+                      }
+                      setForm(f => ({ ...f, ativo: !f.ativo }))
+                    }}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer',
                       padding: '9px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14,
