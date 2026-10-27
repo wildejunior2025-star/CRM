@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import LancarNotaIA from '../components/LancarNotaIA'
 import '../components/Page.css'
@@ -49,6 +49,21 @@ function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
   )
 }
 
+const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+// Figurinha da categoria do CATÁLOGO (o nome é livre em cada loja, então vai pelo jeitão do nome).
+const FIGURA_PRODUTO = [
+  [/retorn|ks\b|vasilhame/, '🍾'], [/cervej|chopp/, '🍺'], [/vinho|destil|dose|whisk|vodka|cacha/, '🍷'],
+  [/suco/, '🧃'], [/agua|bebida|refri/, '🥤'], [/picol|sorvet|acai|gelad/, '🍦'], [/chocolat|bombom/, '🍫'],
+  [/confeit|bala|chiclet|halls/, '🍬'], [/doce|sobremesa|pudim/, '🍮'], [/salgad|snack|biscoit|bolach/, '🥨'],
+  [/cigarr|tabac|seda/, '🚬'], [/embalag|descart/, '📦'], [/limpez|higien/, '🧴'], [/gas\b|carvao/, '🔥'],
+  [/carne|frios|acougue/, '🥩'], [/padaria|pao/, '🍞'], [/mercearia|mercad/, '🛒'],
+]
+const iconeProduto = (cat) => {
+  const n = String(cat || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  return FIGURA_PRODUTO.find(([re]) => re.test(n))?.[1] || '📦'
+}
+
 const MOTIVOS_PADRAO = {
   entrada: ['compra', 'devolucao', 'bonificacao', 'ajuste_inventario'],
   saida: ['venda', 'perda', 'vencimento', 'consumo', 'brinde', 'ajuste_inventario'],
@@ -68,6 +83,8 @@ export default function Estoque({ embutido = false }) {
   const [produtos, setProdutos] = useState([])
   const [clientes, setClientes] = useState([])
   const [cascoSaldo, setCascoSaldo] = useState([])
+  const [custos, setCustos] = useState({})          // produto_id -> preco_custo (pro valor parado)
+  const [catAberta, setCatAberta] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -98,7 +115,6 @@ export default function Estoque({ embutido = false }) {
   // com 51 itens no celular — onde a coluna Categoria nem aparece — achar um
   // produto era rolar a lista inteira com o dedo.
   const [buscaEstoque, setBuscaEstoque] = useState('')
-  const [categoriaEstoque, setCategoriaEstoque] = useState('')
   const [motivoTab, setMotivoTab] = useState('entrada')
   const [novoMotivo, setNovoMotivo] = useState('')
   const [savingMotivo, setSavingMotivo] = useState(false)
@@ -153,8 +169,9 @@ export default function Estoque({ embutido = false }) {
     setLoading(true)
     setError(null)
 
-    const [saldoRes, produtosRes, clientesRes, cascoRes] = await Promise.all([
-      supabase.from('estoque_saldo').select('*').order('nome'),
+    const [saldoRes, produtosRes, clientesRes, cascoRes, custoRes] = await Promise.all([
+      // fetchAll: loja grande passa de 1000 linhas e o resto sumia da tela sem aviso.
+      fetchAll(() => supabase.from('estoque_saldo').select('*').order('nome').order('produto_id')),
       supabase
         .from('produtos')
         .select('id, nome, controla_casco')
@@ -162,6 +179,9 @@ export default function Estoque({ embutido = false }) {
         .order('nome'),
       supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome'),
       supabase.from('casco_saldo').select('*').order('cliente_nome'),
+      empresaId
+        ? fetchAll(() => supabase.from('produtos').select('id, preco_custo').eq('empresa_id', empresaId).eq('controla_estoque', true).order('id'))
+        : Promise.resolve({ data: [] }),
     ])
 
     const firstError =
@@ -172,6 +192,7 @@ export default function Estoque({ embutido = false }) {
     setProdutos(produtosRes.data ?? [])
     setClientes(clientesRes.data ?? [])
     setCascoSaldo((cascoRes.data ?? []).filter((c) => c.saldo_cascos !== 0))
+    setCustos(Object.fromEntries((custoRes.data ?? []).map((p) => [p.id, p.preco_custo])))
 
     setLoading(false)
   }
@@ -179,7 +200,7 @@ export default function Estoque({ embutido = false }) {
   useEffect(() => {
     loadAll()
     loadMotivos()
-  }, [])
+  }, [empresaId])
 
   useEffect(() => { carregarUsoEstoque() }, [empresaId])
 
@@ -232,12 +253,6 @@ export default function Estoque({ embutido = false }) {
   }
   const nZerado = saldoControlado.filter((s) => situacaoDe(s) === 'zerado').length
   const nBaixo = saldoControlado.filter((s) => situacaoDe(s) === 'baixo').length
-  // Numa loja de conveniência a lista passa de cem itens, e o que o dono quer
-  // saber é só "o que eu preciso comprar hoje" (pedido do usuário, 16/10/2026).
-  // As categorias que REALMENTE têm produto com controle de estoque. Listar
-  // todas as do catálogo encheria o seletor de opção que não mostra nada.
-  const categoriasEstoque = [...new Set(saldoControlado.map((s) => s.categoria).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
   // Sem acento e sem caixa: quem digita "agua" tem que achar "Água com Gás".
   const semAcento = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
@@ -245,12 +260,29 @@ export default function Estoque({ embutido = false }) {
 
   const saldoFiltrado = saldoControlado.filter((s) => {
     if (filtroEstoque !== 'todos' && situacaoDe(s) !== filtroEstoque) return false
-    if (categoriaEstoque && s.categoria !== categoriaEstoque) return false
     // A busca olha o nome E a categoria: digitar "cerveja" acha o que está
     // naquela prateleira, mesmo sem saber o nome exato da marca.
     if (termoEstoque && !semAcento(`${s.nome} ${s.categoria ?? ''}`).includes(termoEstoque)) return false
     return true
   })
+
+  // Cartões por categoria, igual às matérias-primas (pedido do Wilde, 27/10/2026): subtotal em R$ (saldo ×
+  // custo), % do estoque e quantos estão baixos/zerados. O total parado fica em cima.
+  const custoDe = (id) => Number(custos[id] || 0)
+  const valorDe = (s) => Math.max(0, Number(s.quantidade_atual || 0)) * custoDe(s.produto_id)
+  const totalProdutos = saldoControlado.reduce((t, s) => t + valorDe(s), 0)
+  const gruposProdutos = (() => {
+    const mapa = new Map()
+    for (const s of saldoFiltrado) {
+      const cat = s.categoria && s.categoria !== 'outros' ? s.categoria : 'Sem categoria'
+      if (!mapa.has(cat)) mapa.set(cat, { cat, itens: [], total: 0, alerta: 0 })
+      const g = mapa.get(cat)
+      g.itens.push(s)
+      g.total += valorDe(s)
+      if (situacaoDe(s) !== 'ok') g.alerta++
+    }
+    return [...mapa.values()].sort((a, b) => b.total - a.total || a.cat.localeCompare(b.cat, 'pt-BR'))
+  })()
 
   async function handleMovSubmit(e) {
     e.preventDefault()
@@ -405,7 +437,10 @@ export default function Estoque({ embutido = false }) {
       )}
 
       {usaEstoque && (<>
-      <h2 style={{ fontSize: 16, marginBottom: 8 }}>Saldo por produto</h2>
+      <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', border: '2px solid var(--primary)', backgroundImage: 'linear-gradient(rgba(124,58,237,.08), rgba(124,58,237,.08))' }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Total parado em produtos</span>
+        <strong style={{ fontSize: 24, color: 'var(--primary)' }}>{brl(totalProdutos)}</strong>
+      </div>
       {/* Filtro: numa conveniência a lista passa de cem itens e o dono abre a
           tela pra saber UMA coisa — o que precisa comprar hoje. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -448,96 +483,89 @@ export default function Estoque({ embutido = false }) {
             color: 'var(--text)', fontSize: 14,
           }}
         />
-        {categoriasEstoque.length > 1 && (
-          <select
-            value={categoriaEstoque}
-            onChange={(e) => setCategoriaEstoque(e.target.value)}
-            aria-label="Filtrar por categoria"
-            style={{
-              flex: '0 1 170px', padding: '9px 10px', borderRadius: 10,
-              border: '1.5px solid var(--border)',
-              background: categoriaEstoque ? 'var(--primary)' : 'var(--surface)',
-              color: categoriaEstoque ? '#fff' : 'var(--text)',
-              fontSize: 14, fontWeight: categoriaEstoque ? 700 : 400, cursor: 'pointer',
-            }}
-          >
-            <option value="">Todas as categorias</option>
-            {categoriasEstoque.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        )}
       </div>
-      {(termoEstoque || categoriaEstoque) && (
+      {termoEstoque && (
         <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '-4px 0 10px' }}>
           Mostrando <strong>{saldoFiltrado.length}</strong> de {saldoControlado.length} produtos.{' '}
-          <button type="button" onClick={() => { setBuscaEstoque(''); setCategoriaEstoque('') }}
+          <button type="button" onClick={() => setBuscaEstoque('')}
             style={{ border: 0, background: 'transparent', color: 'var(--primary)', cursor: 'pointer', font: 'inherit', fontWeight: 700, padding: 0 }}>
             limpar
           </button>
         </p>
       )}
-      <div className="data-table tabela-estoque" style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 24 }}>
         {loading ? (
-          <div className="empty-state">Carregando...</div>
+          <div className="card empty-state">Carregando...</div>
         ) : saldoControlado.length === 0 ? (
-          <div className="empty-state">Nenhum produto com controle de estoque. Ligue o "Controla estoque" no produto (Catálogo) pra ele aparecer aqui.</div>
-        ) : saldoFiltrado.length === 0 ? (
-          <div className="empty-state">
-            {termoEstoque || categoriaEstoque
-              ? `Nenhum produto ${termoEstoque ? `com "${buscaEstoque.trim()}"` : ''}${termoEstoque && categoriaEstoque ? ' ' : ''}${categoriaEstoque ? `em ${categoriaEstoque}` : ''}.`
+          <div className="card empty-state">Nenhum produto com controle de estoque. Ligue o "Controla estoque" no produto (Catálogo) pra ele aparecer aqui.</div>
+        ) : gruposProdutos.length === 0 ? (
+          <div className="card empty-state">
+            {termoEstoque
+              ? `Nenhum produto com "${buscaEstoque.trim()}".`
               : filtroEstoque === 'baixo'
                 ? 'Nenhum produto no mínimo. Está tudo abastecido.'
                 : 'Nenhum produto zerado.'}
           </div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Produto</th>
-                <th className="col-extra">Categoria</th>
-                <th>Estoque atual</th>
-                <th className="col-extra">Estoque mínimo</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {saldoFiltrado.map((s) => {
-                // Sem mínimo definido não existe "baixo": era por isso que a
-                // tela pintava TODA linha de vermelho quando mínimo era 0.
-                const sit = situacaoDe(s)
-                const zerado = sit === 'zerado'
-                const baixo = sit === 'baixo'
-                return (
-                  <tr key={s.produto_id}>
-                    <td>
-                      {s.nome}
-                      {/* No celular a coluna Categoria some. Ela volta aqui como
-                          legenda — é o que diz de qual prateleira é o item. */}
-                      {s.categoria && <span className="so-no-celular">{s.categoria}</span>}
-                    </td>
-                    <td className="col-extra">{s.categoria}</td>
-                    <td>
-                      {s.quantidade_atual}
-                      {/* No celular a coluna do mínimo some, e sem ele o "Estoque
-                          baixo" fica sem referência. Aqui ele volta como legenda. */}
-                      {Number(s.estoque_minimo) > 0 && (
-                        <span className="so-no-celular"> mín. {s.estoque_minimo}</span>
-                      )}
-                    </td>
-                    <td className="col-extra">{s.estoque_minimo}</td>
-                    <td>
-                      <span
-                        className={`badge ${zerado || baixo ? 'badge-danger' : 'badge-success'}`}
-                      >
-                        {zerado ? 'Sem estoque' : baixo ? 'Estoque baixo' : 'Ok'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {gruposProdutos.map((g) => {
+              // Buscando ou filtrando = abre tudo que achou; senão respeita o toque dele.
+              const aberto = !!termoEstoque || filtroEstoque !== 'todos' || catAberta.has(g.cat)
+              const pct = totalProdutos > 0 ? Math.round((g.total / totalProdutos) * 100) : 0
+              return (
+                <div key={g.cat} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <button type="button" aria-expanded={aberto}
+                    onClick={() => setCatAberta((s) => { const n = new Set(s); n.has(g.cat) ? n.delete(g.cat) : n.add(g.cat); return n })}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 14px', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
+                    <span style={{ fontSize: 24 }}>{iconeProduto(g.cat)}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 800, fontSize: 15 }}>{g.cat}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        {g.itens.length} {g.itens.length === 1 ? 'item' : 'itens'}
+                        {g.alerta > 0 && <b style={{ color: 'var(--danger, #dc2626)', marginLeft: 8 }}>⚠️ {g.alerta} pra repor</b>}
                       </span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                    </span>
+                    <span style={{ textAlign: 'right' }}>
+                      <strong style={{ display: 'block', fontSize: 17 }}>{brl(g.total)}</strong>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{pct}% do estoque</span>
+                    </span>
+                    <span style={{ fontSize: 14, color: 'var(--text-muted)', width: 14 }}>{aberto ? '▾' : '▸'}</span>
+                  </button>
+                  {aberto && (
+                    <div style={{ borderTop: '1px solid var(--border)' }}>
+                      {g.itens.map((s) => {
+                        const sit = situacaoDe(s)
+                        const qtd = Number(s.quantidade_atual || 0)
+                        const custo = custoDe(s.produto_id)
+                        return (
+                          <div key={s.produto_id} style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)',
+                            ...(sit === 'zerado' ? { background: 'rgba(220,38,38,.05)', boxShadow: 'inset 3px 0 0 #dc2626' } : sit === 'baixo' ? { boxShadow: 'inset 3px 0 0 #f59e0b' } : {}) }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
+                              <span style={{ fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{s.nome}</span>
+                              <strong style={{ whiteSpace: 'nowrap' }}>{custo > 0 ? brl(valorDe(s)) : '—'}</strong>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 3, fontSize: 13.5 }}>
+                              <span style={{ fontWeight: 700, color: qtd < 0 ? 'var(--danger)' : 'var(--text)' }}>{qtd.toLocaleString('pt-BR')} un</span>
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                {custo > 0 ? `· ${brl(custo)} / un` : <span style={{ color: '#b45309' }}>· sem custo</span>}
+                                {Number(s.estoque_minimo) > 0 && ` · mín. ${s.estoque_minimo}`}
+                              </span>
+                              {sit !== 'ok' && (
+                                <span style={{ padding: '2px 7px', borderRadius: 6, fontSize: 11.5, fontWeight: 700,
+                                  background: sit === 'zerado' ? 'rgba(220,38,38,.12)' : 'rgba(245,158,11,.15)', color: sit === 'zerado' ? 'var(--danger, #dc2626)' : '#b45309' }}>
+                                  {sit === 'zerado' ? '⚠️ sem estoque' : '⚠️ baixo'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
       </>)}
