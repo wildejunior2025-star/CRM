@@ -203,6 +203,10 @@ export default function PresencialSalao() {
   // aqui e no cardápio da mesa — a Loja Online e a Nova venda seguem exigindo.
   const [semObrigatorios, setSemObrigatorios] = useState(false)
   const [semCozinha, setSemCozinha] = useState(false)
+  // Loja desligou em Funcionários (mig 0412): garçom não tira o que já lançou.
+  // A trava de verdade é no banco; aqui só some o botão que não vai funcionar.
+  const [garcomApagaEnviado, setGarcomApagaEnviado] = useState(true)
+  const garcomNaoTira = profile?.perfil === 'garcom' && !garcomApagaEnviado
   const [avisoImpressao, setAvisoImpressao] = useState(null) // remessa que nao saiu no papel
   const [reimprimindo, setReimprimindo] = useState(false)
   const [reimpAberto, setReimpAberto] = useState(false)   // escolher o que reimprimir
@@ -479,7 +483,7 @@ export default function PresencialSalao() {
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
     const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento, garcom_apaga_enviado').eq('id', empresaId).single(),
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
       supabase.rpc('mp_conectado_loja'),
@@ -506,6 +510,7 @@ export default function PresencialSalao() {
       setEmpresaNome(emp.data.nome || '')
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setSemCozinha(!!emp.data.presencial_sem_cozinha)
+      setGarcomApagaEnviado(emp.data.garcom_apaga_enviado !== false)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
       // Vales (Pluxee, Alelo, VR, Ticket): só os que a loja ligou em Minha Loja → Pagamento.
       const ligadas = Array.isArray(emp.data.formas_pagamento) ? emp.data.formas_pagamento : []
@@ -1219,8 +1224,10 @@ export default function PresencialSalao() {
     if (!id) return
     const { data: atual } = await supabase.from('comanda_itens').select('quantidade').eq('id', id).single()
     const q = Number(atual?.quantidade ?? 1)
-    if (q > 1) await supabase.from('comanda_itens').update({ quantidade: q - 1 }).eq('id', id)
-    else await supabase.from('comanda_itens').delete().eq('id', id)
+    const { error } = q > 1
+      ? await supabase.from('comanda_itens').update({ quantidade: q - 1 }).eq('id', id)
+      : await supabase.from('comanda_itens').delete().eq('id', id)
+    if (error) { window.alert(recadoDeErro(error, 'tirar o item')); return }
     setLancadosAgora(prev => prev.flatMap(l => {
       if (l.nome !== linha.nome) return [l]
       const resta = l.qtd - 1
@@ -1711,8 +1718,10 @@ export default function PresencialSalao() {
     for (const it of [...grupo.itens].reverse()) {
       if (falta <= 0) break
       const q = Number(it.quantidade) || 0
-      if (q <= falta) await supabase.from('comanda_itens').delete().eq('id', it.id)
-      else await supabase.from('comanda_itens').update({ quantidade: q - falta }).eq('id', it.id)
+      const { error } = q <= falta
+        ? await supabase.from('comanda_itens').delete().eq('id', it.id)
+        : await supabase.from('comanda_itens').update({ quantidade: q - falta }).eq('id', it.id)
+      if (error) { window.alert(recadoDeErro(error, 'tirar o item')); break }
       falta -= q
     }
     await loadMesas()
@@ -1732,6 +1741,7 @@ export default function PresencialSalao() {
     const n = Math.max(0, Math.floor(Number(valor) || 0))
     const diff = n - grupo.quantidade
     if (diff > 0) await lancarMaisDoGrupo(grupo, diff)
+    else if (diff < 0 && garcomNaoTira) window.alert('Item já enviado só o administrador tira.')
     else if (diff < 0) await tirarDoGrupo(grupo, -diff)
   }
 
@@ -3364,7 +3374,7 @@ export default function PresencialSalao() {
                             )}
                           </div>
                         </div>
-                        <button type="button" onClick={() => mudarQtdGrupo(grupo, -1)} style={qtdBtn}>−</button>
+                        {!garcomNaoTira && <button type="button" onClick={() => mudarQtdGrupo(grupo, -1)} style={qtdBtn}>−</button>}
                         <input type="number" min="0" inputMode="numeric"
                           className="sal-item-qtd sal-item-qtd-inp"
                           aria-label={`Quantidade de ${grupo.nome}`}
@@ -3638,11 +3648,11 @@ export default function PresencialSalao() {
                       <span style={{ flex: 1, fontSize: 14.5, fontWeight: 700 }}>
                         {l.qtd}× {l.nome}
                       </span>
-                      <button type="button" onClick={() => tirarLancado(l)}
+                      {!garcomNaoTira && <button type="button" onClick={() => tirarLancado(l)}
                         style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
                           border: '1.5px solid #ef4444', background: 'transparent', color: '#ef4444' }}>
                         Tirar 1
-                      </button>
+                      </button>}
                     </div>
                   ))}
                 </div>
@@ -3826,11 +3836,13 @@ export default function PresencialSalao() {
               ) : (
                 <div>
                   <div className="sal-acoes">
+                    {!(garcomNaoTira && (comandaSel?.comanda_itens?.length ?? 0) > 0) && (
                     <button type="button" onClick={cancelarMesa}
                       className="sal-acao-icone" title="Cancelar a comanda" aria-label="Cancelar a comanda"
                       style={{ borderRadius: 10, border: '1px solid var(--danger)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}>
                       ✕<span className="sal-acao-txt">Cancelar</span>
                     </button>
+                    )}
                     {/* Cliente mudou de lugar: leva a comanda junto, com tudo
                         que já consumiu.
                         Vale também na comanda de NOME — o cliente abre a conta no

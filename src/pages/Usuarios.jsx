@@ -35,6 +35,9 @@ export default function Usuarios() {
   const [perfis, setPerfis] = useState([])
   const [filaAtiva, setFilaAtiva] = useState(false)
   const [filaSaving, setFilaSaving] = useState(false)
+  // Garçom apaga item já enviado (mig 0412). Padrão ligado; a AGV desliga.
+  const [garcomApaga, setGarcomApaga] = useState(true)
+  const [garcomApagaSaving, setGarcomApagaSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [savingId, setSavingId] = useState(null)
@@ -111,6 +114,18 @@ export default function Usuarios() {
     const { error } = await supabase.from('empresas').update({ fila_entregador_ativa: novo }).eq('id', profile.empresa_id)
     if (error) { setFilaAtiva(!novo); setError(error.message) }
     setFilaSaving(false)
+  }
+
+  useEffect(() => { setGarcomApaga(empresa?.garcom_apaga_enviado !== false) }, [empresa?.garcom_apaga_enviado])
+
+  async function toggleGarcomApaga() {
+    if (!profile?.empresa_id) return
+    const novo = !garcomApaga
+    setGarcomApaga(novo)
+    setGarcomApagaSaving(true)
+    const { error } = await supabase.from('empresas').update({ garcom_apaga_enviado: novo }).eq('id', profile.empresa_id)
+    if (error) { setGarcomApaga(!novo); setError(error.message) }
+    setGarcomApagaSaving(false)
   }
 
   async function handlePerfilChange(profile, novoPerfil) {
@@ -287,6 +302,31 @@ export default function Usuarios() {
           }} aria-pressed={filaAtiva} title={filaAtiva ? 'Ligado' : 'Desligado'}>
           <span style={{
             position: 'absolute', top: 3, left: filaAtiva ? 25 : 3, width: 24, height: 24,
+            borderRadius: '50%', background: '#fff', transition: 'left .15s',
+          }} />
+        </button>
+      </div>
+
+      {/* Garçom apaga item depois de enviado (mig 0412) — a trava é no banco */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        border: '1px solid var(--border, #e5e7eb)', borderRadius: 12, padding: '12px 16px', marginBottom: 12,
+        background: 'var(--surface, #fff)',
+      }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>🍽️ Permitir que o garçom apague item depois de enviado</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted, #6b7280)', marginTop: 2 }}>
+            Ligado: o garçom tira item e diminui quantidade da mesa à vontade.
+            Desligado: depois de lançado, só o <strong>administrador</strong> tira — o garçom também não cancela mesa que já tem item.
+          </div>
+        </div>
+        <button type="button" onClick={toggleGarcomApaga} disabled={garcomApagaSaving}
+          style={{
+            flexShrink: 0, width: 52, height: 30, borderRadius: 999, border: 'none', cursor: 'pointer',
+            background: garcomApaga ? '#16a34a' : '#9ca3af', position: 'relative', transition: 'background .15s',
+          }} aria-pressed={garcomApaga} title={garcomApaga ? 'Ligado' : 'Desligado'}>
+          <span style={{
+            position: 'absolute', top: 3, left: garcomApaga ? 25 : 3, width: 24, height: 24,
             borderRadius: '50%', background: '#fff', transition: 'left .15s',
           }} />
         </button>
