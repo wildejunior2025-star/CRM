@@ -227,7 +227,7 @@ export default function ContagemEstoque({ empresaId }) {
                       {it.custo <= 0 && <span style={{ color: '#b45309' }}> · sem custo</span>}
                       {dif !== null && dif !== 0 && (
                         <b style={{ color: dif < 0 ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
-                          {' '}· {dif > 0 ? '+' : ''}{qtdTxt(dif)}{it.custo > 0 ? ` (${brl(dif * it.custo)})` : ''}
+                          {' '}· {dif < 0 ? 'faltam' : 'sobram'} {qtdTxt(Math.abs(dif))} {it.unidade}{it.custo > 0 ? ` (${brl(Math.abs(dif * it.custo))})` : ''}
                         </b>
                       )}
                       {dif === 0 && <b style={{ color: 'var(--success, #16a34a)' }}> · bateu</b>}
@@ -246,6 +246,9 @@ export default function ContagemEstoque({ empresaId }) {
       <div style={{ ...cartao, padding: 14, marginTop: 6 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15 }}>
           <span>Itens contados</span><b>{digitados.length}</b>
+        </div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>
+          <b>Faltam</b> = você contou menos do que o sistema achava (gastou, perdeu ou saiu sem registrar). <b>Sobram</b> = contou mais (entrou sem lançar a compra). A contagem não é compra: compra se lança em 🛒 Lançar compra, a qualquer hora.
         </div>
         {digitados.length > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, marginTop: 4 }}>
