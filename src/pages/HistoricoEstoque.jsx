@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
+import { ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
 import '../components/Page.css'
 import './ContasPagarReceberV2.css'
 
@@ -9,7 +10,8 @@ import './ContasPagarReceberV2.css'
 // Pedido do AGV Grill (26/10/2026): ver, no mesmo estilo dos cartões de "Já pago", tudo o que mexeu no
 // estoque. Lê as duas tabelas de movimento — estoque_movimentos (produtos do cardápio) e
 // materia_prima_movimentos (insumos da ficha) — e junta. Produto agrupa pela categoria do CATÁLOGO
-// (Bebidas, Picolé…); matéria-prima fica num cartão só.
+// (Bebidas, Picolé…); matéria-prima pela categoria do insumo (Carnes, Hortifruti…).
+// Uma chave escolhe qual dos dois estoques ver (pedido do Wilde 27/10: misturar confundia o total).
 //
 // É LEITURA: nada aqui altera estoque. Quem lança entrada é "Lançar compra"; a saída acontece sozinha na venda.
 
@@ -25,7 +27,7 @@ const quandoTxt = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit
 
 const MOTIVOS = {
   compra: 'Compra', venda: 'Venda', devolucao: 'Devolução', ajuste_inventario: 'Ajuste de inventário',
-  bonificacao: 'Bonificação', perda: 'Perda', desperdicio: 'Desperdício', consumo: 'Consumo',
+  bonificacao: 'Bonificação', perda: 'Perda', desperdicio: 'Desperdício', consumo: 'Consumo', contagem: 'Contagem de estoque',
 }
 const rotuloMotivo = (m, obs) => {
   if (m && MOTIVOS[m]) return MOTIVOS[m]
@@ -40,6 +42,7 @@ export default function HistoricoEstoque({ empresaId }) {
   const [erro, setErro] = useState(null)
   const [periodo, setPeriodo] = useState('hoje')       // 'hoje' | '7d' | 'mes' | 'mes_passado' — abre em Hoje (pedido do AGV)
   const [aba, setAba] = useState('entrada')            // 'entrada' | 'saida'
+  const [qual, setQual] = useState('produto')          // 'produto' (catálogo) | 'materia' (matéria-prima)
   const [aberto, setAberto] = useState(null)           // item aberto: `${origem}:${id}`
 
   const hoje = ymd(new Date())
@@ -64,7 +67,7 @@ export default function HistoricoEstoque({ empresaId }) {
           .select('id, materia_prima_id, tipo, quantidade, observacao, custo_unit, valor_total, created_at')
           .eq('empresa_id', empresaId).gte('created_at', de).lt('created_at', ate).order('created_at', { ascending: false }).order('id')),
         fetchAll(() => supabase.from('produtos').select('id, nome, categoria, preco_custo').eq('empresa_id', empresaId).order('id')),
-        fetchAll(() => supabase.from('materias_primas').select('id, nome, unidade, custo').eq('empresa_id', empresaId).order('id')),
+        fetchAll(() => supabase.from('materias_primas').select('id, nome, unidade, custo, categoria').eq('empresa_id', empresaId).order('id')),
       ])
       for (const r of [p, m, pr, mt]) if (r.error) throw r.error
       setDados({
@@ -104,14 +107,14 @@ export default function HistoricoEstoque({ empresaId }) {
       const dir = sentido(x.tipo, x.quantidade)
       lista.push({
         id: x.id, origem: 'materia', itemId: x.materia_prima_id, nome: it?.nome || 'Matéria-prima apagada',
-        grupo: 'Matéria-prima', emoji: '🥩', unidade: it?.unidade || 'un', dir, qtd,
+        grupo: it?.categoria || 'Sem categoria', emoji: ICONE_CATEGORIA[it?.categoria] || '🥩', unidade: it?.unidade || 'un', dir, qtd,
         valor: Number(x.valor_total) || qtd * unit, estimado: !(Number(x.valor_total) || Number(x.custo_unit)),
         motivo: dir === 'entrada' && /compra/i.test(x.observacao || '') ? 'Compra' : rotuloMotivo(null, x.observacao),
         obs: x.observacao, quando: x.created_at,
       })
     }
-    return lista
-  }, [dados])
+    return lista.filter((m) => m.origem === qual)
+  }, [dados, qual])
 
   const resumo = useMemo(() => {
     const soma = (dir) => {
@@ -155,6 +158,16 @@ export default function HistoricoEstoque({ empresaId }) {
 
       {erro && <div className="cpr-aviso cpr-aviso-erro">{erro} <button type="button" className="btn btn-secondary btn-sm" onClick={carregar}>Tentar de novo</button></div>}
 
+      <div style={{ display: 'inline-flex', padding: 4, gap: 4, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-card, #fff)', marginBottom: 12 }}>
+        {[['produto', '📦 Produtos'], ['materia', '🥩 Matérias-primas']].map(([id, lb]) => (
+          <button key={id} type="button" onClick={() => { setQual(id); setAberto(null) }} aria-pressed={qual === id}
+            style={{ padding: '8px 16px', borderRadius: 999, border: 0, cursor: 'pointer', fontSize: 14, fontWeight: 700,
+              background: qual === id ? 'var(--primary)' : 'transparent', color: qual === id ? '#fff' : 'var(--text-muted)' }}>
+            {lb}
+          </button>
+        ))}
+      </div>
+
       <div className="cp2-periodo">
         {[['hoje', 'Hoje'], ['7d', 'Últimos 7 dias'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado']].map(([id, lb]) => (
           <button key={id} type="button" className={`cp2-chip ${periodo === id ? 'ativo' : ''}`} onClick={() => { setPeriodo(id); setAberto(null) }}>{lb}</button>
@@ -179,7 +192,7 @@ export default function HistoricoEstoque({ empresaId }) {
       ) : grupos.lista.length === 0 ? (
         <div className="card cpr-vazio cpr-vazio-pequeno">
           <div className="cpr-vazio-icone">{aba === 'entrada' ? '📥' : '📤'}</div>
-          <p>{aba === 'entrada' ? 'Nenhuma entrada de estoque nesse período.' : 'Nenhuma saída de estoque nesse período.'}</p>
+          <p>{aba === 'entrada' ? 'Nenhuma entrada' : 'Nenhuma saída'} de {qual === 'materia' ? 'matéria-prima' : 'produto'} nesse período.</p>
         </div>
       ) : (
         <>
