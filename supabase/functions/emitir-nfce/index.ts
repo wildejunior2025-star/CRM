@@ -472,6 +472,18 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
     }
   })
   const tribTotal = Number(items.reduce((s, i) => s + (i.valor_total_tributos as number), 0).toFixed(2))
+  // Divisão por esfera pro cupom: federal por item (arredondado como o total) e o
+  // estadual é o que sobra, então federal + estadual SEMPRE fecha com o total.
+  // Sem alíquota do IBPT (reserva de 31,5%) não há como dividir: fica só o total.
+  const todosComIbpt = itensPed.every((it) => !!ibpt[ncmDoItem(it)])
+  const tribFederal = todosComIbpt
+    ? Number(itensPed.reduce((s, it, i) => {
+        const r = ibpt[ncmDoItem(it)]!
+        const fed = origem === "1" || origem === "2" ? r.importado : r.nacional
+        return s + Number(((items[i].valor_bruto as number) * fed / 100).toFixed(2))
+      }, 0).toFixed(2))
+    : null
+  const tribEstadual = tribFederal === null ? null : Number(Math.max(0, tribTotal - tribFederal).toFixed(2))
 
   const total = Number(ped.total ?? ped.subtotal ?? 0) || items.reduce((s, i) => s + i.valor_bruto, 0)
   // Pagamento em duas formas (mig 0274): cada parte sai como uma forma na nota.
@@ -566,6 +578,8 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
 
   // O cupom impresso pelo app da impressora lê daqui (Lei 12.741).
   patch.tributos_valor = tribTotal
+  patch.tributos_federal = tribFederal
+  patch.tributos_estadual = tribEstadual
   patch.tributos_fonte = ["IBPT", ...fontesIbpt].join(" ")
   if (notaId) await sb.from("nfce_notas").update(patch).eq("id", notaId)
   const { data: nota } = await sb.from("nfce_notas").select("*").eq("id", notaId).maybeSingle()

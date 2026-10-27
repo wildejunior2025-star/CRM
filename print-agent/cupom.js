@@ -429,6 +429,11 @@ function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
   if (n.tributos_valor != null) {
     parts.push(linha('Tributos totais incidentes (Lei 12.741/12):'))
     parts.push(kv('Valor aproximado', money(n.tributos_valor)))
+    // Divisao por esfera (so quando a nota tem os dois valores).
+    if (n.tributos_federal != null && n.tributos_estadual != null) {
+      parts.push(kv('  Federal', money(n.tributos_federal)))
+      parts.push(kv('  Estadual', money(n.tributos_estadual)))
+    }
     if (n.tributos_fonte) parts.push(linha('Fonte: ' + n.tributos_fonte))
   }
 

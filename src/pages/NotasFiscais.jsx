@@ -40,7 +40,7 @@ export default function NotasFiscais() {
     setCarregando(true)
     const [ini, fim] = janelaDoMes(mes)
     const { data } = await supabase.from('nfce_notas')
-      .select('id, pedido_id, comanda_id, status, ambiente, numero, serie, chave_acesso, protocolo, qrcode_url, xml_url, danfe_url, valor_total, tributos_valor, tributos_fonte, motivo_rejeicao, created_at')
+      .select('id, pedido_id, comanda_id, status, ambiente, numero, serie, chave_acesso, protocolo, qrcode_url, xml_url, danfe_url, valor_total, tributos_valor, tributos_federal, tributos_estadual, tributos_fonte, motivo_rejeicao, created_at')
       .eq('empresa_id', profile.empresa_id)
       .gte('created_at', ini).lt('created_at', fim)
       .order('created_at', { ascending: false })
