@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import BuscaSelect from '../components/BuscaSelect'
@@ -182,6 +182,7 @@ export default function FichaTecnica() {
   // por padrao, ela afogaria o que as pessoas lancaram na mao, que e o que o
   // dono quer conferir.
   const [histVendas, setHistVendas] = useState(false)
+  const [histAbertas, setHistAbertas] = useState(() => new Set())   // notas (compras) abertas no histórico
   // Dia aberto na lista. Nasce tudo recolhido: num dia de feira dá 20+ linhas e
   // quem só quer saber o total do dia não precisa rolar tudo isso.
   const [diaAberto, setDiaAberto] = useState(null)
@@ -276,7 +277,8 @@ export default function FichaTecnica() {
     const ini = new Date(`${compraDe}T00:00:00`)
     const fim = new Date(`${compraAte}T00:00:00`)
     fim.setDate(fim.getDate() + 1)
-    const [mp, pr, pessoas] = await Promise.all([
+    const diaIni = compraDe, diaFim = compraAte
+    const [mp, pr, pessoas, comprasR] = await Promise.all([
       supabase.from('materia_prima_movimentos')
         .select('id, created_at, tipo, quantidade, valor_total, observacao, created_by, materias_primas(nome, unidade)')
         .eq('empresa_id', empresaId)
@@ -288,6 +290,13 @@ export default function FichaTecnica() {
         .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
         .order('created_at', { ascending: false }).limit(1000),
       supabase.from('profiles').select('id, nome, email, perfil').eq('empresa_id', empresaId),
+      // Notas lançadas no período (pela data da compra OU pelo dia em que foram lançadas):
+      // o histórico mostra cada nota como UMA linha, com os itens dentro.
+      supabase.from('compras_lancadas')
+        .select('id, created_at, data, fornecedor, numero_nota, total, pago, itens, criado_por')
+        .eq('empresa_id', empresaId).eq('status', 'lancada')
+        .or(`and(created_at.gte.${ini.toISOString()},created_at.lt.${fim.toISOString()}),and(data.gte.${diaIni},data.lte.${diaFim})`)
+        .order('created_at', { ascending: false }).limit(300),
     ])
     // Quem lancou, pelo login. Sem autor = ninguem apertou nada (venda, robo,
     // cron) - a tela escreve "automatico" em vez de deixar o campo vazio, que
@@ -297,15 +306,33 @@ export default function FichaTecnica() {
       if (!u) return null
       return { nome: u.nome || u.email, perfil: u.perfil || '', email: u.email || '' }
     }
+    // Movimento que nasceu de uma nota (mov_id guardado nos itens) sai da lista solta e
+    // entra dentro da nota — senão dois lançamentos se misturam item por item.
+    const movDaNota = new Set()
+    const notas = (comprasR.data || []).map(c => {
+      const itensNota = Array.isArray(c.itens) ? c.itens : []
+      itensNota.forEach(i => { if (i.mov_id) movDaNota.add(i.mov_id) })
+      return {
+        id: 'nota:' + c.id, quando: c.created_at, tipo: 'entrada', origem: 'nota', nota: true,
+        fornecedor: c.fornecedor || 'Fornecedor', numeroNota: c.numero_nota, total: Number(c.total || 0), pago: c.pago,
+        itens: itensNota.map(i => ({
+          nome: i.nome, qtd: Number(i.quantidade || 0), unidade: i.tipo === 'materia' ? (i.emb || '') : (i.emb || 'un'),
+          unit: Number(i.custo_unit || 0), total: Number(i.linha_total || (Number(i.quantidade || 0) * Number(i.custo_unit || 0))),
+          estoque: i.mov_id ? true : false, tipoItem: i.tipo,
+        })),
+        quem: quemFez(c.criado_por), obs: '',
+      }
+    })
     const lista = [
-      ...(mp.data || []).map(r => ({
+      ...notas,
+      ...(mp.data || []).filter(r => !movDaNota.has(r.id)).map(r => ({
         id: 'mp:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'insumo',
         nome: r.materias_primas?.nome || '(insumo apagado)',
         unidade: r.materias_primas?.unidade || '',
         quantidade: Number(r.quantidade || 0), valor: r.valor_total,
         obs: r.observacao || '', quem: quemFez(r.created_by),
       })),
-      ...(pr.data || []).map(r => ({
+      ...(pr.data || []).filter(r => !movDaNota.has(r.id)).map(r => ({
         id: 'pr:' + r.id, quando: r.created_at, tipo: r.tipo, origem: 'produto',
         nome: r.produtos?.nome || '(produto apagado)', unidade: 'un',
         quantidade: Number(r.quantidade || 0), valor: r.valor_total,
@@ -1195,6 +1222,54 @@ export default function FichaTecnica() {
                   </thead>
                   <tbody>
                     {linhas.map(h => {
+                      if (h.nota) {
+                        // UMA linha por nota: quanto foi, onde comprou e quem lançou; a seta abre os itens.
+                        const ab = histAbertas.has(h.id)
+                        const alternar = () => setHistAbertas(s => { const n = new Set(s); n.has(h.id) ? n.delete(h.id) : n.add(h.id); return n })
+                        return (
+                          <Fragment key={h.id}>
+                            <tr onClick={alternar} style={{ cursor: 'pointer', background: ab ? 'rgba(22,163,74,.06)' : undefined }}>
+                              <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
+                                {new Date(h.quando).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 700 }}>
+                                  <span style={{ display: 'inline-block', width: 16, color: 'var(--text-muted)' }}>{ab ? '▾' : '▸'}</span>
+                                  🧾 {h.fornecedor}
+                                </div>
+                                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 16 }}>
+                                  {h.numeroNota ? `NF ${h.numeroNota} · ` : ''}{h.itens.length} {h.itens.length === 1 ? 'item' : 'itens'} · {h.pago ? 'paga' : 'a pagar'}
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 12, fontWeight: 700, color: '#16a34a', background: 'rgba(22,163,74,.12)', border: '1px solid #16a34a' }}>Compra</span>
+                              </td>
+                              <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 800, color: '#16a34a' }}>{brl(h.total)}</td>
+                              <td style={{ fontSize: 13 }}>
+                                {h.quem ? <div style={{ fontWeight: 600 }}>{h.quem.nome}</div> : <span style={{ color: 'var(--text-muted)' }}>automático</span>}
+                              </td>
+                              <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>toque pra {ab ? 'fechar' : 'ver os itens'}</td>
+                            </tr>
+                            {ab && h.itens.map((i, k) => (
+                              <tr key={`${h.id}-${k}`} style={{ background: 'rgba(22,163,74,.03)' }}>
+                                <td />
+                                <td style={{ paddingLeft: 28 }}>
+                                  <div style={{ fontWeight: 600 }}>{i.nome}</div>
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                    {i.tipoItem === 'materia' ? 'insumo' : 'produto'}{!i.estoque ? ' · sem controle de estoque' : ''}
+                                  </div>
+                                </td>
+                                <td />
+                                <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                                  +{fmtQtd(i.qtd, i.unidade)}
+                                  <div style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--text-muted)' }}>{brl(i.unit)} cada · {brl(i.total)}</div>
+                                </td>
+                                <td /><td />
+                              </tr>
+                            ))}
+                          </Fragment>
+                        )
+                      }
                       const sl = selo(h.tipo)
                       return (
                         <tr key={h.id}>
