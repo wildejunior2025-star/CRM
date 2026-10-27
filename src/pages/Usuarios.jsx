@@ -418,6 +418,24 @@ export default function Usuarios() {
                             </label>
                           )
                         })}
+                        {/* iFood pela taxa da casa (mig 0413): corrida do iFood paga pela tabela de km
+                            da loja, não pelo frete que veio do iFood. */}
+                        <label title="Ligado: a corrida do iFood paga pela tabela de km da loja (taxa da casa). Desligado: paga a taxa que veio do iFood."
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!p.entregador_ifood_pelo_km}
+                            onChange={async (e) => {
+                              const v = e.target.checked
+                              setPerfis(prev => prev.map(x => x.id === p.id ? { ...x, entregador_ifood_pelo_km: v } : x))
+                              const { error } = await supabase.from('profiles').update({ entregador_ifood_pelo_km: v }).eq('id', p.id)
+                              if (error) setError(error.message)
+                            }}
+                          />
+                          <span style={{ fontWeight: 700, color: p.entregador_ifood_pelo_km ? 'var(--text)' : 'var(--text-muted, #9ca3af)' }}>
+                            iFood pela taxa da casa (km)
+                          </span>
+                        </label>
                         {/* Encosto: valor garantido por dia, somado as corridas no acerto. */}
                         <label title="Valor garantido que ele ganha por dia a mais das corridas. Soma no acerto do dia em que ele roda."
                           style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
