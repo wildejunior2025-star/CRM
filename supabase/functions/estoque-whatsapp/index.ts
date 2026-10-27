@@ -128,15 +128,46 @@ const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
  * que acontecia: chegava papel novo (ou qualquer outro comando), o rascunho
  * anterior virava "cancelada" no banco e nunca mais ninguém ouvia falar dele.
  */
+// DUAS NOTAS SEGUIDAS: A PRIMEIRA ESPERA, NÃO MORRE (27/10/2026)
+//
+// Agv, 27/10: o dono mandou a nota de R$ 54,00, o robô perguntou se já tinha
+// pago e, antes da resposta, veio a foto da nota seguinte — de R$ 377,98. A
+// pergunta antiga era cancelada com um "manda a foto dela de novo". Ninguém
+// manda. A compra sumia do financeiro sem ninguém notar.
+//
+// Agora o rascunho antigo fica na fila e volta sozinho assim que o novo for
+// respondido. O que NÃO é rascunho continua morrendo: uma proposta de SIM
+// velha não pode ressuscitar depois que o assunto já mudou.
 async function cancelarPendentes(empresaId: string, jid: string): Promise<string> {
-  const { data: antes } = await sb.from("assistente_acoes").select("params")
+  const { data: abertas } = await sb.from("assistente_acoes").select("id, params")
     .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
-    .eq("tipo", "conta_criar").order("created_at", { ascending: false }).limit(1).maybeSingle()
-  const p = antes?.params as Record<string, unknown> | undefined
-  await sb.from("assistente_acoes").update({ status: "cancelada" })
+    .order("created_at", { ascending: false })
+  const mortas = (abertas ?? []).filter((a: any) => !a.params?.rascunho).map((a: any) => a.id)
+  if (mortas.length) {
+    await sb.from("assistente_acoes").update({ status: "cancelada" }).in("id", mortas)
+  }
+  const fila = (abertas ?? []).filter((a: any) => a.params?.rascunho)
+  if (!fila.length) return ""
+  const p: any = fila[0].params
+  return `\n\n🕐 A pergunta de *${p.descricao}* (${brl(Number(p.valor))}) continua esperando` +
+    (fila.length > 1 ? `, com mais ${fila.length - 1} atrás dela` : "") +
+    ` — eu volto nela assim que você responder esta.`
+}
+
+// A fila anda sozinha: fechou um rascunho, o próximo se apresenta. Sem isto a
+// nota que esperou ficaria pendurada em silêncio, que é o mesmo que perdida.
+async function proximoRascunho(empresaId: string, jid: string): Promise<string> {
+  const desde = new Date(Date.now() - VALIDADE_PENDENTE_MIN * 60000).toISOString()
+  const { data } = await sb.from("assistente_acoes").select("params")
     .eq("empresa_id", empresaId).eq("grupo_jid", jid).eq("status", "pendente")
+    .eq("tipo", "conta_criar").gte("created_at", desde)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle()
+  const p: any = data?.params
   if (!p?.rascunho) return ""
-  return `\n\n⚠️ Deixei de lado a pergunta anterior (*${p.descricao}* — ${brl(Number(p.valor))}): ela *não foi lançada*. Manda a foto dela de novo quando puder.`
+  return `\n\n──────────\n📄 Agora a que ficou esperando: *${p.descricao}* — *${brl(Number(p.valor))}*\n\n` +
+    (p.falta_fornecedor
+      ? `Não achei de *quem* é essa compra no papel.\nMe diz o nome do fornecedor (ex.: *Mar Vermelho*), ou *NÃO* pra cancelar.`
+      : perguntaDoPagamento(p, hojeBRT()))
 }
 
 function pareceOutroAssunto(t: string): boolean {
@@ -706,6 +737,28 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
       `Se foi engano, responda *DESFAZER*.`
 }
 
+// A PERGUNTA É SE PAGOU — NÃO QUE DIA É HOJE (27/10/2026)
+//
+// O robô leu a nota da Agv, mostrou "Data no papel: 27/10" e logo embaixo
+// ofereceu "paguei hoje / paguei dia 20 / a pagar dia 30". Pro dono pareceu
+// que ele estava perguntando a data que tinha acabado de ler em voz alta.
+//
+// A data do papel NÃO está em jogo: o robô já tem. O que falta é só se a
+// compra foi paga ou ficou a prazo. Quando o papel é de hoje, nem faz sentido
+// oferecer data nenhuma — *PAGUEI* basta. Quando o papel é mais velho, aí sim
+// existe diferença entre "paguei no dia do papel" e "paguei agora", e as duas
+// aparecem com a data escrita, sem a pessoa ter que digitá-la.
+function perguntaDoPagamento(params: any, hoje: string): string {
+  const emissao = /^\d{4}-\d{2}-\d{2}$/.test(String(params?.emissao)) ? String(params.emissao) : null
+  return `Falta saber uma coisa só: *já pagou*?\n\n` +
+    (!emissao || emissao === hoje
+      ? `• *PAGUEI* — lanço como paga hoje\n`
+      : `• *PAGUEI* — lanço na data do papel, ${ddmmBR(emissao)}\n` +
+        `• *paguei hoje* — se o pagamento foi agora\n`) +
+    `• *a pagar dia 30* — se for pra pagar depois\n\n` +
+    `Ou *NÃO* pra cancelar.`
+}
+
 // A FOTO QUE NÃO DIZ TUDO VIRA PERGUNTA, NÃO CHUTE (24/10/2026)
 //
 // Guarda o que o papel já deu (fornecedor, valor, data) e pede só o que falta.
@@ -745,12 +798,7 @@ async function rascunhoDaNota(empresaId: string, jid: string, nota: NonNullable<
       `Não achei de *quem* é essa compra no papel.\n` +
       `Me diz o nome do fornecedor (ex.: *Mar Vermelho*), ou *NÃO* pra cancelar.` + deixadaPraTras
   }
-  return `${cabeca}\n\n` +
-    `Falta saber se já pagou. Me responde uma dessas:\n` +
-    `• *paguei hoje*\n` +
-    `• *paguei dia 20* (ou "ontem")\n` +
-    `• *a pagar dia 30* — se for pra pagar depois\n\n` +
-    `Ou *NÃO* pra cancelar.` + deixadaPraTras
+  return `${cabeca}\n\n` + perguntaDoPagamento({ emissao }, hojeBRT()) + deixadaPraTras
 }
 
 // SIM OU NÃO SEM NADA ESPERANDO (23/10/2026)
@@ -1283,9 +1331,12 @@ function completarRascunho(t: string, params: any, hoje: string): { params?: any
   if (aPagar) {
     return { params: { ...params, rascunho: false, quitada: false, vencimento: data, forma: null, recorrencia: null } }
   }
-  // Já pagou: a data é a do pagamento. "paguei" sozinho = hoje.
+  // Já pagou: a data é a do pagamento. *PAGUEI* sozinho vale a data do PAPEL,
+  // que é a que o robô acabou de mostrar e a que ele ofereceu na pergunta —
+  // e hoje quando não veio papel nenhum (gasto escrito solto).
   if (jaPagou || data) {
-    return { params: { ...params, rascunho: false, quitada: true, vencimento: data ?? hoje, forma: formaDoTexto(resto || t), recorrencia: null } }
+    const doPapel = /^\d{4}-\d{2}-\d{2}$/.test(String(params?.emissao)) ? String(params.emissao) : hoje
+    return { params: { ...params, rascunho: false, quitada: true, vencimento: data ?? doPapel, forma: formaDoTexto(resto || t), recorrencia: null } }
   }
   return {}
 }
@@ -1568,7 +1619,7 @@ async function tratar(req: Request): Promise<Response> {
       if (pendAcao.params.falta_fornecedor) {
         if (/^(nao|n|cancela|cancelar|deixa|esquece)\W*$/.test(tResp)) {
           await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
-          await enviar(instance, jid, "Cancelado. Não registrei nada.")
+          await enviar(instance, jid, "Cancelado. Não registrei nada." + await proximoRascunho(empresaId, jid))
           return ok()
         }
         const nome = (textoResp || "").trim().slice(0, 120)
@@ -1583,9 +1634,7 @@ async function tratar(req: Request): Promise<Response> {
         await sb.from("assistente_acoes").update({ params: p2 }).eq("id", pendAcao.id)
         await enviar(instance, jid,
           `🏪 Anotei: *${nome}* — *${brl(Number(p2.valor))}*\n\n` +
-          `Agora: já pagou?\n` +
-          `• *paguei hoje*\n• *paguei dia 20* (ou "ontem")\n• *a pagar dia 30*\n\n` +
-          `Ou *NÃO* pra cancelar.`)
+          perguntaDoPagamento(p2, hojeBRT()))
         return ok()
       }
       // FRASE QUE JÁ É UM LANÇAMENTO INTEIRO NÃO É RESPOSTA (26/10/2026)
@@ -1601,13 +1650,14 @@ async function tratar(req: Request): Promise<Response> {
         const r = completarRascunho(tResp, pendAcao.params, hojeBRT())
         if (r.cancelar) {
           await sb.from("assistente_acoes").update({ status: "cancelada" }).eq("id", pendAcao.id)
-          await enviar(instance, jid, "Cancelado. Não registrei nada.")
+          await enviar(instance, jid, "Cancelado. Não registrei nada." + await proximoRascunho(empresaId, jid))
           return ok()
         }
         if (r.params) {
           await sb.from("assistente_acoes").update({ params: r.params }).eq("id", pendAcao.id)
           try {
-            await enviar(instance, jid, await executarAcao(empresaId, { ...pendAcao, params: r.params }))
+            const feito = await executarAcao(empresaId, { ...pendAcao, params: r.params })
+            await enviar(instance, jid, feito + await proximoRascunho(empresaId, jid))
           } catch (e: any) {
             console.error("[estoque-wpp] rascunho:", e)
             await enviar(instance, jid, "❌ Não consegui registrar agora. Nada foi alterado — tente de novo.")
@@ -1616,8 +1666,8 @@ async function tratar(req: Request): Promise<Response> {
         }
         // Não entendi a resposta: repete a pergunta em vez de registrar torto.
         await enviar(instance, jid,
-          `Ainda falta a data de *${pendAcao.params.descricao}* (${brl(Number(pendAcao.params.valor))}).\n\n` +
-          `• *paguei hoje*\n• *paguei dia 20*\n• *a pagar dia 30*\n• ou *NÃO* pra cancelar`)
+          `Não entendi. É sobre *${pendAcao.params.descricao}* (${brl(Number(pendAcao.params.valor))}).\n\n` +
+          perguntaDoPagamento(pendAcao.params, hojeBRT()))
         return ok()
       }
     }
