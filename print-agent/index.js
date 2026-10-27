@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 48
+const APP_VERSION = 49
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -305,12 +305,31 @@ async function lerFilas() {
 // Conta pro servidor como estao as filas. Quem decide se isso e problema e
 // quem avisa e o banco (mig 0355) — aqui so se reporta o que se ve.
 var _saudeEm = 0, _saudeAgendada = null
+var _filasRuins = false
+
+// QUEBRADA NAO DISPUTA A VEZ (v49, 27/10/2026)
+// No Zebu um PC de fora, com a ELGIN USB offline e 52 cupons presos, reservava o
+// pedido ~1s antes do PC da loja: o Windows "aceitava" o trabalho, a reserva ficava
+// com ele e o balcao ficou sem papel o dia todo. Agora, com a fila quebrada, este
+// PC so abre mao da vez se OUTRO PC da loja avisou ha ate 4 min com a impressora
+// boa. Sem ninguem pra assumir, tudo segue como antes (a fila guarda o papel).
+async function outroPcSaudavel() {
+  try {
+    const desde = new Date(Date.now() - 4 * 60 * 1000).toISOString()
+    const { data } = await supabase.from('impressora_saude').select('pc, filas, visto_em')
+      .eq('empresa_id', empresaId).neq('pc', os.hostname()).gte('visto_em', desde)
+    return (data || []).some(r => Array.isArray(r.filas) && r.filas.length > 0 && r.filas.every(f => !f.offline))
+  } catch (e) { return false }
+}
 async function reportarSaude() {
   if (!empresaId || !sessionAtiva) return   // sem sessao, o servidor nota o silencio
   _saudeEm = Date.now()
   try {
     const filas = await lerFilas()
     if (!filas) return
+    // Impressora offline COM papel preso = quebrada de verdade. So offline, sozinho,
+    // nao basta: termica que dorme tambem aparece assim e imprime normal.
+    _filasRuins = filas.some(f => f.offline && f.presos > 0)
     await supabase.from('impressora_saude').upsert({
       empresa_id: empresaId,
       pc: os.hostname(),
@@ -604,6 +623,11 @@ async function imprimirPedido(p, jaReservado) {
   // `jaReservado` = o pedido chegou pelo /api/imprimir do gestor deste PC, que
   // JA pegou a vez antes de mandar pra ca. Pedir de novo levaria "nao" e o
   // cupom nao sairia em lugar nenhum.
+  if (!jaReservado && _filasRuins && await outroPcSaudavel()) {
+    log('  (#' + (p.numero_pedido ?? p.id) + ': minha impressora esta offline com papel preso — deixo pro outro PC da loja)')
+    marcarImpresso(p.id)
+    return
+  }
   try {
     const { data: minhaVez, error } = jaReservado
       ? { data: true, error: null }
@@ -891,6 +915,7 @@ function paginaHtml() {
   <div class="ok">✓ Conectado</div>
   <div style="margin-top:6px">Loja: <span class="pill">${(empresa?.nome || '—')}</span></div>
   <div style="margin-top:6px">Impressora: <span class="pill">${c.printer || 'nenhuma'}</span></div>
+  ${_filasRuins ? '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#7f1d1d;color:#fecaca;font-size:13px">⚠ A impressora deste PC está OFFLINE com papel preso. Se outro PC da loja estiver bom, ele assume os pedidos; se não, ligue a impressora ou limpe a fila do Windows.</div>' : ''}
   <div style="margin-top:6px;font-size:12px;color:#9ca3af">Versão do app: <b>v${APP_VERSION}</b></div>
   <form method="POST" action="/atualizar" onsubmit="this.querySelector('button').textContent='⏳ Buscando atualização... o app reinicia sozinho se tiver versão nova.'">
     <button style="background:#2563eb">↻ Atualizar app agora</button>
