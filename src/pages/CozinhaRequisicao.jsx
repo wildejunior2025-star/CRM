@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
-import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
+import { CATEGORIAS_INSUMO } from '../lib/categoriasFinanceiro'
+import { useCategoriasInsumo } from '../hooks/useCategoriasInsumo'
 import '../components/Page.css'
 
 // COZINHA — o que sai do estoque (almoxarifado) pra cozinha e o que volta no fim do dia.
@@ -32,6 +33,7 @@ const pilula = (on) => ({ padding: '9px 14px', borderRadius: 999, border: '1px s
   background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--text)' })
 
 export default function CozinhaRequisicao({ empresaId }) {
+  const { icone } = useCategoriasInsumo(empresaId)
   const hoje = ymd(new Date())
   const [funcs, setFuncs] = useState([])
   const [materias, setMaterias] = useState([])
@@ -322,7 +324,7 @@ export default function CozinhaRequisicao({ empresaId }) {
                 {sugestoes.map(m => (
                   <button key={m.id} type="button" onClick={() => poe(m)}
                     style={{ width: '100%', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '12px 14px', border: 'none', borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: 15 }}>
-                    <span>{ICONE_CATEGORIA[m.categoria] || '📋'} <b>{m.nome}</b></span>
+                    <span>{icone(m.categoria)} <b>{m.nome}</b></span>
                     <span style={{ color: m.saldo <= 0 ? 'var(--danger, #dc2626)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>tem {qtdTxt(m.saldo)} {m.unidade}</span>
                   </button>
                 ))}
@@ -341,7 +343,7 @@ export default function CozinhaRequisicao({ empresaId }) {
               <div style={grade}>
                 {porCategoria.map(g => (
                   <button key={g.cat} type="button" style={tile} onClick={() => setCatSel(g.cat)}>
-                    <b style={{ display: 'block', fontSize: 14 }}>{ICONE_CATEGORIA[g.cat] || '📋'} {g.cat}</b>
+                    <b style={{ display: 'block', fontSize: 14 }}>{icone(g.cat)} {g.cat}</b>
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{g.itens.length} {g.itens.length === 1 ? 'item' : 'itens'}</span>
                   </button>
                 ))}
@@ -351,7 +353,7 @@ export default function CozinhaRequisicao({ empresaId }) {
             return (
               <div style={{ marginTop: 10 }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCatSel(null)}>← Categorias</button>
-                <b style={{ marginLeft: 8 }}>{ICONE_CATEGORIA[catSel] || '📋'} {catSel}</b>
+                <b style={{ marginLeft: 8 }}>{icone(catSel)} {catSel}</b>
                 <div style={grade}>
                   {(g?.itens || []).map(m => {
                     const ja = noCarrinho.has(m.id)

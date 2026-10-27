@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
-import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
+import { CATEGORIAS_INSUMO } from '../lib/categoriasFinanceiro'
+import { useCategoriasInsumo } from '../hooks/useCategoriasInsumo'
 import '../components/Page.css'
 
 // CONTAGEM DE ESTOQUE — o dono conta o que tem na prateleira e o sistema acerta o saldo de uma vez.
@@ -28,6 +29,7 @@ const pilula = (on) => ({ padding: '9px 14px', borderRadius: 999, border: '1px s
   background: on ? 'var(--primary)' : 'transparent', color: on ? '#fff' : 'var(--text)' })
 
 export default function ContagemEstoque({ empresaId }) {
+  const { icone } = useCategoriasInsumo(empresaId)
   const [insumos, setInsumos] = useState([])
   const [produtos, setProdutos] = useState([])
   const [ultima, setUltima] = useState(null)
@@ -209,7 +211,7 @@ export default function ContagemEstoque({ empresaId }) {
           <div key={cat} style={{ ...cartao, marginBottom: 10, overflow: 'hidden' }}>
             <button type="button" onClick={() => setCatAberta(aberto && !busca ? null : cat)}
               style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '14px 14px', background: 'transparent', border: 0, color: 'var(--text)', cursor: 'pointer', fontSize: 16, fontWeight: 800, textAlign: 'left' }}>
-              <span>{ICONE_CATEGORIA[cat] || '📦'} {cat}</span>
+              <span>{icone(cat)} {cat}</span>
               <span style={{ fontSize: 13, fontWeight: 700, color: feitos === itens.length ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
                 {feitos}/{itens.length} {feitos === itens.length ? '✓' : ''} {aberto ? '▲' : '▼'}
               </span>

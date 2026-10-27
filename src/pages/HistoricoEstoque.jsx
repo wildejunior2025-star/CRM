@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
-import { ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
+import { useCategoriasInsumo } from '../hooks/useCategoriasInsumo'
 import '../components/Page.css'
 import './ContasPagarReceberV2.css'
 
@@ -37,6 +37,7 @@ const rotuloMotivo = (m, obs) => {
 const CORES = ['#2563eb', '#0891b2', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#ca8a04', '#64748b']
 
 export default function HistoricoEstoque({ empresaId }) {
+  const { icone } = useCategoriasInsumo(empresaId)
   const [dados, setDados] = useState({ prod: [], mp: [], produtos: new Map(), materias: new Map(), pessoas: new Map() })
   const [agrupar, setAgrupar] = useState('categoria')  // 'categoria' | 'origem' (fornecedor / cozinha / contagem…)
   const [apagando, setApagando] = useState(null)
@@ -112,7 +113,7 @@ export default function HistoricoEstoque({ empresaId }) {
       const dir = sentido(x.tipo, x.quantidade)
       lista.push({
         id: x.id, origem: 'materia', itemId: x.materia_prima_id, nome: it?.nome || 'Matéria-prima apagada',
-        grupo: it?.categoria || 'Sem categoria', emoji: ICONE_CATEGORIA[it?.categoria] || '🥩', unidade: it?.unidade || 'un', dir, qtd,
+        grupo: it?.categoria || 'Sem categoria', emoji: icone(it?.categoria), unidade: it?.unidade || 'un', dir, qtd,
         valor: Number(x.valor_total) || qtd * unit, estimado: !(Number(x.valor_total) || Number(x.custo_unit)),
         motivo: dir === 'entrada' && /compra/i.test(x.observacao || '') ? 'Compra' : rotuloMotivo(null, x.observacao),
         obs: x.observacao, quando: x.created_at,
@@ -134,7 +135,7 @@ export default function HistoricoEstoque({ empresaId }) {
       m.apagavel = m.fonte === '✍️ Lançado à mão'
     }
     return lista.filter((m) => m.origem === qual)
-  }, [dados, qual])
+  }, [dados, qual, icone])
 
   async function apagar(m) {
     if (!window.confirm(`Apagar este lançamento?\n\n${m.nome} · ${m.dir === 'entrada' ? '+' : '−'}${qtdTxt(m.qtd)} ${m.unidade}${m.valor > 0 ? ` (${brl(m.valor)})` : ''}\n` +

@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth'
 import '../components/Page.css'
 import { recadoDeErro } from '../lib/erroRede'
 import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
+import { useCategoriasInsumo, FIGURINHAS_CATEGORIA } from '../hooks/useCategoriasInsumo'
 
 // Normaliza pra busca: tira acento e deixa minúsculo. Assim "feijao" acha "Feijão".
 const normTxt = (s) => (s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
@@ -233,6 +234,20 @@ export default function FichaTecnica({ modo = 'fichas' }) {
     setMateriaForm(inicial ? { ...emptyMateria, nome: inicial } : emptyMateria)
     setShowMateria(true)
   }
+  const { proprias: catProprias, icone: iconeCat, criar: criarCatLoja } = useCategoriasInsumo(empresaId)
+  const [novaCat, setNovaCat] = useState(null)   // { nome, icone } enquanto cria uma categoria própria
+  async function criarCategoria() {
+    let nome = (novaCat?.nome || '').trim().replace(/\s+/g, ' ')
+    if (!nome) { alert('Digite o nome da categoria.'); return }
+    nome = nome.charAt(0).toUpperCase() + nome.slice(1)
+    const padrao = CATEGORIAS_INSUMO.find(c => normTxt(c) === normTxt(nome))
+    if (padrao) { setMateriaForm(f => ({ ...f, categoria: padrao })); setNovaCat(null); return }
+    const erro = await criarCatLoja(nome, novaCat.icone)
+    if (erro) { alert(recadoDeErro(erro, 'criar a categoria')); return }
+    setMateriaForm(f => ({ ...f, categoria: nome }))
+    setNovaCat(null)
+  }
+
   // "+ Cadastrar matéria-prima" da Ficha Técnica chega aqui com ?nova=1: já abre o formulário.
   useEffect(() => {
     if (modo !== 'insumos' || searchParams.get('nova') !== '1') return
@@ -887,7 +902,7 @@ export default function FichaTecnica({ modo = 'fichas' }) {
                   <button type="button" aria-expanded={aberto}
                     onClick={() => setCatAberta(s => { const n = new Set(s); n.has(g.cat) ? n.delete(g.cat) : n.add(g.cat); return n })}
                     style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 14px', border: 'none', background: 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left' }}>
-                    <span style={{ fontSize: 24 }}>{ICONE_CATEGORIA[g.cat] || '📋'}</span>
+                    <span style={{ fontSize: 24 }}>{iconeCat(g.cat)}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: 'block', fontWeight: 800, fontSize: 15 }}>{g.cat}</span>
                       <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>
@@ -983,24 +998,44 @@ export default function FichaTecnica({ modo = 'fichas' }) {
               </div>
               <div className="form-field full">
                 <label>Categoria</label>
-                <select value={materiaForm.categoria} onChange={e => {
-                  let v = e.target.value
-                  // Categoria própria da loja (ex.: "Temperos"): fica gravada no insumo e passa a aparecer
-                  // aqui pros outros. No dinheiro (rateio da nota) o insumo continua caindo numa categoria padrão.
-                  if (v === '__nova__') {
-                    v = (window.prompt('Nome da nova categoria (ex.: Temperos):') || '').trim().replace(/\s+/g, ' ')
-                    if (!v) return
-                    v = v.charAt(0).toUpperCase() + v.slice(1)
-                  }
-                  setMateriaForm(f => ({ ...f, categoria: v }))
+                {/* Categoria própria da loja (ex.: "Temperos" 🌿, mig 0417): fica gravada no insumo e passa a
+                    aparecer pros outros. No dinheiro (rateio da nota) o insumo continua caindo numa categoria padrão. */}
+                <select value={novaCat ? '__nova__' : materiaForm.categoria} onChange={e => {
+                  if (e.target.value === '__nova__') { setNovaCat({ nome: '', icone: '🌿' }); return }
+                  setNovaCat(null)
+                  setMateriaForm(f => ({ ...f, categoria: e.target.value }))
                 }}>
                   <option value="">{materiaEdit ? SEM_CATEGORIA : 'Automática (pelo nome)'}</option>
                   {CATEGORIAS_INSUMO.map(c => <option key={c} value={c}>{ICONE_CATEGORIA[c]} {c}</option>)}
-                  {[...new Set([...materias.map(m => m.categoria), materiaForm.categoria])]
+                  {[...new Set([...catProprias.map(c => c.nome), ...materias.map(m => m.categoria), materiaForm.categoria])]
                     .filter(c => c && !CATEGORIAS_INSUMO.includes(c)).sort()
-                    .map(c => <option key={c} value={c}>📦 {c}</option>)}
-                  <option value="__nova__">➕ Outra categoria…</option>
+                    .map(c => <option key={c} value={c}>{iconeCat(c)} {c}</option>)}
+                  <option value="__nova__">➕ Criar categoria nova…</option>
                 </select>
+                {novaCat && (
+                  <div style={{ marginTop: 8, padding: 12, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: 26, lineHeight: 1 }}>{novaCat.icone}</span>
+                      <input autoFocus placeholder="Nome (ex.: Temperos)" maxLength={40} value={novaCat.nome}
+                        onChange={e => setNovaCat(n => ({ ...n, nome: e.target.value }))} style={{ flex: 1 }} />
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Escolha a figurinha:</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(38px, 1fr))', gap: 4, marginBottom: 10 }}>
+                      {FIGURINHAS_CATEGORIA.map(f => (
+                        <button key={f} type="button" onClick={() => setNovaCat(n => ({ ...n, icone: f }))} aria-label={`Figurinha ${f}`}
+                          style={{ fontSize: 22, padding: '4px 0', borderRadius: 8, cursor: 'pointer',
+                            border: novaCat.icone === f ? '2px solid var(--primary)' : '1px solid transparent',
+                            background: novaCat.icone === f ? 'var(--primary-bg, rgba(124,58,237,.1))' : 'transparent' }}>
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setNovaCat(null)}>Cancelar</button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={criarCategoria}>Criar categoria</button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="form-field">
                 <label>Estoque mínimo ({materiaForm.unidade})</label>
