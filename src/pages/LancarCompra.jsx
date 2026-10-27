@@ -143,7 +143,7 @@ export default function LancarCompra({ empresaId }) {
       return [...prev, {
         key, tipo: item.tipo, id: item.id, nome: item.nome, unidade: item.unidade || 'un',
         estoque: item.tipo === 'materia' ? true : item.controla_estoque !== false,
-        qtd: '1', custo, total: null,
+        qtd: item.qtd && num(item.qtd) > 0 ? String(item.qtd).replace('.', ',') : '1', custo, total: null,
         // Produto de revenda: manda a categoria do catálogo (Picolé, Sucos…). Matéria-prima não tem
         // categoria de venda, então fica com o palpite entre os tipos de gasto.
         cat: aprendidas[chaveDoItem(item.nome)]
@@ -222,7 +222,7 @@ export default function LancarCompra({ empresaId }) {
           .select('id, nome, unidade, custo').single()
         if (error) throw error
         setMaterias(m => [...m, d])
-        poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade })
+        poeItem({ tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, qtd: novo.qtd })
       } else {
         // Nasce ESCONDIDO de todos os canais de venda: está sem preço, e produto com preço zero
         // não pode aparecer na Loja Online. O preço de venda se define depois em Produtos.
@@ -234,7 +234,7 @@ export default function LancarCompra({ empresaId }) {
           }).select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque').single()
         if (error) throw error
         setProdutos(p => [...p, d])
-        poeItem({ tipo: 'produto', id: d.id, nome: d.nome, custo: d.preco_custo, categoria: d.categoria, controla_estoque: true })
+        poeItem({ tipo: 'produto', id: d.id, nome: d.nome, custo: d.preco_custo, categoria: d.categoria, controla_estoque: true, qtd: novo.qtd })
       }
       setNovo(null)
     } catch (e) {
@@ -464,7 +464,7 @@ export default function LancarCompra({ empresaId }) {
             })}
             {!novo && (
               <button type="button" className="btn btn-secondary"
-                onClick={() => setNovo({ nome: busca.trim(), tipo: 'materia', unidade: 'kg', custo: '', minimo: '', categoria: '' })}
+                onClick={() => setNovo({ nome: busca.trim(), tipo: 'materia', unidade: 'kg', qtd: '', custo: '', minimo: '', categoria: '' })}
                 style={{ textAlign: 'left', padding: '10px 12px', borderStyle: 'dashed' }}>
                 ➕ Cadastrar “{busca.trim()}” como item novo
               </button>
@@ -497,6 +497,10 @@ export default function LancarCompra({ empresaId }) {
                       </select>
                     </div>
                   )}
+                  <div>
+                    <label style={lbl}>Quantidade que está entrando{novo.tipo === 'materia' ? ` (${novo.unidade})` : ''}</label>
+                    <input inputMode="decimal" value={novo.qtd} placeholder="ex.: 2" onChange={e => setNovo({ ...novo, qtd: e.target.value })} style={{ ...inp, width: 150 }} />
+                  </div>
                   <div>
                     <label style={lbl}>Valor pago por {novo.tipo === 'materia' ? novo.unidade : 'unidade'} (R$)</label>
                     <input inputMode="decimal" value={novo.custo} placeholder="0,00" onChange={e => setNovo({ ...novo, custo: e.target.value })} style={{ ...inp, width: 130 }} />
