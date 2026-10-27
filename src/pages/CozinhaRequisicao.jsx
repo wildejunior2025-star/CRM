@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
-import { ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
+import { CATEGORIAS_INSUMO, ICONE_CATEGORIA } from '../lib/categoriasFinanceiro'
 import '../components/Page.css'
 
 // COZINHA — o que sai do estoque (almoxarifado) pra cozinha e o que volta no fim do dia.
@@ -45,6 +45,7 @@ export default function CozinhaRequisicao({ empresaId }) {
   const [linhas, setLinhas] = useState([])
   const [busca, setBusca] = useState('')
   const [obs, setObs] = useState('')
+  const [catSel, setCatSel] = useState(null)       // categoria aberta nos cartões (igual ao "+ Vender")
   const [salvando, setSalvando] = useState(false)
   const [ultima, setUltima] = useState(null)       // última entrega do cozinheiro escolhido (pra repetir)
 
@@ -123,6 +124,20 @@ export default function CozinhaRequisicao({ empresaId }) {
         return pa - pb || a.nome.localeCompare(b.nome)
       }).slice(0, 8)
   }, [busca, materias, noCarrinho])
+
+  // Cartões por categoria (pra quem prefere tocar em vez de digitar), na mesma ordem do estoque.
+  const porCategoria = useMemo(() => {
+    const mapa = new Map()
+    for (const m of materias) {
+      const c = m.categoria || 'Sem categoria'
+      if (!mapa.has(c)) mapa.set(c, [])
+      mapa.get(c).push(m)
+    }
+    const ordem = [...CATEGORIAS_INSUMO, 'Sem categoria']
+    return [...mapa.entries()]
+      .map(([cat, itens]) => ({ cat, itens: itens.sort((a, b) => a.nome.localeCompare(b.nome)) }))
+      .sort((a, b) => (ordem.indexOf(a.cat) + 1 || 99) - (ordem.indexOf(b.cat) + 1 || 99))
+  }, [materias])
 
   const poe = (m, qtd = '') => { setLinhas(ls => ls.some(l => l.id === m.id) ? ls : [...ls, { id: m.id, qtd }]); setBusca('') }
   const repetir = () => {
@@ -288,6 +303,41 @@ export default function CozinhaRequisicao({ empresaId }) {
               <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6 }}>Não achei "{busca}" no estoque de insumos (ou já está na entrega).</div>
             )}
           </div>
+
+          {/* Ou vai tocando: categoria → itens (igual ao "+ Vender") */}
+          {!busca.trim() && porCategoria.length > 0 && (() => {
+            const grade = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginTop: 10 }
+            const tile = { textAlign: 'left', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer', minHeight: 56 }
+            if (!catSel) return (
+              <div style={grade}>
+                {porCategoria.map(g => (
+                  <button key={g.cat} type="button" style={tile} onClick={() => setCatSel(g.cat)}>
+                    <b style={{ display: 'block', fontSize: 14 }}>{ICONE_CATEGORIA[g.cat] || '📋'} {g.cat}</b>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{g.itens.length} {g.itens.length === 1 ? 'item' : 'itens'}</span>
+                  </button>
+                ))}
+              </div>
+            )
+            const g = porCategoria.find(x => x.cat === catSel)
+            return (
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setCatSel(null)}>← Categorias</button>
+                <b style={{ marginLeft: 8 }}>{ICONE_CATEGORIA[catSel] || '📋'} {catSel}</b>
+                <div style={grade}>
+                  {(g?.itens || []).map(m => {
+                    const ja = noCarrinho.has(m.id)
+                    return (
+                      <button key={m.id} type="button" disabled={ja} onClick={() => poe(m)}
+                        style={{ ...tile, opacity: ja ? .5 : 1, borderColor: ja ? 'var(--primary)' : 'var(--border)' }}>
+                        <b style={{ display: 'block', fontSize: 14 }}>{ja ? '✓ ' : ''}{m.nome}</b>
+                        <span style={{ fontSize: 12, color: m.saldo <= 0 ? 'var(--danger, #dc2626)' : 'var(--text-muted)' }}>tem {qtdTxt(m.saldo)} {m.unidade}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
 
           {linhas.length > 0 && (
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
