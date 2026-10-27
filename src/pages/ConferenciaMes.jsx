@@ -20,7 +20,7 @@ const cartao = { background: 'var(--bg-card, var(--card, #fff))', border: '1px s
 const linha = (forte) => ({ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 0', fontSize: forte ? 17 : 15, fontWeight: forte ? 800 : 400 })
 const nav = { width: 44, height: 44, borderRadius: 999, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontSize: 20, cursor: 'pointer' }
 
-export default function ConferenciaMes() {
+export default function ConferenciaMes({ onContar }) {
   const hoje = new Date()
   const [mes, setMes] = useState({ a: hoje.getFullYear(), m: hoje.getMonth() })
   const [d, setD] = useState(null)
@@ -104,9 +104,16 @@ export default function ConferenciaMes() {
           </div>
 
           {/* Avisos honestos: o número só vale se o dado de base vale */}
-          {(c.estIni === 0 && c.compras > 0) && (
+          {!d.contou_inicio && (
             <div style={{ ...cartao, background: 'rgba(245,158,11,.1)', borderColor: 'rgba(245,158,11,.4)', fontSize: 14 }}>
-              ⚠️ <b>Mês de partida:</b> o estoque do início não foi contado, então o consumo real aparece maior do que o verdadeiro. A partir do mês que vem a conta fecha.
+              ⚠️ <b>Mês de partida:</b> o estoque do início nunca foi contado, então o "estoque no início" é só o que o sistema achava. Conte no dia 1º antes de abrir e o mês seguinte fecha certo.
+              {onContar && <div><button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={onContar}>📋 Contar estoque</button></div>}
+            </div>
+          )}
+          {d.contou_inicio && !d.contou_fim && !emAndamento && (
+            <div style={{ ...cartao, background: 'rgba(245,158,11,.1)', borderColor: 'rgba(245,158,11,.4)', fontSize: 14 }}>
+              ⚠️ <b>Sem contagem no fim do mês:</b> o "estoque no fim" é o do sistema, então perda e desvio não aparecem no consumo real. Conte no dia 1º.
+              {onContar && <div><button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={onContar}>📋 Contar estoque</button></div>}
             </div>
           )}
           {(d.produtos_sem_custo > 0 || d.insumos_sem_custo > 0) && (
