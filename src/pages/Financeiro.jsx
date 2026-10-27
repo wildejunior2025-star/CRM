@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido, FORMA_ENTREGA_LABEL } from '../lib/ifoodLiquido'
 import IfoodIcon from '../components/IfoodIcon'
@@ -61,9 +62,17 @@ export default function Financeiro() {
   const { profile } = useAuth()
   const empresaId = profile?.empresa_id
 
-  // Lembra a aba escolhida (não volta pro Recebimentos ao sair e voltar da tela).
-  const [aba, setAba] = useState(() => { try { const a = localStorage.getItem('fin_aba'); return !a || a === 'contas' ? 'recebimentos' : a } catch { return 'recebimentos' } })
-  const trocarAba = (id) => { setAba(id); try { localStorage.setItem('fin_aba', id) } catch { /* ignora */ } }
+  // A aba mora na URL (?aba=lucro): F5 e o botão voltar ficam na tela certa, e cada aba tem link próprio.
+  // Sem ?aba= na URL, cai na última que a pessoa usou (localStorage) — o comportamento de antes.
+  const [params, setParams] = useSearchParams()
+  const ABAS = ['recebimentos', 'lucro', 'fiado', 'ifood']
+  const doParam = params.get('aba')
+  const aba = ABAS.includes(doParam) ? doParam
+    : (() => { try { const a = localStorage.getItem('fin_aba'); return ABAS.includes(a) ? a : 'recebimentos' } catch { return 'recebimentos' } })()
+  const trocarAba = (id) => {
+    try { localStorage.setItem('fin_aba', id) } catch { /* ignora */ }
+    setParams({ aba: id })            // troca de aba zera a sub-aba (cada aba abre na sua primeira)
+  }
   const [periodoD, setPeriodoD] = useState('mes')
   const [custIni, setCustIni]   = useState(ymd(new Date()))
   const [custFim, setCustFim]   = useState(ymd(new Date()))

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { calcIfoodLiquido } from '../lib/ifoodLiquido'
 import { diasAbertosNoMes, comoFicaNoDia, carregarExcecoes } from '../lib/feriados'
@@ -108,7 +109,11 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const ontemYMD = addDia(hojeYMD, -1)
   const rotuloDia = ehHoje ? 'de hoje' : dia === ontemYMD ? 'de ontem' : 'do dia'
 
-  const [sub, setSub] = useState('hoje') // 'hoje' | 'historico'
+  // A sub-aba mora na URL (?aba=lucro&sub=compra): F5 continua na tela certa e cada uma tem link próprio.
+  const [params, setParams] = useSearchParams()
+  const SUBS = ['compra', 'hoje', 'historico', 'contas']
+  const sub = SUBS.includes(params.get('sub')) ? params.get('sub') : 'hoje'
+  const setSub = (id) => setParams(prev => { const n = new URLSearchParams(prev); n.set('aba', 'lucro'); n.set('sub', id); return n })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
