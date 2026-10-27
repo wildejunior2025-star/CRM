@@ -66,8 +66,10 @@ export default function CozinhaRequisicao({ empresaId }) {
       // O que a conta da loja ESPERA ter gasto: custo estimado dos pratos vendidos (ficha técnica ou % do vendido).
       // É o mesmo número do "Dia a dia" — a comparação com o gasto real da cozinha nasce daqui.
       const noInstante = (dia) => new Date(`${dia}T00:00:00-03:00`).toISOString()
-      const [f, m, r, ce] = await Promise.all([
+      const [f, pf, m, r, ce] = await Promise.all([
         supabase.from('funcionarios').select('id, nome, cargo').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+        // A equipe com LOGIN (tela Funcionários) também pede insumo — a loja pode ter cadastrado só ali (mig 0413).
+        supabase.from('profiles').select('id, nome, email, perfil, cargo, ativo').eq('empresa_id', empresaId),
         fetchAll(() => supabase.from('materia_prima_saldo').select('materia_prima_id, nome, unidade, custo, quantidade_atual, categoria').order('materia_prima_id')),
         supabase.from('requisicoes_cozinha').select('*, requisicao_itens(*)').eq('empresa_id', empresaId)
           .gte('data', de).lte('data', ate).order('created_at', { ascending: false }),
@@ -81,7 +83,17 @@ export default function CozinhaRequisicao({ empresaId }) {
       if (f.error) throw f.error
       if (m.error) throw m.error
       if (r.error) throw r.error
-      setFuncs(f.data || [])
+      // As duas listas numa só, sem repetir o mesmo nome. Dono (admin) e entregador não pedem insumo.
+      const pessoas = (f.data || []).map(x => ({ id: `f:${x.id}`, nome: x.nome, cargo: x.cargo || '' }))
+      const nomes = new Set(pessoas.map(x => norm(x.nome).trim()))
+      for (const x of (pf.error ? [] : (pf.data || []))) {
+        if (x.ativo === false || ['admin', 'super_admin', 'cliente', 'entregador'].includes(x.perfil)) continue
+        const nome = (x.nome || '').trim() || x.email
+        if (!nome || nomes.has(norm(nome).trim())) continue
+        nomes.add(norm(nome).trim())
+        pessoas.push({ id: `p:${x.id}`, nome, cargo: x.cargo || x.perfil || '' })
+      }
+      setFuncs(pessoas)
       setMaterias((m.data || []).map(x => ({ id: x.materia_prima_id, nome: x.nome, unidade: x.unidade, custo: Number(x.custo || 0), saldo: Number(x.quantidade_atual || 0), categoria: x.categoria })))
       setReqs(r.data || [])
     } catch (e) {
@@ -105,7 +117,7 @@ export default function CozinhaRequisicao({ empresaId }) {
     if (!funcId) return
     let vivo = true
     supabase.from('requisicoes_cozinha').select('data, requisicao_itens(materia_prima_id, quantidade)')
-      .eq('funcionario_id', funcId).order('created_at', { ascending: false }).limit(1)
+      .eq(funcId.startsWith('f:') ? 'funcionario_id' : 'profile_id', funcId.slice(2)).order('created_at', { ascending: false }).limit(1)
       .then(({ data }) => { if (vivo) setUltima(data?.[0] || null) })
     return () => { vivo = false }
   }, [funcId, reqs.length])
@@ -158,7 +170,7 @@ export default function CozinhaRequisicao({ empresaId }) {
     setSalvando(true)
     try {
       const { error } = await supabase.rpc('requisitar_insumos', {
-        p: { funcionario_id: funcId, observacao: obs, itens: prontas.map(l => ({ id: l.id, quantidade: num(l.qtd) })) },
+        p: { [funcId.startsWith('f:') ? 'funcionario_id' : 'profile_id']: funcId.slice(2), observacao: obs, itens: prontas.map(l => ({ id: l.id, quantidade: num(l.qtd) })) },
       })
       if (error) throw error
       setLinhas([]); setObs(''); setBusca('')
@@ -269,7 +281,7 @@ export default function CozinhaRequisicao({ empresaId }) {
 
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>QUEM PEDIU?</div>
           {funcs.length === 0 && !carregando && (
-            <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>Nenhum funcionário cadastrado. Cadastre em <b>Funcionários</b> e volte aqui.</div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>Ninguém da equipe cadastrado. Cadastre em <b>Funcionários</b> e volte aqui.</div>
           )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
             {funcsOrdenados.map(f => (
