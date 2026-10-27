@@ -319,7 +319,7 @@ export default function LancarCompra({ empresaId }) {
           .select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque, unidades_por_caixa, estoque_minimo')
           .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null).order('nome').order('id')),
         fetchAll(() => supabase.from('materias_primas')
-          .select('id, nome, unidade, custo, estoque_minimo').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
+          .select('id, nome, unidade, custo, estoque_minimo, categoria').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
         supabase.from('categoria_item_aprendida').select('termo, categoria').eq('empresa_id', empresaId).limit(2000),
         supabase.from('fornecedores').select('id, nome, cnpj').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(1000),
         supabase.from('compras_lancadas')
@@ -402,7 +402,8 @@ export default function LancarCompra({ empresaId }) {
   }, [novaLinha])
 
   const doProduto = (x) => ({ tipo: 'produto', id: x.id, nome: x.nome, custo: x.preco_custo, categoria: x.categoria, controla_estoque: x.controla_estoque, porCx: x.unidades_por_caixa, minimo: x.estoque_minimo })
-  const daMateria = (x) => ({ tipo: 'materia', id: x.id, nome: x.nome, custo: x.custo, unidade: x.unidade, minimo: x.estoque_minimo })
+  // A categoria do insumo (estoque organizado, mig 0408) vira a categoria do gasto: carvão é "Gás", não palpite pelo nome.
+  const daMateria = (x) => ({ tipo: 'materia', id: x.id, nome: x.nome, custo: x.custo, unidade: x.unidade, minimo: x.estoque_minimo, categoria: x.categoria })
 
   // Leitor de código de barras (USB é teclado) funciona aqui também, igual à Entrada de estoque.
   useEffect(() => {
@@ -607,10 +608,10 @@ export default function LancarCompra({ empresaId }) {
     try {
       const { data: d, error } = await supabase.from('materias_primas')
         .insert({ empresa_id: empresaId, nome, unidade: novo.unidade, custo: num(novo.custo), estoque_minimo: num(novo.minimo) })
-        .select('id, nome, unidade, custo, estoque_minimo').single()
+        .select('id, nome, unidade, custo, estoque_minimo, categoria').single()
       if (error) throw error
       setMaterias(m => [...m, d])
-      const baseNova = { tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, minimo: d.estoque_minimo }
+      const baseNova = { tipo: 'materia', id: d.id, nome: d.nome, custo: d.custo, unidade: d.unidade, minimo: d.estoque_minimo, categoria: d.categoria }
       if (novo.pendente) {
         // Veio de um item da nota: já fica ligado (o nome que a nota usa → esta matéria-prima nova).
         await salvarApelido(novo.descricao, baseNova)
