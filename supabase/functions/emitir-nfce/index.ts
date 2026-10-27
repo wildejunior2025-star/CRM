@@ -595,13 +595,19 @@ async function cancelar(sb: any, req: Request, notaId?: string, justificativa?: 
   if (just.length < 15) return { ok: false, error: "Escreva o motivo do cancelamento (mínimo 15 letras)" }
 
   const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")
-  const { data: u } = await sb.auth.getUser(jwt)
-  if (!u?.user) return { ok: false, error: "sessão inválida" }
-  const { data: prof } = await sb.from("profiles").select("empresa_id, perfil").eq("id", u.user.id).maybeSingle()
+  // O robo nfce-auto cancela em nome do sistema, com a chave de servico (so quem
+  // tem o segredo passa; igual a chave, nao parecida).
+  const chaveServico = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+  const ehServico = !!chaveServico && jwt === chaveServico
 
   const { data: nota } = await sb.from("nfce_notas").select("*").eq("id", notaId).maybeSingle()
   if (!nota) return { ok: false, error: "nota não encontrada" }
-  if (prof?.perfil !== "super_admin" && prof?.empresa_id !== nota.empresa_id) return { ok: false, error: "sem permissão" }
+  if (!ehServico) {
+    const { data: u } = await sb.auth.getUser(jwt)
+    if (!u?.user) return { ok: false, error: "sessão inválida" }
+    const { data: prof } = await sb.from("profiles").select("empresa_id, perfil").eq("id", u.user.id).maybeSingle()
+    if (prof?.perfil !== "super_admin" && prof?.empresa_id !== nota.empresa_id) return { ok: false, error: "sem permissão" }
+  }
   if (nota.status !== "autorizada") return { ok: false, error: "só dá pra cancelar nota autorizada" }
 
   const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", nota.empresa_id).maybeSingle()

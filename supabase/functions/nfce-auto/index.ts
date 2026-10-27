@@ -157,6 +157,73 @@ Deno.serve(async () => {
         }
       }
     }
+
+    // ── CANCELAMENTO: venda cancelada depois da nota → cancela a nota ──────────
+    // Vale pras notas emitidas depois que a loja ligou o automatico (nao mexe em
+    // nota antiga nem de loja que desligou). A SEFAZ aceita cancelar por um prazo;
+    // passou dele, o emissor recusa e o dono da FWC e avisado pra resolver a mao.
+    let canceladas = 0
+    for (const loja of lojas ?? []) {
+      if (canceladas >= MAX_POR_RODADA) break
+      const nome = (loja as any).empresas?.nome ?? loja.empresa_id
+      const desde = new Date(Math.max(new Date(loja.nfce_auto_desde).getTime(), Date.now() - 3 * 24 * 3600 * 1000)).toISOString()
+
+      const { data: notas } = await sb.from("nfce_notas")
+        .select("id, pedido_id, comanda_id, numero")
+        .eq("empresa_id", loja.empresa_id).eq("status", "autorizada").gte("created_at", desde).limit(150)
+      if (!notas?.length) continue
+
+      const idsPed = notas.map((n: any) => n.pedido_id).filter(Boolean)
+      const idsCom = notas.map((n: any) => n.comanda_id).filter(Boolean)
+      const cancelados = new Set<string>()
+      if (idsPed.length) {
+        const { data } = await sb.from("pedidos_delivery").select("id").in("id", idsPed).eq("status", "cancelado")
+        for (const p of data ?? []) cancelados.add(p.id)
+      }
+      if (idsCom.length) {
+        const { data } = await sb.from("comandas").select("id").in("id", idsCom).eq("status", "cancelada")
+        for (const c of data ?? []) cancelados.add(c.id)
+      }
+      const alvo = notas.filter((n: any) => cancelados.has(n.pedido_id ?? n.comanda_id))
+      if (!alvo.length) continue
+
+      const { data: tents } = await sb.from("nfce_auto_cancel").select("*").in("nota_id", alvo.map((n: any) => n.id))
+      const tentPorNota = new Map<string, any>((tents ?? []).map((t: any) => [t.nota_id, t]))
+
+      for (const n of alvo) {
+        if (canceladas >= MAX_POR_RODADA) break
+        const t = tentPorNota.get(n.id)
+        if (t && (t.desistiu || new Date(t.proxima_em).getTime() > Date.now())) continue
+
+        canceladas++
+        let ok = false, erro = ""
+        try {
+          const r = await fetch(`${SUPABASE_URL}/functions/v1/emitir-nfce`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY },
+            body: JSON.stringify({ acao: "cancelar", nota_id: n.id, justificativa: "Venda cancelada no sistema da loja (cancelamento automatico)" }),
+          })
+          const d = await r.json().catch(() => ({}))
+          ok = d?.ok === true
+          erro = String(d?.error ?? d?.mensagem ?? `HTTP ${r.status}`).slice(0, 300)
+        } catch (e) { erro = String(e).slice(0, 300) }
+
+        if (ok) { resumo.push({ loja: nome, nota: n.numero, cancelada: true }); continue }
+
+        const k = (t?.tentativas ?? 0) + 1
+        const desistiu = k >= 3
+        const proxima = new Date(Date.now() + k * 5 * 60 * 1000).toISOString()
+        if (t) await sb.from("nfce_auto_cancel").update({ tentativas: k, ultimo_erro: erro, proxima_em: proxima, desistiu }).eq("nota_id", n.id)
+        else await sb.from("nfce_auto_cancel").insert({ nota_id: n.id, empresa_id: loja.empresa_id, tentativas: k, ultimo_erro: erro, proxima_em: proxima, desistiu })
+        resumo.push({ loja: nome, nota: n.numero, cancelada: false, tentativa: k, erro })
+
+        if (desistiu && !t?.avisado) {
+          await sb.from("nfce_auto_cancel").update({ avisado: true }).eq("nota_id", n.id)
+          await avisarDono(sb,
+            `⚠️ *Cancelamento automático da NFC-e falhou* — ${nome}\n\nA venda foi cancelada, mas a nota nº ${n.numero ?? "?"} continua autorizada na SEFAZ.\nMotivo: ${erro}\n\n_Provavelmente passou do prazo de cancelamento: pode ser preciso fazer o evento de cancelamento por fora ou emitir devolução. Avise o contador da loja._`)
+        }
+      }
+    }
   } catch (e) {
     console.error("[nfce-auto] erro:", e)
     return new Response(JSON.stringify({ ok: false, erro: String(e).slice(0, 300) }), { status: 500 })
