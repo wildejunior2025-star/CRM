@@ -930,14 +930,24 @@ export default function Produtos() {
   const semEstoquePausado = (p) => !!empresa?.pausa_sem_estoque && !!p.pausado_por_estoque && p.controla_estoque !== false
     && Number(saldoLista.has(p.id) ? saldoLista.get(p.id) : 0) <= 0
 
+  // O aviso já leva pro conserto: a contagem, aberta na aba Revenda e com o produto buscado.
+  async function avisarSemEstoque(p) {
+    const ir = await confirmar({
+      titulo: `“${p.nome}” está sem estoque`,
+      texto: 'Ele foi pausado sozinho porque o estoque zerou, e só volta a vender quando tiver estoque. Se tem na prateleira, ajuste a quantidade (ou lance a compra) que ele volta na hora.',
+      textoOk: '📋 Ajustar o estoque',
+      textoCancelar: 'Agora não',
+      perigo: false,
+      icone: '📦',
+    })
+    if (ir) navigate(`/estoque?aba=contar&item=prod&busca=${encodeURIComponent(p.nome)}`)
+  }
+
   async function togglePausar(p) {
     const novo = !p.ativo
     // Pausado porque o estoque zerou: não volta na mão (o banco também recusa, mig 0419). Volta sozinho
     // quando entrar mercadoria — Lançar compra ou Contar estoque.
-    if (novo && semEstoquePausado(p)) {
-      window.alert(`"${p.nome}" está pausado porque o estoque zerou.\n\nPra voltar a vender, lance a compra (Estoque → Lançar compra) ou acerte na contagem — ele volta sozinho quando tiver estoque.`)
-      return
-    }
+    if (novo && semEstoquePausado(p)) { avisarSemEstoque(p); return }
     setProdutos(prev => prev.map(x => x.id === p.id ? { ...x, ativo: novo, disponivel_delivery: novo } : x))
     const { error } = await supabase.from('produtos')
       .update({ ativo: novo, disponivel_delivery: novo }).eq('id', p.id)
@@ -2801,10 +2811,7 @@ export default function Produtos() {
                     type="button"
                     onClick={() => {
                       const orig = editingId ? produtos.find(x => x.id === editingId) : null
-                      if (!form.ativo && orig && !orig.ativo && semEstoquePausado(orig)) {
-                        window.alert(`"${orig.nome}" está pausado porque o estoque zerou.\n\nPra voltar a vender, lance a compra (Estoque → Lançar compra) ou acerte na contagem — ele volta sozinho quando tiver estoque.`)
-                        return
-                      }
+                      if (!form.ativo && orig && !orig.ativo && semEstoquePausado(orig)) { avisarSemEstoque(orig); return }
                       setForm(f => ({ ...f, ativo: !f.ativo }))
                     }}
                     style={{

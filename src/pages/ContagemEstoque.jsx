@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { recadoDeErro } from '../lib/erroRede'
 import { CATEGORIAS_INSUMO } from '../lib/categoriasFinanceiro'
@@ -36,8 +37,10 @@ export default function ContagemEstoque({ empresaId }) {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
   const [aviso, setAviso] = useState(null)
-  const [aba, setAba] = useState('mp')            // 'mp' insumos | 'prod' revenda
-  const [busca, setBusca] = useState('')
+  // O aviso "sem estoque" do Catálogo chega aqui com ?item=prod&busca=<nome>: já abre no produto.
+  const [params] = useSearchParams()
+  const [aba, setAba] = useState(() => params.get('item') === 'prod' ? 'prod' : 'mp')   // 'mp' insumos | 'prod' revenda
+  const [busca, setBusca] = useState(() => params.get('busca') || '')
   const [catAberta, setCatAberta] = useState(null)
   const [salvando, setSalvando] = useState(false)
   // { 'mp:<id>': '12,5', 'prod:<id>': '24' } — o que já foi digitado
@@ -177,8 +180,10 @@ export default function ContagemEstoque({ empresaId }) {
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span>
               Última contagem: <b>{quando(ultima.feita_em)}</b>{ultima.feita_por_nome ? ` por ${ultima.feita_por_nome}` : ''} — {ultima.itens} itens,{' '}
-              {Number(ultima.valor_diferenca) === 0 ? 'tudo batia' : <b style={{ color: ultima.valor_diferenca < 0 ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
-                {ultima.valor_diferenca < 0 ? 'faltou' : 'sobrou'} {brl(Math.abs(ultima.valor_diferenca))}</b>}
+              {Number(ultima.itens_diferentes) === 0 ? 'tudo batia'
+                : Number(ultima.valor_diferenca) === 0 ? <b>{ultima.itens_diferentes} acertado{ultima.itens_diferentes > 1 ? 's' : ''}</b>
+                : <b style={{ color: ultima.valor_diferenca < 0 ? 'var(--danger, #dc2626)' : 'var(--success, #16a34a)' }}>
+                  {ultima.itens_diferentes} acertado{ultima.itens_diferentes > 1 ? 's' : ''} · {ultima.valor_diferenca < 0 ? 'faltou' : 'sobrou'} {brl(Math.abs(ultima.valor_diferenca))}</b>}
             </span>
             <button type="button" className="btn btn-secondary btn-sm" onClick={desfazer}>Desfazer</button>
           </div>
