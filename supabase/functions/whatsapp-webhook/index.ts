@@ -2630,7 +2630,7 @@ async function handleFecharPedido(
     // #1061 saiu com endereço completo e taxa R$ 0,00 por causa disso.
     let taxaFinal = tipoEntrega === "entrega" ? (taxaEntregaCalc != null ? taxaEntregaCalc : taxaEntrega) : 0
     if (tipoEntrega === "entrega" && endRua) {
-      const cfgB = acharBairroCfg(empresa.taxas_entrega_bairro, endBairro)
+      const cfgB = acharBairroCfg(empresa.taxas_entrega_bairro, endBairro, endCidade, empresa.cidade)
       if (cfgB && cfgB.entrega !== false) {
         taxaFinal = Number(cfgB.taxa) || 0
         console.log(`[Taxa] bairro "${endBairro}" → R$${taxaFinal}`)
@@ -3148,9 +3148,23 @@ function normBairro(s: string): string {
 // veio aparece dentro do nome cadastrado. Nos dois casos de "aparece dentro",
 // ganha o nome MAIS ESPECÍFICO — senão "Redinha" roubaria o endereço de
 // "Redinha Nova", que tem taxa própria.
-function acharBairroCfg(lista: any, bairroCliente: string | null): any {
+//
+// Mesmo nome em duas cidades (mig 0411): bairro sem cidade no nome é da cidade
+// da LOJA; endereço de outra cidade procura antes "<bairro> de <cidade>" e
+// depois a linha da cidade. Mesma régua do checkout e do banco.
+const semConectivo = (s: string | null | undefined) =>
+  normBairro(String(s ?? "")).replace(/[^a-z0-9 ]+/g, " ").replace(/\b(de|do|da|dos|das)\b/g, " ").replace(/\s+/g, " ").trim()
+function acharBairroCfg(lista: any, bairroCliente: string | null, cidadeCliente?: string | null, cidadeLoja?: string | null): any {
   const n = normBairro(bairroCliente || "")
-  if (!n || !Array.isArray(lista)) return null
+  if (!Array.isArray(lista)) return null
+  const cid = semConectivo(cidadeCliente), cidL = semConectivo(cidadeLoja)
+  if (cid.length >= 3 && (!cidL || (!cid.includes(cidL) && !cidL.includes(cid)))) {
+    const sc = lista.map((b: any) => ({ cfg: b, nome: semConectivo(b?.bairro) }))
+    const alvo = n ? semConectivo(`${bairroCliente} ${cidadeCliente}`) : null
+    const achou = (alvo && sc.find((x: any) => x.nome === alvo)) || sc.find((x: any) => x.nome === cid)
+    if (achou) return achou.cfg
+  }
+  if (!n) return null
   const cfgs = lista
     .map((b: any) => ({ cfg: b, nome: normBairro(String(b?.bairro ?? "")) }))
     .filter((x: any) => x.nome)
@@ -4530,7 +4544,8 @@ serve(async (req) => {
 
     // BAIRRO primeiro: taxa fixa ou bloqueio do bairro do cliente (prioridade sobre o km).
     const bairroCliente = carrinhoEndereco.bairro ?? cliente?.bairro ?? null
-    const cfgBairro = acharBairroCfg(empresa.taxas_entrega_bairro, bairroCliente)
+    const cfgBairro = acharBairroCfg(empresa.taxas_entrega_bairro, bairroCliente,
+      carrinhoEndereco.cidade ?? cliente?.cidade ?? null, empresa.cidade)
     const bairroBloqueado = aceitaDelivery && !!cfgBairro && cfgBairro.entrega === false
     const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
     // Taxa de entrega: bairro (taxa fixa) > km (faixas por distância) > taxa fixa da loja.
@@ -6140,7 +6155,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           .select("endereco_rua, endereco_numero, endereco_bairro, endereco_cidade, endereco_lat, endereco_lng")
           .eq("empresa_id", empresaId).eq("phone", phone).maybeSingle()
         if (e?.endereco_rua && e?.endereco_numero) {
-          const cfg = acharBairroCfg(empresa.taxas_entrega_bairro, e.endereco_bairro)
+          const cfg = acharBairroCfg(empresa.taxas_entrega_bairro, e.endereco_bairro, e.endereco_cidade, empresa.cidade)
           let linhaTaxa = ""
           if (cfg && cfg.entrega === false) {
             linhaTaxa = `😕 No bairro *${e.endereco_bairro}* a gente não está entregando.`

@@ -87,6 +87,7 @@ Deno.serve(async (req) => {
         p_bairro:  pedido.endereco_bairro ?? null,
         p_lat:     pedido.endereco_lat ?? null,
         p_lng:     pedido.endereco_lng ?? null,
+        p_cidade:  pedido.endereco_cidade ?? null,
       })
       const esperada = Number(taxaCerta ?? 0)
       if (esperada > 0 && Number(pedido.taxa_entrega ?? 0) < esperada - 0.009) {

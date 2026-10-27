@@ -156,9 +156,23 @@ function mesmoLugar(a, b) {
 // veio aparece dentro do nome cadastrado. Nos dois casos de "aparece dentro",
 // ganha o nome MAIS ESPECÍFICO — senão "Redinha" roubaria o endereço de
 // "Redinha Nova", que tem taxa própria.
-function acharBairroCfg(lista, bairroCliente) {
+//
+// Bairro com o mesmo nome em duas cidades (mig 0411): o "Jardins" de São Gonçalo
+// e o de Extremoz. Bairro sem cidade no nome é bairro da cidade da LOJA; endereço
+// de outra cidade procura antes "<bairro> de <cidade>" e depois a linha da
+// cidade ("Extremoz"). Mesma régua da taxa_entrega_esperada do banco.
+const semConectivo = s => normBairro(s).replace(/\b(de|do|da|dos|das)\b/g, ' ').replace(/\s+/g, ' ').trim()
+function acharBairroCfg(lista, bairroCliente, cidadeCliente, cidadeLoja) {
   const n = normBairro(bairroCliente)
-  if (!n || !Array.isArray(lista)) return null
+  if (!Array.isArray(lista)) return null
+  const cid = semConectivo(cidadeCliente), cidL = semConectivo(cidadeLoja)
+  if (cid.length >= 3 && (!cidL || (!cid.includes(cidL) && !cidL.includes(cid)))) {
+    const sc = lista.map(b => ({ cfg: b, nome: semConectivo(b?.bairro ?? '') }))
+    const alvo = n ? semConectivo(`${bairroCliente} ${cidadeCliente}`) : null
+    const achou = (alvo && sc.find(x => x.nome === alvo)) || sc.find(x => x.nome === cid)
+    if (achou) return achou.cfg
+  }
+  if (!n) return null
   const cfgs = lista
     .map(b => ({ cfg: b, nome: normBairro(b?.bairro ?? '') }))
     .filter(x => x.nome)
@@ -1474,7 +1488,7 @@ export default function DeliveryCheckout() {
   // se não der pra calcular, cai na taxa fixa passada pela loja.
   const temFaixas = Array.isArray(lojaEndereco?.taxas_entrega_km) && lojaEndereco.taxas_entrega_km.length > 0
   // BAIRRO primeiro: se o bairro do cliente estiver configurado, ele manda (taxa fixa ou bloqueio).
-  const cfgBairro = acharBairroCfg(lojaEndereco?.taxas_entrega_bairro, form.bairro)
+  const cfgBairro = acharBairroCfg(lojaEndereco?.taxas_entrega_bairro, form.bairro, form.cidade, lojaEndereco?.cidade)
   const bairroBloqueado = tipo === 'entrega' && !!cfgBairro && cfgBairro.entrega === false
   const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
   const taxaCalculada = (() => {

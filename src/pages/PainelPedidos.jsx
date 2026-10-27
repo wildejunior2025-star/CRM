@@ -1505,9 +1505,22 @@ function normBairro(s) {
 // veio aparece dentro do nome cadastrado. Nos dois casos de "aparece dentro",
 // ganha o nome MAIS ESPECÍFICO — senão "Redinha" roubaria o endereço de
 // "Redinha Nova", que tem taxa própria.
-function acharBairroCfg(lista, bairroCliente) {
+//
+// Mesmo nome em duas cidades (mig 0411): bairro sem cidade no nome é da cidade
+// da LOJA; endereço de outra cidade procura antes "<bairro> de <cidade>" e
+// depois a linha da cidade. Mesma régua do checkout e do banco.
+const semConectivo = s => normBairro(s).replace(/\b(de|do|da|dos|das)\b/g, ' ').replace(/\s+/g, ' ').trim()
+function acharBairroCfg(lista, bairroCliente, cidadeCliente, cidadeLoja) {
   const n = normBairro(bairroCliente)
-  if (!n || !Array.isArray(lista)) return null
+  if (!Array.isArray(lista)) return null
+  const cid = semConectivo(cidadeCliente), cidL = semConectivo(cidadeLoja)
+  if (cid.length >= 3 && (!cidL || (!cid.includes(cidL) && !cidL.includes(cid)))) {
+    const sc = lista.map(b => ({ cfg: b, nome: semConectivo(b?.bairro ?? '') }))
+    const alvo = n ? semConectivo(`${bairroCliente} ${cidadeCliente}`) : null
+    const achou = (alvo && sc.find(x => x.nome === alvo)) || sc.find(x => x.nome === cid)
+    if (achou) return achou.cfg
+  }
+  if (!n) return null
   const cfgs = lista
     .map(b => ({ cfg: b, nome: normBairro(b?.bairro ?? '') }))
     .filter(x => x.nome)
@@ -1530,7 +1543,7 @@ function acharBairroCfg(lista, bairroCliente) {
  * saber se a taxa é a do bairro, a da distância ou a fixa da loja.
  */
 async function taxaDoEndereco(empresa, end) {
-  const cfg = acharBairroCfg(empresa?.taxas_entrega_bairro, end.bairro)
+  const cfg = acharBairroCfg(empresa?.taxas_entrega_bairro, end.bairro, end.cidade, empresa?.cidade)
   if (cfg && cfg.entrega === false) {
     return { taxa: 0, bloqueado: true, texto: `A loja não entrega no bairro ${cfg.bairro}.` }
   }

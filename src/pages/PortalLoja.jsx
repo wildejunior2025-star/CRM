@@ -759,6 +759,7 @@ export default function PortalLoja() {
       p_bairro:  form.bairro?.trim() || null,
       p_lat:     coords?.lat ?? null,
       p_lng:     coords?.lng ?? null,
+      p_cidade:  form.cidade?.trim() || null,
     })
     if (e || data == null) return null
     return Number(data)
