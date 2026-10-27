@@ -125,3 +125,17 @@
 .cp2-nota-rodape { margin: 4px 4px 0; font-size: 13.5px; color: var(--text-muted); }
 .cp2-rodape { margin: 26px 4px 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 .cp2-link { background: none; border: 0; padding: 0; color: var(--primary); font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* ── Histórico de estoque ── */
+.cp2-cards-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .cp2-cards-2 { grid-template-columns: 1fr; } }
+.cp2-cat-estoque { grid-template-columns: 16px minmax(0, 1fr) auto auto; }
+.cp2-cat-qtd { font-size: 13px; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ce-movs { list-style: none; margin: 4px 0 10px 26px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ce-movs li { display: grid; grid-template-columns: 92px minmax(0, 1fr) 64px 84px; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+.ce-quando { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ce-motivo { font-weight: 600; }
+.ce-qtd, .ce-valor { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ce-obs { grid-column: 2 / -1; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ce-mais { color: var(--text-muted); font-size: 12.5px; background: transparent !important; }
+@media (max-width: 560px) { .ce-movs li { grid-template-columns: 78px minmax(0, 1fr) 52px 72px; } }
