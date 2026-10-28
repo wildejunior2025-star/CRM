@@ -293,16 +293,21 @@ function CameraNaTela({ onFoto, onFechar, onFalhou }) {
     c.getContext('2d').drawImage(v, 0, 0)
     c.toBlob((b) => { if (b) onFoto(new File([b], 'nota.jpg', { type: 'image/jpeg' })) }, 'image/jpeg', 0.92)
   }
+  // Botões POR CIMA do vídeo, presos no rodapé (28/10/2026): com o vídeo num flex, no celular ele
+  // empurrava os botões pra fora da tela e o "Perguntar à IA" (z-index 9000) ficava por cima.
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#000', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, height: '100dvh', zIndex: 10000, background: '#000', overflow: 'hidden' }}>
       <video ref={videoRef} playsInline muted onLoadedMetadata={() => setPronta(true)}
-        style={{ flex: 1, width: '100%', objectFit: 'contain', background: '#000' }} />
-      <div style={{ padding: '10px 14px 4px', color: '#ddd', fontSize: 13, textAlign: 'center' }}>
-        Enquadre a nota inteira, com boa luz, e toque em <strong>Bater foto</strong>.
-      </div>
-      <div style={{ display: 'flex', gap: 10, padding: 14 }}>
-        <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onFechar}>Cancelar</button>
-        <button type="button" className="btn btn-primary" style={{ flex: 2, fontSize: 16 }} disabled={!pronta} onClick={bater}>📸 Bater foto</button>
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000' }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '12px 14px calc(16px + env(safe-area-inset-bottom))',
+        background: 'linear-gradient(transparent, rgba(0,0,0,.85) 35%)' }}>
+        <div style={{ color: '#eee', fontSize: 13, textAlign: 'center', marginBottom: 10 }}>
+          Enquadre a nota inteira, com boa luz, e toque em <strong>Bater foto</strong>.
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1, padding: '14px 0' }} onClick={onFechar}>Cancelar</button>
+          <button type="button" className="btn btn-primary" style={{ flex: 2, fontSize: 17, padding: '14px 0' }} disabled={!pronta} onClick={bater}>📸 Bater foto</button>
+        </div>
       </div>
     </div>
   )
