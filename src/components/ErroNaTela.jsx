@@ -15,7 +15,12 @@ import { Component } from 'react'
 const SINAIS_DE_VERSAO_VELHA = [
   '_result',                                  // React.lazy: o pedaço não chegou
   '_payload',
-  'dynamically imported module',              // Chrome/Firefox
+  // Chrome/Edge escrevem o mesmo erro do React.lazy sem a palavra `_result`:
+  // "Cannot read properties of undefined (reading 'default')". Era o que o
+  // Braseiro via em 28/10/2026 (app FWC Gestor, 16 min depois de uma publicação)
+  // e, sem esta linha, caia em "Esta tela travou" em vez de recarregar sozinho.
+  "(reading 'default')",
+  'dynamically imported module',            // Chrome/Firefox
   'importing a module script failed',         // Safari / iPhone
   'unable to preload css',
   'is not a valid javascript mime type',      // veio HTML no lugar do JS
