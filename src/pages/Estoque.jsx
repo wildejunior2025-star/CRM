@@ -726,6 +726,7 @@ export default function Estoque({ embutido = false }) {
                     <input
                       inputMode="decimal"
                       name="valor_pago"
+                      autoComplete="off"
                       placeholder="Ex.: 120,00"
                       value={movForm.valor_pago}
                       onChange={handleMovChange}
