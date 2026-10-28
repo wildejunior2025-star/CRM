@@ -1191,7 +1191,8 @@ export default function PresencialHistorico() {
                         <span style={{ fontSize: 13.5 }}>
                           💳 Pagamento: <strong>{formaComOrigem(c)}</strong>
                         </span>
-                        {ehAdmin && editandoForma !== c.id && cobrancasOnlinePagas(c).length === 0 && (
+                        {/* Vendedor também troca: é quem cuida do caixa (Braseiro Trailer, 27/10/2026). */}
+                        {(ehAdmin || profile?.perfil === 'vendedor') && editandoForma !== c.id && cobrancasOnlinePagas(c).length === 0 && (
                           <button type="button" onClick={() => setEditandoForma(c.id)}
                             style={{ padding: '5px 12px', borderRadius: 8, cursor: 'pointer', border: '1px solid var(--border)',
                               background: 'transparent', color: 'var(--primary)', fontSize: 12.5, fontWeight: 700 }}>
