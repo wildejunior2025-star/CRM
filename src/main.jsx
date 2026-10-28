@@ -267,6 +267,19 @@ else updateSW = registerSW({
   },
 })
 
+// A CÂMERA DERRUBOU O APP (AGV, 28/10/2026): no app da Play Store, o Android fecha o app no fundo
+// pra abrir a câmera em celular com pouca memória. Ele reabre do zero na tela inicial (o Painel) e a
+// foto se perde. Quem abriu a câmera deixou marcado de onde veio: se o app renasce em até 5 min,
+// volta pra lá (o rascunho da compra já está salvo) com um aviso.
+try {
+  const volta = JSON.parse(localStorage.getItem('fwc_volta_camera') || 'null')
+  localStorage.removeItem('fwc_volta_camera')
+  if (volta?.url && Date.now() - Number(volta.em) < 5 * 60 * 1000 && volta.url !== location.pathname + location.search) {
+    const sep = volta.url.includes('?') ? '&' : '?'
+    history.replaceState(null, '', `${volta.url}${sep}camera_perdida=1`)
+  }
+} catch { /* sem localStorage: segue normal */ }
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
