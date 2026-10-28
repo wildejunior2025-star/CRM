@@ -274,7 +274,7 @@ else updateSW = registerSW({
 try {
   const volta = JSON.parse(localStorage.getItem('fwc_volta_camera') || 'null')
   localStorage.removeItem('fwc_volta_camera')
-  if (volta?.url && Date.now() - Number(volta.em) < 5 * 60 * 1000 && volta.url !== location.pathname + location.search) {
+  if (volta?.url && Date.now() - Number(volta.em) < 5 * 60 * 1000) {
     const sep = volta.url.includes('?') ? '&' : '?'
     history.replaceState(null, '', `${volta.url}${sep}camera_perdida=1`)
   }

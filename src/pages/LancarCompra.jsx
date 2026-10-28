@@ -259,6 +259,49 @@ function lerRascunho(empresaId) {
   } catch { return null }
 }
 
+// CÂMERA NA PRÓPRIA TELA (AGV, 28/10/2026): mandar o celular pro app de câmera fazia o Android
+// fechar a página/o app no fundo (celular com pouca memória) — a foto voltava pra uma tela que já
+// não existia e sumia. Aqui o vídeo roda dentro da página: não sai de lugar nenhum, não tem o que fechar.
+function CameraNaTela({ onFoto, onFechar, onFalhou }) {
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const [pronta, setPronta] = useState(false)
+  const falhouRef = useRef(onFalhou)
+  useEffect(() => { falhouRef.current = onFalhou })
+  useEffect(() => {
+    let vivo = true
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }, audio: false,
+    }).then((s) => {
+      if (!vivo) { s.getTracks().forEach(t => t.stop()); return }
+      streamRef.current = s
+      if (videoRef.current) { videoRef.current.srcObject = s; videoRef.current.play().catch(() => {}) }
+    }).catch(() => { if (vivo) falhouRef.current() })
+    return () => { vivo = false; streamRef.current?.getTracks().forEach(t => t.stop()) }
+  }, [])
+  function bater() {
+    const v = videoRef.current
+    if (!v?.videoWidth) return
+    const c = document.createElement('canvas')
+    c.width = v.videoWidth; c.height = v.videoHeight
+    c.getContext('2d').drawImage(v, 0, 0)
+    c.toBlob((b) => { if (b) onFoto(new File([b], 'nota.jpg', { type: 'image/jpeg' })) }, 'image/jpeg', 0.92)
+  }
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: '#000', display: 'flex', flexDirection: 'column' }}>
+      <video ref={videoRef} playsInline muted onLoadedMetadata={() => setPronta(true)}
+        style={{ flex: 1, width: '100%', objectFit: 'contain', background: '#000' }} />
+      <div style={{ padding: '10px 14px 4px', color: '#ddd', fontSize: 13, textAlign: 'center' }}>
+        Enquadre a nota inteira, com boa luz, e toque em <strong>Bater foto</strong>.
+      </div>
+      <div style={{ display: 'flex', gap: 10, padding: 14 }}>
+        <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onFechar}>Cancelar</button>
+        <button type="button" className="btn btn-primary" style={{ flex: 2, fontSize: 16 }} disabled={!pronta} onClick={bater}>📸 Bater foto</button>
+      </div>
+    </div>
+  )
+}
+
 export default function LancarCompra({ empresaId }) {
   const navigate = useNavigate()
   // O rascunho é lido UMA vez, na montagem; a partir daí o estado manda.
@@ -311,7 +354,14 @@ export default function LancarCompra({ empresaId }) {
   // Câmera direto (AGV, 28/10/2026): com "image/*,application/pdf" e sem capture, o celular do dono
   // abria a galeria em vez da câmera. capture="environment" manda abrir a câmera traseira; no PC é ignorado.
   const camRef = useRef(null)
+  const [camNaTela, setCamNaTela] = useState(false)
   function abrirCamera() {
+    // A câmera na tela não sai da página. Só se o navegador não deixar (sem permissão, aparelho velho)
+    // é que cai no app de câmera do celular.
+    if (navigator.mediaDevices?.getUserMedia) { setCamNaTela(true); return }
+    abrirCameraDoCelular()
+  }
+  function abrirCameraDoCelular() {
     // Se o Android derrubar o app pra abrir a câmera, o main.jsx traz a pessoa de volta pra cá.
     try {
       const url = (window.location.pathname + window.location.search).replace(/[?&]camera_perdida=1/, '')
@@ -1157,6 +1207,8 @@ export default function LancarCompra({ empresaId }) {
 
   return (
     <div>
+      {camNaTela && <CameraNaTela onFechar={() => setCamNaTela(false)} onFalhou={() => { setCamNaTela(false); abrirCameraDoCelular() }}
+        onFoto={(arq) => { setCamNaTela(false); importarFoto(arq) }} />}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 18, fontWeight: 800 }}>Lançar compra</div>
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
