@@ -24,7 +24,7 @@ const PORT = 9110
 // Auto-atualização: a cada release eu subo o .exe novo E o impressora-version.json
 // com o número novo. Este app compara e, se tiver versão maior, baixa e se instala
 // sozinho (silencioso). BUMP a cada mudança no app.
-const APP_VERSION = 51
+const APP_VERSION = 52
 
 // Status em que o pedido AINDA NAO ANDOU e, por isso, vira papel. Depois de
 // 'pronto' ou 'saiu_entrega' o cupom so sai se alguem apertar reimprimir.
@@ -650,6 +650,25 @@ async function imprimirPedido(p, jaReservado) {
       return
     }
   } catch (e) { /* sem resposta — segue e imprime */ }
+
+  // CUPOM SEM PRODUTOS EM PEDIDO GRANDE (28/10/2026, CDBom #1567)
+  //
+  // O pedido nasce 'aguardando' e vira 'confirmado' meio segundo depois — e e esse
+  // UPDATE que traz o pedido pra ca. So que o tempo real NAO manda coluna grande
+  // que nao mudou no UPDATE: o Postgres guarda `itens` fora da linha (TOAST) quando
+  // o pedido tem muito sabor/complemento, e o evento chega com `itens` ausente.
+  // O cupom saia com o cabecalho, o endereco e o total — e nenhum produto.
+  // Pedido pequeno nao e afetado, por isso so aparecia nos grandes. Se faltou a
+  // lista, busca o pedido inteiro antes de montar o papel.
+  if (!Array.isArray(p.itens) || !p.itens.length) {
+    try {
+      const { data: cheio } = await supabase.from('pedidos_delivery').select('*').eq('id', p.id).maybeSingle()
+      if (cheio && Array.isArray(cheio.itens) && cheio.itens.length) {
+        log('  (#' + (p.numero_pedido ?? p.id) + ' chegou sem os itens — busquei o pedido completo: ' + cheio.itens.length + ' item(ns))')
+        p = cheio
+      }
+    } catch (e) { /* sem resposta — imprime com o que veio */ }
+  }
 
   marcarImpresso(p.id)
   const saiu = imprimir(p)
