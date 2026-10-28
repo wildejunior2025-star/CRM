@@ -9924,7 +9924,10 @@ export default function PainelPedidos() {
     // papel em lugar nenhum, e ninguem via erro.
     // Agora o Painel EMPURRA a comanda pro app: ele esta logado e ja tem o item
     // na mao. O app pula os ids que ja imprimiu, entao nao sai 2 via.
-    if (!deveAutoImprimir() || (item.status && item.status !== 'pendente')) return
+    // 27/10/2026, Braseiro Trailer: o app estava neste PC mas o "imprimir automático"
+    // do Painel estava desligado — o Painel se calava e o pedido do celular ficava sem
+    // papel. App FWC presente já basta pra empurrar (ele pula id repetido).
+    if (!(deveAutoImprimir() || fwcImprimeRef.current) || (item.status && item.status !== 'pendente')) return
     const cid = item.comanda_id
     const buf = mesaPrintRef.current
     if (!buf[cid]) buf[cid] = { itens: [], timer: null }
