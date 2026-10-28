@@ -37,6 +37,7 @@ export default function RaioEntrega() {
   const ringsRef  = useRef([])
   const gradeRef  = useRef(null)   // { passo_m, celulas: [[lat,lng,km]] } — mapa pela rua
   const gradeLayerRef = useRef(null)
+  const gradeCanvasRef = useRef(null) // um só desenhista: criar um por redesenho empilhava canvas
   const markerRef = useRef(null)
   const raioVal   = useRef(10)    // espelho do estado, pra funções do mapa lerem o valor de agora
   const taxasVal  = useRef([])
@@ -437,7 +438,7 @@ export default function RaioEntrega() {
     }
 
     initMap()
-    return () => { if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null; gradeLayerRef.current = null; setMapaPronto(false) } }
+    return () => { if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null; gradeLayerRef.current = null; gradeCanvasRef.current = null; setMapaPronto(false) } }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latitude, longitude])
 
@@ -488,20 +489,24 @@ export default function RaioEntrega() {
     const g = gradeRef.current
     const ponto = markerRef.current?.getLatLng()
     desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
-    if (!pelaRua || !g || gradeStatus !== 'ok') return
+    const comGrade = pelaRua && !!g && gradeStatus === 'ok'
+    // O círculo vermelho é o raio em linha reta: com a grade vira só contorno de referência.
+    circleRef.current?.setStyle({ dashArray: comGrade ? '6 8' : null, weight: comGrade ? 1.5 : 3 })
+    if (!comGrade) return
     const lat0 = g.origem?.[0] ?? latitude
     const dLat = g.passo_m / 111320 / 2
     const dLng = g.passo_m / (111320 * Math.cos(lat0 * Math.PI / 180)) / 2
     const raioAgora = Number(raio) || 10
-    const renderer = L.canvas({ padding: 0.2 })
+    if (!gradeCanvasRef.current) gradeCanvasRef.current = L.canvas({ padding: 0.2 })
+    const renderer = gradeCanvasRef.current
     const camada = L.layerGroup()
     for (const [la, ln, km] of g.celulas) {
       if (km > raioAgora) continue
       const forte = destaqueKm != null && km <= destaqueKm
       L.rectangle([[la - dLat, ln - dLng], [la + dLat, ln + dLng]], {
         renderer, stroke: false, interactive: false,
-        fillColor: forte ? '#a21caf' : '#c084fc',
-        fillOpacity: forte ? 0.5 : (destaqueKm != null ? 0.12 : 0.28),
+        fillColor: forte ? '#a21caf' : '#c026d3',
+        fillOpacity: forte ? 0.55 : (destaqueKm != null ? 0.15 : 0.3),
       }).addTo(camada)
     }
     camada.addTo(map)
