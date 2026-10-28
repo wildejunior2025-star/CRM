@@ -276,7 +276,7 @@ try {
   localStorage.removeItem('fwc_volta_camera')
   if (volta?.url && Date.now() - Number(volta.em) < 5 * 60 * 1000) {
     const sep = volta.url.includes('?') ? '&' : '?'
-    history.replaceState(null, '', `${volta.url}${sep}camera_perdida=1`)
+    history.replaceState(null, '', `${volta.url}${sep}foto_perdida=${volta.origem === 'galeria' ? 'galeria' : 'camera'}`)
   }
 } catch { /* sem localStorage: segue normal */ }
 

@@ -357,9 +357,12 @@ export default function LancarCompra({ empresaId }) {
   const [totalEsperado, setTotalEsperado] = useState(rascunho?.totalEsperado ?? null)  // total impresso na nota
   const [importando, setImportando] = useState(null)    // texto enquanto trabalha
   const [avisoImport, setAvisoImport] = useState(() => (
-    new URLSearchParams(window.location.search).has('camera_perdida')
-      ? { tipo: 'info', texto: 'O celular fechou o app quando abriu a câmera, e a foto se perdeu (acontece em celular com pouca memória). Faça assim: tire a foto da nota pela câmera do próprio celular e depois toque em “🖼 Galeria ou PDF” e escolha ela.' }
-      : null
+    (() => {
+      const perdida = new URLSearchParams(window.location.search).get('foto_perdida')
+      if (perdida === 'galeria') return { tipo: 'info', texto: 'O celular fechou a página enquanto a galeria estava aberta, e a foto se perdeu (acontece em celular com pouca memória). Use o “📷 Tirar foto”: a câmera abre aqui dentro e não sai da página.' }
+      if (perdida) return { tipo: 'info', texto: 'O celular fechou a página quando abriu a câmera, e a foto se perdeu (acontece em celular com pouca memória). Tente o “📷 Tirar foto” de novo — ele abre a câmera aqui dentro.' }
+      return null
+    })()
   ))  // { tipo, texto, chave?, ciencia?, tentar?, foto? }
   const fotoRef = useRef(null)
   // Câmera direto (AGV, 28/10/2026): com "image/*,application/pdf" e sem capture, o celular do dono
@@ -372,13 +375,32 @@ export default function LancarCompra({ empresaId }) {
     if (navigator.mediaDevices?.getUserMedia) { setCamNaTela(true); return }
     abrirCameraDoCelular()
   }
-  function abrirCameraDoCelular() {
-    // Se o Android derrubar o app pra abrir a câmera, o main.jsx traz a pessoa de volta pra cá.
+  // Antes de sair pra câmera/galeria do celular: deixa marcado de onde saiu. Se o Android fechar a
+  // página no fundo (celular fraco), o main.jsx traz de volta com o aviso. Se a página SOBREVIVEU, o
+  // foco volta pra ela e a marca é apagada — cancelar a galeria não deixa aviso falso pra depois.
+  function marcarSaida(origem) {
     try {
-      const url = (window.location.pathname + window.location.search).replace(/[?&]camera_perdida=1/, '')
-      localStorage.setItem('fwc_volta_camera', JSON.stringify({ url, em: Date.now() }))
+      const url = (window.location.pathname + window.location.search).replace(/[?&]foto_perdida=[a-z]+/, '')
+      localStorage.setItem('fwc_volta_camera', JSON.stringify({ url, em: Date.now(), origem }))
+      const limpar = () => { try { localStorage.removeItem('fwc_volta_camera') } catch { /* ok */ } }
+      window.addEventListener('focus', limpar, { once: true })
     } catch { /* ok */ }
+  }
+  function abrirCameraDoCelular() {
+    marcarSaida('camera')
     camRef.current?.click()
+  }
+  // Galeria que volta sem a foto (celular do dono do AGV, 28/10/2026): a página fica, mas o arquivo
+  // escolhido não chega no campo e a tela ficava parada sem dizer nada. Se o foco volta e em 3 s não
+  // chegou arquivo, avisa e aponta a câmera da tela, que funciona nesse aparelho.
+  const galeriaRecebeuRef = useRef(false)
+  function abrirGaleria() {
+    marcarSaida('galeria')
+    galeriaRecebeuRef.current = false
+    window.addEventListener('focus', () => setTimeout(() => {
+      if (!galeriaRecebeuRef.current) setAvisoImport({ tipo: 'info', texto: 'A foto da galeria não chegou aqui (este celular não entregou o arquivo). Use o “📷 Tirar foto”: a câmera abre aqui dentro e lê na hora.' })
+    }, 3000), { once: true })
+    fotoRef.current?.click()
   }
   const importarRef = useRef(null)
   const [aberta, setAberta] = useState(null)            // compra aberta no histórico
@@ -1278,11 +1300,11 @@ export default function LancarCompra({ empresaId }) {
             style={{ ...inp, flex: '1 1 280px', fontSize: 15, padding: '11px 12px' }} />
           <button type="button" className="btn btn-primary" onClick={() => importarChave(chaveInput)} disabled={!!importando || !chaveInput.trim()}>Puxar pela chave</button>
           <button type="button" className="btn btn-secondary" onClick={abrirCamera} disabled={!!importando}>📷 Tirar foto</button>
-          <button type="button" className="btn btn-secondary" onClick={() => fotoRef.current?.click()} disabled={!!importando}>🖼 Galeria ou PDF</button>
+          <button type="button" className="btn btn-secondary" onClick={abrirGaleria} disabled={!!importando}>🖼 Galeria ou PDF</button>
           <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Tirar foto da nota"
             onChange={e => { try { localStorage.removeItem('fwc_volta_camera') } catch { /* ok */ } const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
           <input ref={fotoRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} aria-label="Foto ou PDF da nota"
-            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
+            onChange={e => { galeriaRecebeuRef.current = !!e.target.files?.length; const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
         </div>
         {importando && <div role="status" style={{ marginTop: 10, fontSize: 13.5, fontWeight: 700 }}>⏳ {importando}</div>}
         {avisoImport && (
