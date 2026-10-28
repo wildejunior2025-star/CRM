@@ -228,6 +228,41 @@ async function cidadesDoEstado(uf) {
   } catch { /* sem lista: fica só a região */ }
   return []
 }
+// KM PELA RUA (28/10/2026)
+//
+// A linha reta diz 1,5 km pra quem está do outro lado do canal, e o motoboy
+// roda 2,5 km pela ponte. Loja com `taxa_pela_rua` cobra pelo caminho de moto
+// que o Google calcula. Mesmo ponto não pergunta duas vezes (aqui e no servidor).
+// Falhou (Google fora, cota)? Devolve null e quem chamou usa a linha reta —
+// nunca deixa o cliente sem taxa.
+const _kmRua = new Map()
+async function kmPelaRua({ empresaId, origem, destino }) {
+  if (!empresaId || !origem || !destino) return null
+  const chave = `${origem.lat.toFixed(4)},${origem.lng.toFixed(4)}>${destino.lat.toFixed(4)},${destino.lng.toFixed(4)}`
+  if (_kmRua.has(chave)) return _kmRua.get(chave)
+  const pedido = (async () => {
+    try {
+      const base = import.meta.env.VITE_SUPABASE_URL ?? 'https://ycytrsqdvrviihkqfvno.supabase.co'
+      const chaveApi = import.meta.env.VITE_SUPABASE_ANON_KEY
+      const r = await fetch(`${base}/functions/v1/geocodificar-google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: chaveApi, Authorization: `Bearer ${chaveApi}` },
+        body: JSON.stringify({ acao: 'rota', empresa_id: empresaId, origem_lat: origem.lat, origem_lng: origem.lng, lat: destino.lat, lng: destino.lng }),
+      })
+      const g = await r.json()
+      return g?.ok && typeof g.km === 'number' ? g.km : null
+    } catch { return null }
+  })()
+  _kmRua.set(chave, pedido)
+  const km = await pedido
+  if (km == null) _kmRua.delete(chave) // erro não fica guardado: tenta de novo depois
+  return km
+}
+// A conferência do banco ainda mede em linha reta e recusa taxa MENOR que a
+// dela. Pela rua quase sempre dá mais, mas o ponto do Google "encosta" na rua
+// e pode encurtar uns metros: nunca cobra abaixo da reta.
+const kmCobrado = (kmRua, kmReta) => (kmRua == null ? kmReta : Math.max(kmRua, kmReta))
+
 function calcTaxaKm(faixas, distKm) {
   const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
   if (!arr.length) return null
@@ -471,7 +506,7 @@ async function reverseGeocode(lat, lng) {
 //     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
 //   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
 //     uma página que rola, é briga de dedo).
-function MapaLocalizador({ empresaIdMapa, storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
+function MapaLocalizador({ empresaIdMapa, pelaRua, storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -691,7 +726,23 @@ function MapaLocalizador({ empresaIdMapa, storeLat, storeLng, raioKm, taxas, tax
     usarMinhaLocalizacao(true)
   }, [embutido, autoLocalizar, initial]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const dist = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
+  const reta = coord && storeLat ? haversineKm(coord.lat, coord.lng, Number(storeLat), Number(storeLng)) : null
+  // Loja que cobra pela rua: o mapa mostra o km do caminho da moto, o mesmo do resumo.
+  const pontoMapa = coord ? `${coord.lat},${coord.lng}` : null
+  const [rotaMapa, setRotaMapa] = useState(null) // { para, km }
+  useEffect(() => {
+    if (!pelaRua || !pontoMapa || !definido || !storeLat) return
+    if (rotaMapa?.para === pontoMapa) return
+    let vivo = true
+    const t = setTimeout(async () => {
+      const km = await kmPelaRua({ empresaId: empresaIdMapa, origem: { lat: Number(storeLat), lng: Number(storeLng) }, destino: coord })
+      if (vivo) setRotaMapa({ para: pontoMapa, km })
+    }, 600)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [pelaRua, pontoMapa, definido]) // eslint-disable-line react-hooks/exhaustive-deps
+  const rotaMapaAtual = pelaRua && rotaMapa?.para === pontoMapa ? rotaMapa : null
+  const calculandoRotaMapa = pelaRua && definido && !!pontoMapa && !rotaMapaAtual
+  const dist = reta == null ? null : pelaRua ? kmCobrado(rotaMapaAtual?.km, reta) : reta
   // O BAIRRO MANDA, igual ao resumo do pedido.
   //
   // Aqui só se calculava pelo km. Mas quando o bairro do cliente tem taxa fixa
@@ -712,7 +763,8 @@ function MapaLocalizador({ empresaIdMapa, storeLat, storeLng, raioKm, taxas, tax
 
   const linhaDistancia = geoLoading ? 'Procurando o endereço…'
     : !definido ? '👆 Arraste o pino até sua casa'
-    : dist != null ? <>📏 {dist.toFixed(1)} km{bairroBloqueado ? '' : <> · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong></>}{foraRaio ? ' · ⚠️ fora do raio' : ''}</>
+    : calculandoRotaMapa && taxaBairro == null ? '⏳ Calculando o caminho da moto…'
+    : dist != null ? <>📏 {dist.toFixed(1)} km{pelaRua && rotaMapaAtual?.km != null ? ' pela rua' : ''}{bairroBloqueado ? '' : <> · <strong style={{ color: '#34d399' }}>Taxa {taxa != null ? `R$ ${fmt(taxa)}` : '—'}</strong></>}{foraRaio ? ' · ⚠️ fora do raio' : ''}</>
     : 'Arraste o pino até sua casa'
 
   const avisoBairro = pinLongeDoBairro && (
@@ -913,6 +965,9 @@ export default function DeliveryCheckout() {
   // mas deixava o bairro errado no cadastro — que e o que perde o entregador.
   const [motivoReconfirmar, setMotivoReconfirmar] = useState(null)
   const [coordCliente, setCoordCliente] = useState(null) // {lat,lng} do ponto de entrega
+  // Km pela rua do ponto atual (só loja com taxa_pela_rua). `para` diz de qual
+  // ponto é: pino que andou não usa o km do ponto anterior.
+  const [rotaCliente, setRotaCliente] = useState(null) // { para: 'lat,lng', km }
   const [mapaAberto, setMapaAberto]     = useState(false)
   const pinManualRef = useRef(false) // true quando o cliente marcou no mapa (não sobrescreve com geocode)
   const reverseTimer = useRef(null)  // espera o dedo parar antes de perguntar a rua do pino
@@ -1028,7 +1083,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct, taxa_pela_rua')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -1491,20 +1546,46 @@ export default function DeliveryCheckout() {
   const cfgBairro = acharBairroCfg(lojaEndereco?.taxas_entrega_bairro, form.bairro, form.cidade, lojaEndereco?.cidade)
   const bairroBloqueado = tipo === 'entrega' && !!cfgBairro && cfgBairro.entrega === false
   const bairroTaxaFixa = !!cfgBairro && cfgBairro.entrega !== false
+  const pelaRua = !!lojaEndereco?.taxa_pela_rua
+  const pontoChave = coordCliente ? `${coordCliente.lat},${coordCliente.lng}` : null
+  const rotaAtual = rotaCliente && rotaCliente.para === pontoChave ? rotaCliente : null
+  // Só espera o Google quando a taxa sai mesmo do km (bairro fixo não precisa)
+  const rotaCalculando = pelaRua && !!pontoChave && !rotaAtual && !bairroTaxaFixa
   const taxaCalculada = (() => {
     if (tipo === 'retirada') return 0
     // 1) taxa fixa do bairro (ignora o km)
     if (bairroTaxaFixa) return Number(cfgBairro.taxa) || 0
     // 2) km (fallback pros bairros não configurados)
     if (coordCliente && lojaEndereco?.latitude && lojaEndereco?.longitude && temFaixas) {
-      const dist = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
+      const reta = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
+      const dist = pelaRua ? kmCobrado(rotaAtual?.km, reta) : reta
       const t = calcTaxaKm(lojaEndereco.taxas_entrega_km, dist)
       if (t != null) return t
     }
     return taxaEntrega
   })()
   // Precisa marcar o ponto pra saber a taxa? (só quando é por km — bairro com taxa fixa não precisa)
-  const taxaPendente = tipo === 'entrega' && temFaixas && !coordCliente && !bairroTaxaFixa && !bairroBloqueado
+  // Loja pela rua: segura também enquanto o Google calcula o caminho, senão o
+  // cliente via a taxa da reta e ela pulava um segundo depois.
+  const taxaPendente = tipo === 'entrega' && temFaixas && !bairroTaxaFixa && !bairroBloqueado
+    && (!coordCliente || (pelaRua && rotaCalculando))
+
+  useEffect(() => {
+    if (!rotaCalculando || !lojaEndereco?.latitude) return
+    let vivo = true
+    const para = pontoChave
+    // Espera o pino parar: arrastar dispara a cada movimento.
+    const t = setTimeout(async () => {
+      const km = await kmPelaRua({
+        empresaId: state?.empresaId,
+        origem: { lat: Number(lojaEndereco.latitude), lng: Number(lojaEndereco.longitude) },
+        destino: coordCliente,
+      })
+      // km null = Google falhou: grava assim mesmo e a taxa sai pela reta.
+      if (vivo) setRotaCliente({ para, km })
+    }, 600)
+    return () => { vivo = false; clearTimeout(t) }
+  }, [rotaCalculando, pontoChave]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A taxa NÃO PODE sair no chute. Quando o cálculo não fecha, o código caía em
   // `taxaEntrega` (a taxa fixa da loja) — e loja que cobra por km deixa esse
@@ -1517,6 +1598,8 @@ export default function DeliveryCheckout() {
   // Nos dois casos é melhor segurar o botão do que entregar grátis.
   const configNaoCarregou = tipo === 'entrega' && lojaEndereco === null
   const taxaIndefinida = !bairroBloqueado && (configNaoCarregou || taxaPendente)
+  // Tem ponto, só falta o Google dizer os km pela rua: é espera, não "marque no mapa".
+  const calculandoEntrega = configNaoCarregou || (taxaPendente && !!coordCliente)
 
   // A rua/bairro digitados batem com o CEP? Se o cliente trocou na mão pra um
   // endereço de outro bairro (caso do pedido torto), avisa — sem bloquear.
@@ -2074,7 +2157,7 @@ export default function DeliveryCheckout() {
     // Última trava antes de gravar: pedido NUNCA sai com taxa chutada. O botão
     // já fica desabilitado, mas Enter no formulário passa por cima dele.
     if (taxaIndefinida) {
-      setErroGlobal(configNaoCarregou
+      setErroGlobal(calculandoEntrega
         ? 'Ainda estou calculando a taxa de entrega. Aguarde um instante ou recarregue a página.'
         : 'Marque seu endereço no mapa pra eu calcular a taxa de entrega.')
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -2814,6 +2897,7 @@ export default function DeliveryCheckout() {
                       <MapaLocalizador
                         embutido
                         empresaIdMapa={state?.empresaId}
+                        pelaRua={!!lojaEndereco?.taxa_pela_rua}
                         storeLat={lojaEndereco.latitude}
                         storeLng={lojaEndereco.longitude}
                         raioKm={lojaEndereco.raio_entrega_km}
@@ -2843,10 +2927,10 @@ export default function DeliveryCheckout() {
                         </div>
                       )}
                       {temFaixas && form.numero.trim() && (
-                        <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente ? '#eab308' : 'var(--text-muted,#9aa)' }}>
-                          {taxaPendente
-                            ? '⚠️ Confira o pino no mapa — é ele que define a taxa de entrega.'
-                            : `📏 Entrega calculada pela distância: R$ ${fmt(taxaAplicada)}`}
+                        <div style={{ marginTop: 6, fontSize: 12.5, color: taxaPendente && !calculandoEntrega ? '#eab308' : 'var(--text-muted,#9aa)' }}>
+                          {calculandoEntrega ? '⏳ Calculando a entrega pelo caminho da moto...'
+                            : taxaPendente ? '⚠️ Confira o pino no mapa — é ele que define a taxa de entrega.'
+                            : `📏 Entrega calculada pela distância${pelaRua && rotaAtual?.km != null ? ` (${rotaAtual.km.toFixed(1).replace('.', ',')} km pela rua)` : ''}: R$ ${fmt(taxaAplicada)}`}
                         </div>
                       )}
                     </div>
@@ -3157,7 +3241,7 @@ export default function DeliveryCheckout() {
 
                 {taxaIndefinida && (
                   <div className="dco-erro-global" style={{ background: 'rgba(234,179,8,.12)', border: '1px solid #eab308', color: '#eab308' }}>
-                    {configNaoCarregou
+                    {calculandoEntrega
                       ? '⏳ Carregando a taxa de entrega... se demorar, recarregue a página.'
                       : <>📍 Falta marcar seu endereço no mapa pra calcular a taxa de entrega. Toque em <strong>“Marcar no mapa”</strong> acima.</>}
                   </div>
@@ -3173,7 +3257,7 @@ export default function DeliveryCheckout() {
                 <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
                   {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
                     : bairroBloqueado ? 'Não entregamos no seu bairro'
-                    : configNaoCarregou ? 'Calculando a entrega...'
+                    : calculandoEntrega ? 'Calculando a entrega...'
                     : taxaPendente ? 'Marque seu endereço no mapa'
                     : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fechar e enviar para a loja'}
                 </button>
@@ -3200,7 +3284,7 @@ export default function DeliveryCheckout() {
               <>
                 {taxaIndefinida && (
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: '#eab308', textAlign: 'center', marginBottom: 8 }}>
-                    {configNaoCarregou
+                    {calculandoEntrega
                       ? '⏳ Carregando a taxa de entrega...'
                       : '📍 Marque seu endereço no mapa pra calcular a entrega'}
                   </div>
@@ -3213,7 +3297,7 @@ export default function DeliveryCheckout() {
                       ? <><span className="dco-spinner" />Enviando pedido...</>
                       : bairroBloqueado
                       ? 'Não entregamos no seu bairro'
-                      : configNaoCarregou
+                      : calculandoEntrega
                       ? 'Calculando a entrega...'
                       : taxaPendente
                       ? 'Marque seu endereço no mapa'
@@ -3231,6 +3315,7 @@ export default function DeliveryCheckout() {
       {mapaAberto && (
         <MapaLocalizador
           empresaIdMapa={state?.empresaId}
+          pelaRua={!!lojaEndereco?.taxa_pela_rua}
           storeLat={lojaEndereco?.latitude}
           storeLng={lojaEndereco?.longitude}
           raioKm={lojaEndereco?.raio_entrega_km}
