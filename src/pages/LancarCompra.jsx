@@ -234,7 +234,13 @@ async function prepararArquivo(arquivo) {
     if (arquivo.size > 8 * 1024 * 1024) throw new Error('PDF grande demais (limite de 8 MB)')
     return { base64: await paraBase64(arquivo), mimetype: 'application/pdf', chave: null }
   }
-  const bmp = await createImageBitmap(arquivo)
+  // Celular fraco (AGV, 28/10/2026): abrir a foto de 12–50 MP no tamanho cheio estourava a memória
+  // e a página caía — nem pela galeria lia. Pedimos a imagem já reduzida na decodificação (largura
+  // 1600, a altura acompanha), que é o que a IA precisa pra ler; só cai no tamanho cheio se o
+  // navegador não souber reduzir.
+  let bmp
+  try { bmp = await createImageBitmap(arquivo, { resizeWidth: 1600, resizeQuality: 'high' }) }
+  catch { bmp = await createImageBitmap(arquivo) }
   let chave = null
   try {
     if ('BarcodeDetector' in window) {
