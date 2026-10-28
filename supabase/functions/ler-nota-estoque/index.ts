@@ -97,7 +97,7 @@ const json = (d: unknown, s = 200) =>
       "{",
       '  "itens": [ { "indice": number, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "por_embalagem": number | null } ],',
       '  "nao_encontrados": [ { "nome": string, "descricao": string, "quantidade": number, "custo_unit": number | null, "total_linha": number | null, "por_embalagem": number | null, "unidade": "kg"|"g"|"L"|"ml"|"un" } ],',
-      '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null },',
+      '  "nota": { "fornecedor": string|null, "documento": string|null, "numero": string|null, "valor_total": number|null, "data": "AAAA-MM-DD"|null, "vencimento": "AAAA-MM-DD"|null, "pago": boolean|null, "condicao": "a_vista"|"a_prazo"|null, "forma": "dinheiro"|"pix"|"credito"|"debito"|"boleto"|"transferencia"|null },',
       '  "classificacao": [ { "descricao": string, "valor": number, "categoria": string } ]',
       "}",
       "",
@@ -163,6 +163,20 @@ const json = (d: unknown, s = 200) =>
       "  'pago' = true quando o documento mostra pagamento feito ('VALOR PAGO', 'FORMA PAGAMENTO', comprovante de",
       "  PIX/cartao); false quando e a prazo (boleto, duplicata, 'a pagar'); null se nao der pra saber.",
       "  'forma' = como foi pago, se disser. Nao souber um campo: null. Nunca invente.",
+      // O DANFE QUASE NUNCA IMPRIME "PAGO" (28/10/2026)
+      //
+      // A nota da Comebom pra Agv (NF 587487) nao tem a palavra pago em lugar
+      // nenhum. Mas tem o bloco FATURA **vazio** e, em DADOS ADICIONAIS,
+      // "COD. COB.: CPX CHAVE PIX PRAZO: CHAVE PIX". Isso nao e "nao da pra
+      // saber": e uma nota A VISTA, paga na entrega. Perguntar ao dono toda vez
+      // e obriga-lo a parar o que esta fazendo pra responder o obvio.
+      "- 'condicao' = como a compra foi COMBINADA, que e diferente de 'pago':",
+      "  'a_prazo' quando existe DUPLICATA, FATURA preenchida, boleto, ou um prazo em DIAS/DATA",
+      "  ('PRAZO PAGTO: 28 DIAS', 'VENC 10/11').",
+      "  'a_vista' quando o bloco FATURA/DUPLICATA esta VAZIO e a cobranca e dinheiro, PIX, cartao ou",
+      "  'a vista' — inclusive quando o campo PRAZO repete a forma em vez de um prazo",
+      "  (ex.: 'COD. COB.: CPX CHAVE PIX  PRAZO: CHAVE PIX' = cobranca por PIX, sem prazo = A VISTA).",
+      "  Cupom fiscal e recibo sao sempre 'a_vista'. Nao der pra saber: null.",
       // Nota a prazo vira CONTA A PAGAR, e conta a pagar sem vencimento nao
       // serve pra nada: nao entra no "vence em 7 dias" nem no alerta de atraso.
       "  'vencimento' = a data em que a loja PRECISA PAGAR, quando a nota e a prazo. Procure em FATURA,",
@@ -379,6 +393,7 @@ const json = (d: unknown, s = 200) =>
         vencimento: /^\d{4}-\d{2}-\d{2}$/.test(String(n?.vencimento)) ? String(n.vencimento) : null,
         numero: String(n?.numero ?? "").trim().slice(0, 30) || null,
         pago: typeof n?.pago === "boolean" ? n.pago : null,
+        condicao: ["a_vista", "a_prazo"].includes(String(n?.condicao)) ? String(n.condicao) : null,
         forma: ["dinheiro", "pix", "credito", "debito", "boleto", "transferencia"].includes(String(n?.forma))
           ? String(n.forma) : null,
       }

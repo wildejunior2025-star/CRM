@@ -48,6 +48,9 @@ type NotaLida = {
   data: string | null         // emissão
   vencimento?: string | null  // quando é a prazo (boleto, duplicata, fatura)
   pago: boolean | null        // null = o documento não deixou claro
+  // Como a compra foi COMBINADA, que é diferente de já ter sido paga. O DANFE
+  // quase nunca imprime "PAGO", mas quase sempre diz se tem duplicata.
+  condicao?: "a_vista" | "a_prazo" | null
   forma: string | null
   // A nota quebrada por categoria de gasto (mig 0389), já conferida contra o
   // total por quem leu o papel. null/vazio = não deu pra separar.
@@ -674,10 +677,23 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
   //
   // Quando o papel não diz, o robô PERGUNTA. Mesma regra do gasto escrito
   // solto: só registra completo.
-  if (typeof nota.pago !== "boolean" || (nota.pago === false && !nota.vencimento)) {
+  // NOTA À VISTA NÃO SE PERGUNTA (28/10/2026)
+  //
+  // O DANFE quase nunca imprime a palavra PAGO. O que ele imprime é o bloco
+  // FATURA/DUPLICATA — e quando esse bloco está VAZIO e a cobrança é PIX ou
+  // dinheiro, a compra é à vista: o entregador da distribuidora não sai sem o
+  // dinheiro. Perguntar "já pagou?" nessa nota é fazer o dono largar o que
+  // está fazendo pra responder o óbvio, e foi a reclamação da Agv.
+  //
+  // A pergunta fica só pro papel que REALMENTE não diz: bloquinho de feira,
+  // caderno, recibo à mão. E a saída continua a um toque de distância, na
+  // própria confirmação.
+  const aVista = nota.pago === true || (nota.pago !== false && nota.condicao === "a_vista")
+  const aPrazo = nota.pago === false || nota.condicao === "a_prazo"
+  if (!aVista && !(aPrazo && nota.vencimento)) {
     return await rascunhoDaNota(empresaId, jid, nota, emissao)
   }
-  const quitada = nota.pago
+  const quitada = aVista
   const vence = quitada ? emissao
     : (/^\d{4}-\d{2}-\d{2}$/.test(String(nota.vencimento)) ? String(nota.vencimento) : emissao)
 
@@ -721,12 +737,20 @@ async function contaDaNota(empresaId: string, jid: string, nota: NonNullable<Not
   }).then(() => {}, () => {})
 
   const forma = nota.forma ? ` (${ROTULO_FORMA[nota.forma] ?? nota.forma})` : ""
+  // Quando o PAPEL não escreveu "pago" e quem concluiu isso foi a leitura da
+  // condição (fatura vazia + cobrança à vista), a saída tem que vir junto: é a
+  // diferença entre um robô que decide e um robô que decide por cima do dono.
+  const deduzido = quitada && nota.pago !== true
   return quitada
     ? `🟢 *Despesa registrada*\n\n` +
       `🏪 Fornecedor: *${nota.fornecedor}*\n` +
       `💸 Valor: *${brl(nota.valor_total)}*\n` +
       `📆 Pago em: ${ddmmBR(emissao)}${forma}\n` +
       `${linhasDoRateio(nota)}${nota.numero ? `\n🧾 Nota: ${nota.numero}` : ""}\n\n` +
+      (deduzido
+        ? `_A nota é à vista (sem duplicata), por isso lancei como paga._\n` +
+          `Se ainda não pagou, me diga *a pagar dia 30* que eu mudo.\n`
+        : "") +
       `Se foi engano, responda *DESFAZER*.`
     : `🟠 *Conta a pagar registrada*\n\n` +
       `🏪 Fornecedor: *${nota.fornecedor}*\n` +
@@ -1818,6 +1842,34 @@ async function tratar(req: Request): Promise<Response> {
       }
     }
     const faltaPreco = (p: any) => [...(p.itens ?? []), ...(p.nao_achados ?? [])].filter((x: any) => precisaPreco(x) && x.custo_unit == null)
+
+    // "NA VERDADE AINDA NÃO PAGUEI" (28/10/2026)
+    //
+    // A nota à vista passou a entrar como paga sem perguntar — é o que o papel
+    // diz. Mas quem decide por conta própria precisa aceitar correção barata:
+    // uma frase, não um DESFAZER seguido de mandar a foto de novo. Vale pro
+    // último lançamento, na mesma janela de 30 min.
+    if (ultLancado?.conta_id && /\b(a pagar|ainda nao paguei|nao paguei|nao foi paga|nao esta paga|vou pagar|pagar depois)\b/.test(t)) {
+      const { data: conta } = await sb.from("contas_financeiras")
+        .select("id, descricao, valor").eq("id", ultLancado.conta_id).eq("empresa_id", empresaId).maybeSingle()
+      if (conta) {
+        const { data: venceEm } = { data: extrairData(t, hojeBRT()).data }
+        if (!venceEm) {
+          await enviar(instance, jid,
+            `Certo — *${conta.descricao}* (${brl(Number(conta.valor))}) ainda não está paga.\n\n` +
+            `Pra que dia fica? Me diga *a pagar dia 30* (ou "05/11", "sexta").`)
+          return ok()
+        }
+        // A baixa sai primeiro: é ela que mantém a conta como paga, e o
+        // gatilho do banco reabre a conta sozinho quando ela some.
+        await sb.from("contas_baixas").delete().eq("conta_id", conta.id).eq("empresa_id", empresaId)
+        await sb.from("contas_financeiras").update({ vencimento: venceEm }).eq("id", conta.id).eq("empresa_id", empresaId)
+        await enviar(instance, jid,
+          `🟠 Corrigido: *${conta.descricao}* — ${brl(Number(conta.valor))} agora é *conta a pagar*, vence ${ddmmBR(venceEm)}.\n\n` +
+          `Quando pagar, me diga *"paguei ${String(conta.descricao).replace(/^Compra — /, "").split(/\s+/)[0]}"* que eu dou baixa.`)
+        return ok()
+      }
+    }
 
     if (pend && /^(sem (o )?(preco|valor|custo)|nao sei( o preco| o valor)?|(lanca|lancar|pode lancar) sem (preco|valor|custo))\W*$/.test(t)) {
       const zera = (l: any[]) => (l ?? []).map((x: any) => ({ ...x, custo_unit: x.custo_unit ?? 0 }))
