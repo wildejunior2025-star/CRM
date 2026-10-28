@@ -817,6 +817,15 @@ export default function LancarCompra({ empresaId }) {
     }
   }
 
+  async function nomeDoCnpj(cnpj) {
+    try {
+      const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`)
+      if (!r.ok) return null
+      const j = await r.json()
+      return String(j.nome_fantasia || j.razao_social || '').trim() || null
+    } catch { return null }
+  }
+
   async function importarChave(texto, acao = 'buscar') {
     const info = lerChave(texto)
     if (!info) {
@@ -833,6 +842,10 @@ export default function LancarCompra({ empresaId }) {
       const conhecido = fornecedores.find(f => f.cnpj === info.cnpj)
       setChaveNota(info.chave); setCnpjNota(info.cnpj); setNumeroNota(info.numero)
       if (conhecido) setFornecedor(conhecido.nome)
+      // CNPJ que a loja ainda não cadastrou (AGV, 28/10/2026): o bip trazia o nº da nota e deixava o
+      // fornecedor em branco. O nome vem do cadastro público do CNPJ (BrasilAPI, grátis) — só se o
+      // campo estiver vazio, pra não passar por cima do que a pessoa já digitou.
+      else nomeDoCnpj(info.cnpj).then(nome => { if (nome) setFornecedor(atual => atual || nome) })
       setImportando('Buscando os itens na Receita…')
       const { data: r, error } = await supabase.functions.invoke('nfe-por-chave', { body: { empresa_id: empresaId, chave: info.chave, acao } })
       if (error) throw error
@@ -1208,6 +1221,9 @@ export default function LancarCompra({ empresaId }) {
         {chaveNota && !importando && (
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)' }}>
             Chave da nota guardada{cnpjNota ? ` · emitente ${fmtCnpj(cnpjNota)}` : ''} — a mesma nota não entra duas vezes.
+            <div style={{ fontFamily: 'monospace', letterSpacing: '.03em', marginTop: 2, wordBreak: 'break-all' }}>
+              {chaveNota.replace(/(\d{4})(?=\d)/g, '$1 ')}
+            </div>
           </div>
         )}
       </div>
