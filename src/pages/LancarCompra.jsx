@@ -322,7 +322,7 @@ export default function LancarCompra({ empresaId }) {
       const [pr, mp, ap, fo, hi, ct, ape, sp, sm] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, categoria, codigo_barras, controla_estoque, unidades_por_caixa, estoque_minimo')
-          .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null).order('nome').order('id')),
+          .eq('empresa_id', empresaId).or('ativo.eq.true,pausado_por_estoque.eq.true').is('arquivado_em', null).order('nome').order('id')),
         fetchAll(() => supabase.from('materias_primas')
           .select('id, nome, unidade, custo, estoque_minimo, categoria').eq('empresa_id', empresaId).eq('ativo', true).order('nome').order('id')),
         supabase.from('categoria_item_aprendida').select('termo, categoria').eq('empresa_id', empresaId).limit(2000),

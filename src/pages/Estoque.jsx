@@ -198,11 +198,17 @@ export default function Estoque({ embutido = false }) {
     const [saldoRes, produtosRes, clientesRes, cascoRes, custoRes] = await Promise.all([
       // fetchAll: loja grande passa de 1000 linhas e o resto sumia da tela sem aviso.
       fetchAll(() => supabase.from('estoque_saldo').select('*').order('nome').order('produto_id')),
-      supabase
-        .from('produtos')
-        .select('id, nome, controla_casco')
-        .eq('ativo', true)
-        .order('nome'),
+      // Pausado por estoque zerado TEM que aparecer (AGV, 28/10/2026): é justamente ele que precisa da
+      // entrada — antes só vinha ativo=true e o dono tinha que dar a volta pelo "Contar".
+      empresaId
+        ? fetchAll(() => supabase
+          .from('produtos')
+          .select('id, nome, controla_casco')
+          .eq('empresa_id', empresaId)
+          .is('arquivado_em', null)
+          .or('ativo.eq.true,pausado_por_estoque.eq.true')
+          .order('nome').order('id'))
+        : Promise.resolve({ data: [] }),
       supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome'),
       supabase.from('casco_saldo').select('*').order('cliente_nome'),
       empresaId

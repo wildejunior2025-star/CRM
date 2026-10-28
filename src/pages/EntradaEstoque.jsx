@@ -54,7 +54,7 @@ export default function EntradaEstoque() {
       const [pr, emp, sl] = await Promise.all([
         fetchAll(() => supabase.from('produtos')
           .select('id, nome, preco_custo, codigo_barras, categoria, controla_estoque')
-          .eq('empresa_id', empresaId).eq('ativo', true).is('arquivado_em', null)
+          .eq('empresa_id', empresaId).or('ativo.eq.true,pausado_por_estoque.eq.true').is('arquivado_em', null)
           .order('nome').order('id')),
         supabase.from('empresas').select('estoque_ativo').eq('id', empresaId).maybeSingle(),
         fetchAll(() => supabase.from('estoque_saldo')
