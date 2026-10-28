@@ -38,6 +38,7 @@ export default function RaioEntrega() {
   const markerRef = useRef(null)
   const raioVal   = useRef(10)    // espelho do estado, pra funções do mapa lerem o valor de agora
   const taxasVal  = useRef([])
+  const pelaRuaVal = useRef(false)
   const anelTimer = useRef(null)
 
   // Dados
@@ -61,6 +62,7 @@ export default function RaioEntrega() {
   // o bot do WhatsApp, o balcão, as mesas e o iFood não olham isso.
   const [aceitaRetirada,  setAceitaRetirada]  = useState(true)
   const [aceitaEntrega,   setAceitaEntrega]   = useState(true)
+  const [pelaRua,         setPelaRua]         = useState(false) // taxa pelo caminho da moto (Google)
   const [taxaEntrega,     setTaxaEntrega]     = useState(0)
   const [pedidoMinimo,    setPedidoMinimo]    = useState(0)
   const [taxasKm,         setTaxasKm]         = useState([])  // [{km, taxa}]
@@ -72,6 +74,7 @@ export default function RaioEntrega() {
   const raioSyncTimer = useRef(null) // debounce pra faixas acompanharem o raio
   raioVal.current = raio
   taxasVal.current = taxasKm
+  pelaRuaVal.current = pelaRua
 
   // Puxa os bairros das cidades DENTRO do raio de entrega (via OpenStreetMap/Overpass).
   // Genérico: funciona pra qualquer cidade — sem cadastrar lista fixa. Debounce pra
@@ -187,6 +190,7 @@ export default function RaioEntrega() {
       aceitaDelivery: !!o.aceitaDelivery,
       aceitaRetirada: o.aceitaRetirada !== false,
       aceitaEntrega:  o.aceitaEntrega  !== false,
+      pelaRua: !!o.pelaRua,
       taxaEntrega: String(o.taxaEntrega ?? ''),
       pedidoMinimo: String(o.pedidoMinimo ?? ''),
       taxasKm: (o.taxasKm ?? []).map(f => ({ km: Number(f.km) || 0, taxa: Number(f.taxa) || 0, tempo: (f.tempo == null || f.tempo === '') ? null : Number(f.tempo) })),
@@ -199,14 +203,14 @@ export default function RaioEntrega() {
     })
   }
   function snapshotAtual() {
-    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
+    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
   }
   function descartarAlteracoes() {
     if (!baselineRef.current) return
     if (!window.confirm('Descartar as alterações não salvas e voltar ao que estava salvo?')) return
     const b = JSON.parse(baselineRef.current)
     setAceitaDelivery(!!b.aceitaDelivery); setAceitaRetirada(b.aceitaRetirada !== false)
-    setAceitaEntrega(b.aceitaEntrega !== false)
+    setAceitaEntrega(b.aceitaEntrega !== false); setPelaRua(!!b.pelaRua)
     setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
     setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
     setTempoMin(b.tempoMin); setTempoMax(b.tempoMax); setCategoria(b.categoria); setRaio(b.raio)
@@ -220,7 +224,7 @@ export default function RaioEntrega() {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, aceita_delivery, aceita_retirada, taxa_entrega, pedido_minimo, aceita_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude')
+      .select('id, aceita_delivery, aceita_retirada, taxa_entrega, pedido_minimo, aceita_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude, taxa_pela_rua')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
@@ -229,6 +233,7 @@ export default function RaioEntrega() {
         setAceitaDelivery(data.aceita_delivery ?? false)
         setAceitaRetirada(data.aceita_retirada !== false)
         setAceitaEntrega(data.aceita_entrega !== false)
+        setPelaRua(!!data.taxa_pela_rua)
         setTaxaEntrega(data.taxa_entrega ?? 0)
         setPedidoMinimo(data.pedido_minimo ?? 0)
         setTempoMin(data.tempo_entrega_min ?? 30)
@@ -266,6 +271,7 @@ export default function RaioEntrega() {
           aceitaDelivery: data.aceita_delivery ?? false,
           aceitaRetirada: data.aceita_retirada !== false,
           aceitaEntrega:  data.aceita_entrega  !== false,
+          pelaRua: !!data.taxa_pela_rua,
           taxaEntrega: data.taxa_entrega ?? 0,
           pedidoMinimo: data.pedido_minimo ?? 0,
           taxasKm: faixas,
@@ -282,7 +288,7 @@ export default function RaioEntrega() {
           if (raw && raw !== baselineRef.current) {
             const d = JSON.parse(raw)
             setAceitaDelivery(!!d.aceitaDelivery); setAceitaRetirada(d.aceitaRetirada !== false)
-            setAceitaEntrega(d.aceitaEntrega !== false)
+            setAceitaEntrega(d.aceitaEntrega !== false); setPelaRua(!!d.pelaRua)
             setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
             setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
             setTempoMin(d.tempoMin ?? 30); setTempoMax(d.tempoMax ?? 60); setCategoria(d.categoria ?? ''); setRaio(d.raio ?? 10)
@@ -310,7 +316,7 @@ export default function RaioEntrega() {
       try { mudou ? localStorage.setItem(draftKey, snap) : localStorage.removeItem(draftKey) } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
+  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
 
   // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
   useEffect(() => {
@@ -398,14 +404,22 @@ export default function RaioEntrega() {
 
       // Clicou no mapa: diz a quantos km da loja é aquele ponto e em que faixa cai.
       // É pra conferir uma entrega: clica no endereço e vê se o raio e a taxa batem.
-      map.on('click', (e) => {
+      map.on('click', async (e) => {
         const ponto = markerRef.current?.getLatLng()
         if (!ponto) return
         const km = map.distance(ponto, e.latlng) / 1000
-        L.popup({ closeButton: false })
+        const popup = L.popup({ closeButton: false })
           .setLatLng(e.latlng)
-          .setContent(textoDoPonto(km))
+          .setContent(pelaRuaVal.current ? `${textoDoPonto(km, null)}<br><i>Calculando o caminho da moto…</i>` : textoDoPonto(km))
           .openOn(map)
+        if (!pelaRuaVal.current) return
+        // Loja que cobra pela rua: o círculo não diz a taxa. Pergunta ao Google
+        // o caminho de moto até o ponto clicado (ponto repetido sai do cache).
+        const { data } = await supabase.functions.invoke('geocodificar-google', {
+          body: { acao: 'rota', origem_lat: ponto.lat, origem_lng: ponto.lng, lat: e.latlng.lat, lng: e.latlng.lng },
+        }).catch(() => ({ data: null }))
+        if (!popup.isOpen()) return
+        popup.setContent(textoDoPonto(km, data?.ok ? data.km : undefined))
       })
 
       // Soltar: salva nova posição no estado (sem recriar o mapa)
@@ -437,7 +451,7 @@ export default function RaioEntrega() {
     const ponto = markerRef.current?.getLatLng()
     desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taxasKm])
+  }, [taxasKm, pelaRua])
 
   // ── Faixas de 500 m, cada uma de uma cor ──────────────────────
   // Serve pra conferir as entregas: a cor diz em que "anel" o endereço caiu.
@@ -460,8 +474,19 @@ export default function RaioEntrega() {
     return faixas.find(f => km <= f.km + 1e-9) ?? null
   }
   const kmTxt = km => (km % 1 === 0 ? String(km) : km.toFixed(1).replace('.', ',')) + ' km'
-  function textoDoPonto(km) {
+  // kmRua: undefined = loja em linha reta (ou o Google falhou); null = ainda calculando.
+  function textoDoPonto(km, kmRua) {
     const r = raioVal.current
+    if (pelaRuaVal.current && kmRua !== undefined) {
+      const reta = `${km.toFixed(2).replace('.', ',')} km em linha reta`
+      if (km > r) return `${reta}<br><span style="color:#dc2626">Fora do raio de ${kmTxt(r)}</span>`
+      if (kmRua == null) return reta
+      // Mesma régua do link: nunca cobra abaixo da reta.
+      const cobrado = Math.max(kmRua, km)
+      const f = taxaAteKm(cobrado) ?? [...(taxasVal.current || [])].map(x => ({ km: Number(x.km), taxa: Number(x.taxa) })).sort((a, b) => b.km - a.km)[0]
+      return `${reta}<br><b>${cobrado.toFixed(2).replace('.', ',')} km pela rua</b> (caminho da moto)`
+        + (f ? `<br>Taxa: <b>R$ ${f.taxa.toFixed(2).replace('.', ',')}</b>` : '')
+    }
     const f = taxaAteKm(km)
     const dist = `<b>${km.toFixed(2).replace('.', ',')} km</b> da loja`
     if (km > r) return `${dist}<br><span style="color:#dc2626">Fora do raio de ${kmTxt(r)}</span>`
@@ -487,14 +512,18 @@ export default function RaioEntrega() {
       const aneis = [pontosDoCirculo(lat, lng, rOut)]
       if (rIn > 0) aneis.push(pontosDoCirculo(lat, lng, rIn).reverse())
       const f = taxaAteKm(rOut / 1000)
+      // Pela rua, o anel é só referência de linha reta: fica apagado e
+      // tracejado pra ninguém ler a taxa nele.
+      const ref = pelaRuaVal.current
       const poly = L.polygon(aneis, {
-        color: cor, weight: 1.5, fillColor: cor, fillOpacity: 0.3,
+        color: cor, weight: ref ? 1 : 1.5, fillColor: cor, fillOpacity: ref ? 0.06 : 0.3,
+        dashArray: ref ? '4 6' : null,
       }).bindTooltip(
-        `${kmTxt(rIn / 1000)} a ${kmTxt(rOut / 1000)}` + (f ? ` · R$ ${f.taxa.toFixed(2).replace('.', ',')}` : ''),
+        `${kmTxt(rIn / 1000)} a ${kmTxt(rOut / 1000)}` + (ref ? ' em linha reta · clique pra ver pela rua' : f ? ` · R$ ${f.taxa.toFixed(2).replace('.', ',')}` : ''),
         { sticky: true })
       poly.addTo(map)
       ringsRef.current.push(poly)
-      if (i % cada === 0 || i === total) {
+      if (!ref && (i % cada === 0 || i === total)) {
         const rot = L.marker([lat + rOut / 111320, lng], {
           interactive: false, keyboard: false,
           icon: L.divIcon({
@@ -622,6 +651,7 @@ export default function RaioEntrega() {
       aceita_delivery:      aceitaDelivery,
       aceita_retirada:      aceitaRetirada,
       aceita_entrega:       aceitaEntrega,
+      taxa_pela_rua:        pelaRua,
       taxa_entrega:         taxaPiso,
       pedido_minimo:        parseFloat(pedidoMinimo) || 0,
       taxas_entrega_km:     faixasOrdenadas,
@@ -894,6 +924,35 @@ export default function RaioEntrega() {
                 onClick={() => setAceitaRetirada(v => !v)}
                 aria-label="Permitir retirada na loja"
                 aria-pressed={aceitaRetirada}
+              >
+                <span className="re-switch-thumb" />
+              </button>
+            </div>
+          </div>
+
+          {/* Taxa pelo caminho da moto (28/10/2026). Pela rua dá em média
+              1,3x a 1,5x a linha reta: com as mesmas faixas, a taxa sobe. */}
+          <div className="re-toggle-row" style={{ borderTop: '1px solid var(--border)' }}>
+            <div>
+              <div className="re-toggle-label">Cobrar pelo caminho da moto (km real)</div>
+              <div className="re-toggle-sub">
+                {pelaRua
+                  ? 'A taxa sai dos km que a moto anda pela rua (Google), não da linha reta. Os círculos do mapa viram só referência: clique num ponto pra ver os km pela rua e a taxa.'
+                  : 'Hoje a taxa sai da distância em linha reta (os círculos do mapa).'}
+                <br />
+                <span style={{ opacity: .75 }}>Pela rua a distância costuma ser 30% a 50% maior que a reta. Revise as faixas antes de ligar. Vale para a loja online e o app.</span>
+              </div>
+            </div>
+            <div className="re-toggle-controls">
+              <span className={`re-status-badge ${pelaRua ? 'active' : 'inactive'}`}>
+                {pelaRua ? 'Ativo' : 'Inativo'}
+              </span>
+              <button
+                type="button"
+                className={`re-switch ${pelaRua ? 'on' : 'off'}`}
+                onClick={() => setPelaRua(v => !v)}
+                aria-label="Cobrar pelo caminho da moto"
+                aria-pressed={pelaRua}
               >
                 <span className="re-switch-thumb" />
               </button>
