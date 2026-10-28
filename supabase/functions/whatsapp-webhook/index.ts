@@ -4944,7 +4944,8 @@ ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "
 
 COMPROVANTE DE PAGAMENTO (foto ou print de PIX/transferência):
 ⛔ Você NUNCA confirma pagamento. Uma foto não prova que o dinheiro caiu — comprovante pode ser falso, agendado ou de outro valor. PROIBIDO dizer "pagamento confirmado", "PIX confirmado", "recebemos seu pagamento" ou "pedido pago".
-Responda: "Recebi seu comprovante! 🙌 A loja confere o pagamento e confirma seu pedido por aqui." Pode citar o valor que aparece na foto, mas sempre como algo que a loja ainda vai conferir.
+Responda EXATAMENTE isso e NADA MAIS: "Recebi seu comprovante! 🙌 A loja confere o pagamento e confirma seu pedido por aqui. 😊"
+⛔ Essa é a mensagem INTEIRA. NÃO emende pergunta, NÃO ofereça cardápio, NÃO pergunte tamanho/sabor/endereço, NÃO puxe assunto, NÃO cumprimente pelo nome antes. Quem manda comprovante já escolheu, já fechou e já pagou — oferecer produto pra essa pessoa é constrangedor e faz a loja parecer desorganizada. Pode ser até um pedido que a loja fechou na mão, fora do seu alcance. Mandou comprovante: você avisa que a loja vai conferir e cala a boca.
 
 Chamar uma pessoa da loja (VOCÊ NÃO SABE responder, ou o cliente está insistindo/incomodado):
 Mande antes: "Já chamei alguém aqui da loja pra te ajudar. 🙌 Só um instante!" e emita:
@@ -5813,6 +5814,24 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       if (confirmouPagamento) {
         console.log("[SafeNet] robô confirmou pagamento pela foto — resposta trocada:", resposta.slice(0, 160))
         resposta = "Recebi seu comprovante! 🙌\n\nA loja confere o pagamento e confirma seu pedido por aqui. Qualquer dúvida é só chamar! 😊"
+      }
+    }
+
+    // Safety net: comprovante não puxa assunto.
+    // Agv, 28/10/2026: a Luanna mandou só o print do PIX de um pedido que ela
+    // já tinha feito na véspera e que a loja já tinha confirmado na mão. O robô
+    // acertou a primeira frase — "Recebi seu comprovante!" — e emendou
+    // "Perfeito, Luanna! Agora qual tamanho de quentinha você prefere?",
+    // oferecendo cardápio pra quem já escolheu, já fechou e já pagou. Quem
+    // manda comprovante não está decidindo nada: a única coisa a dizer é que a
+    // loja vai conferir. Quando o pedido é do próprio robô ele já foi criado
+    // ANTES do PIX ("Pedido #N recebido!"), então o comprovante também não tem
+    // nada pra fechar aqui. Se o modelo emitiu ação, não é esse caso — não mexe.
+    if (acaoMatch === null && imageBase64 && /\b(recebi|recebemos)\b[^\n.!?]{0,20}\bcomprovante\b|\bcomprovante\b[^\n.!?]{0,20}\brecebid[oa]\b/i.test(resposta)) {
+      const soORecibo = "Recebi seu comprovante! 🙌\n\nA loja confere o pagamento e confirma seu pedido por aqui. 😊"
+      if (resposta.trim() !== soORecibo) {
+        console.log("[SafeNet] comprovante com assunto emendado — cortado:", resposta.slice(0, 200))
+        resposta = soORecibo
       }
     }
 
