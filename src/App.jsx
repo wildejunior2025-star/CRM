@@ -3,6 +3,7 @@ import { useEffect, lazy, Suspense } from 'react'
 import { useAuth } from './hooks/useAuth'
 import ErroNaTela from './components/ErroNaTela'
 import { homeDoPerfil, usaPainelDePedidos } from './lib/homeDoPerfil'
+import { portalNoGestor } from './lib/portalNoGestor'
 
 /* ── Telas que só carregam quando alguém entra nelas ────────────────────
  * O sistema inteiro era UM arquivo de 2 MB: quem abria o gestor baixava
@@ -98,7 +99,8 @@ function HostnameRedirect() {
     // a carga chega. Ela só SOMA — tirar do estoque sem venda mora no
     // Financeiro, do dono.
     if (perfil === 'vendedor') {
-      if (h === 'portal.fwcinter.com') return
+      // Entrou no Portal pelo botão da barra do gestor: mesmo caso do domínio do Portal.
+      if (h === 'portal.fwcinter.com' || portalNoGestor()) return
       if (!pathname.startsWith('/painel') && !pathname.startsWith('/entrada-estoque') && pathname !== '/login') {
         navigate('/painel', { replace: true })
       }
@@ -147,6 +149,8 @@ function HostnameRedirect() {
       // devolvia ele pro salão, e daqui ele era empurrado pro /painel de novo —
       // sem parar.
       if (usaPainelDePedidos(perfil)) {
+        // Dono que abriu o Portal pelo botão da barra do gestor: deixa navegar.
+        if (portalNoGestor()) return
         // /mensalidade também: é onde o dono paga a mensalidade (mig 0263).
         // `/entrada-estoque` entra na lista porque é tela de operação: quem
         // recebe a carga está no gestor, não no portal do dono.

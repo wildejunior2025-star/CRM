@@ -253,6 +253,20 @@ export default function Layout() {
       {/* Sidebar / drawer */}
       <aside className={`sidebar${menuOpen ? ' open' : ''}`}>
         <div className="sidebar-title">{empresa?.nome || 'CRM'}</div>
+        {/* Volta pro gestor de pedidos. /painel existe nos dois domínios com a
+            mesma sessão, então serve pra quem veio pelo botão "Portal" do gestor
+            (app FWC Gestor) e pra quem entrou direto no portal.fwcinter.com. */}
+        {['admin', 'vendedor', 'super_admin'].includes(profile?.perfil) && (
+          <button type="button" className="sidebar-link"
+            onClick={() => { closeMenu(); navigate('/painel') }}
+            style={{
+              width: '100%', textAlign: 'left', cursor: 'pointer', fontWeight: 700,
+              border: '1px solid var(--primary, #7c3aed)', background: 'rgba(124,58,237,.10)',
+              color: 'var(--primary, #7c3aed)', marginBottom: 8,
+            }}>
+            ← Voltar ao gestor
+          </button>
+        )}
         <nav>
           {visibleLinks.map((link, i) =>
             link.group ? (

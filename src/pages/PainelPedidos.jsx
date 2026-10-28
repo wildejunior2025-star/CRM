@@ -18,6 +18,7 @@ import { useChamados } from '../hooks/useChamados'
 import { useConfirmar } from '../hooks/useConfirmar'
 import { calcularTaxa } from '../lib/taxaServico'
 import { fwcFetch, explicaErroFwc } from '../lib/appFwc'
+import { marcarPortalNoGestor } from '../lib/portalNoGestor'
 import ModalMapaEndereco from '../components/ModalMapaEndereco'
 import 'leaflet/dist/leaflet.css'   // mapa da posição do entregador (mig 0245)
 import Caixa from './Caixa'
@@ -4965,6 +4966,18 @@ const RIGHTBAR_BOTOES = [
       </svg>
     ),
   },
+  {
+    // Abre o Portal (relatórios, financeiro, catálogo completo) sem sair do
+    // gestor nem do app — ver lib/portalNoGestor.js. Só dono e vendedor.
+    id: 'portal', label: 'Portal', soFinanceiro: true, abrePortal: true,
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <path d="M3 9h18"/>
+        <path d="M9 21V9"/>
+      </svg>
+    ),
+  },
 ]
 
 // ── Onde o motoboy está (mig 0245) ──────────────────────────────────────────
@@ -7400,6 +7413,8 @@ export default function PainelPedidos() {
   // com o caixa na mão precisa deles pra fechar a conta certa. Por isso o
   // vendedor entrou aqui em 13/10/2026, junto com a conta azul.
   const podeFinanceiro = ['admin', 'super_admin', 'vendedor'].includes(profile?.perfil)
+  // Voltou do Portal pro gestor: desliga a marca, senão o dono fica solto no domínio do gestor.
+  useEffect(() => { marcarPortalNoGestor(false) }, [])
   const { theme, toggleTheme } = useTheme()
   const [pedidos, setPedidos] = useState([])
   const [entregadores, setEntregadores] = useState([])
@@ -12740,6 +12755,7 @@ export default function PainelPedidos() {
           return (
             <button key={b.id} type="button" title={b.label}
               onClick={() => {
+                if (b.abrePortal) { marcarPortalNoGestor(true); window.location.assign('/'); return }
                 if (!b.abreSalao) { setPainelDireito(prev => prev === b.id ? null : b.id); return }
                 // Atalho: abre a gaveta de Mesas ja na aba certa. Clicar de
                 // novo fecha, igual aos outros botoes.
