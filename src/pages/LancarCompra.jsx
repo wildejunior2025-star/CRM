@@ -52,12 +52,14 @@ const UNIDADES = ['kg', 'g', 'L', 'ml', 'un']
 // do produto quando ela já é uma categoria de compra. Errar aqui custa um clique no select.
 const PALPITES = [
   ['Bebidas', /\b(coca|refri|guarana|fanta|sprite|pepsi|suco|agua|cerveja|skol|brahma|heineken|antarctica|budweiser|vinho|vodka|whisky|energetico|cha gelado|h2o)\b/],
-  ['Carnes e frios', /\b(carne|frango|boi|porco|bacon|linguica|calabresa|peixe|camarao|presunto|mortadela|salsicha|hamburguer|costela|picanha|file|coxa|asa|sol|charque|bife)\b/],
-  ['Laticínios e ovos', /\b(queijo|leite|ovo|ovos|manteiga|requeijao|creme de leite|iogurte|mussarela|coalho|nata|cheddar|catupiry)\b/],
+  ['Carnes e frios', /\b(carne|frango|boi|porco|bacon|linguica|calabresa|peixe|camarao|presunto|mortadela|salsicha|hamburguer|costela|picanha|file|coxa|sobrecoxa|asa|sol|charque|bife|guisado|guizado|moida|figado|bisteca)\b/],
+  ['Laticínios e ovos', /\b(queijo|leite|ovo|ovos|manteiga|requeijao|creme de leite|iogurte|mussarela|mucarela|muzarela|coalho|nata|cheddar|catupiry)\b/],
+  // Mercearia antes do Hortifruti: "molho de tomate" é mercearia, o tomate solto continua Hortifruti.
+  ['Mercearia', /\b(arroz|feijao|oleo|azeite|macarrao|mac|espaguete|lasanha|cafe|acucar|sal|tempero|sazon|colorifico|coloral|molho|maionese|ketchup|mostarda|amido|maizena|farofa|vinagre|extrato|milho|ervilha|enlatado)\b/],
   ['Hortifruti', /\b(tomate|cebola|alface|batata|banana|laranja|limao|cenoura|pimentao|alho|coentro|cheiro verde|macaxeira|mandioca|abacaxi|melancia|fruta|verdura|legume|salada|repolho)\b/],
   ['Padaria e confeitaria', /\b(pao|paes|bolo|massa|farinha de trigo|fermento|confeitaria|biscoito|bisnaga)\b/],
   ['Congelados', /\b(congelad|sorvete|polpa|acai|pizza congelada|nuggets)\b/],
-  ['Descartáveis e embalagens', /\b(copo|prato descart|embalagem|marmita|marmitex|sacola|guardanapo|canudo|talher|papel aluminio|filme|isopor|quentinha)\b/],
+  ['Descartáveis e embalagens', /\b(copo|prato descart|embalagem|marmita|marmitex|sacola|sacolas|guardanapo|canudo|talher|papel aluminio|filme|isopor|quentinha|espeto|espetos|palito)\b/],
   ['Limpeza e higiene', /\b(detergente|sabao|desinfetante|alvejante|sanitaria|esponja|papel toalha|papel higienico|limpeza|cloro|luva)\b/],
   ['Gás', /\b(gas|botijao)\b/],
 ]
@@ -83,6 +85,9 @@ const PALPITES_GASTO = [
 function palpiteDoGasto(nome) {
   const n = norm(nome)
   for (const [cat, re] of PALPITES_GASTO) if (re.test(n)) return cat
+  // Lá em Casa, 27/10/2026: compra de cozinha lançada como "só despesa" (sem estoque) caía toda
+  // em "Outros" — frango, arroz, copo. Comida e descartável ganham a categoria de mercadoria.
+  for (const [cat, re] of PALPITES) if (re.test(n)) return cat
   return 'Outros'
 }
 const valorGasto = (g) => r2(num(g.valor))
