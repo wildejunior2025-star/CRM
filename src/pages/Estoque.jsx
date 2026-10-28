@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import LancarNotaIA from '../components/LancarNotaIA'
+import EstoqueSabores from '../components/EstoqueSabores'
 import '../components/Page.css'
 
 function ItemSearch({ items, value, onChange, placeholder = 'Buscar...' }) {
@@ -610,6 +611,7 @@ export default function Estoque({ embutido = false }) {
           </div>
         )}
       </div>
+      <EstoqueSabores empresaId={empresaId} dono={dono} />
       </>)}
 
       {usaEstoque && usaCasco && (<>
