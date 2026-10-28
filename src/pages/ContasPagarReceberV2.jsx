@@ -440,6 +440,24 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
 // Uma conta: ícone da família, nome, fornecedor + quando, a categoria, o valor e o botão.
 function Linha({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onHistorico, onExcluir }) {
   const [detalhe, setDetalhe] = useState(false)
+  // O que tinha na nota (Lá em Casa, 27/10/2026): a conta só guardava o total; os itens
+  // ficam em compras_lancadas — o que foi pro estoque (itens) e o que foi só despesa (gastos).
+  const [nota, setNota] = useState(null)   // null fechado | 'carregando' | [{nome, detalhe, valor}]
+  const veioDeNota = c.tipo === 'pagar' && /^Compra\b/.test(c.descricao || '')
+  async function verNota() {
+    setNota('carregando')
+    const { data } = await supabase.from('compras_lancadas').select('itens, payload')
+      .or(`conta_id.eq.${c.id},conta_ids.cs.{${c.id}}`).limit(1).maybeSingle()
+    const estoque = (Array.isArray(data?.itens) ? data.itens : []).map((i) => ({
+      nome: i.descricao_nota || i.nome,
+      detalhe: `${Number(i.qtd_digitada ?? i.quantidade ?? 0).toLocaleString('pt-BR')} ${i.emb || 'un'} · foi pro estoque`,
+      valor: Number(i.linha_total ?? Number(i.custo_unit || 0) * Number(i.quantidade || 0)),
+    }))
+    const gastos = (Array.isArray(data?.payload?.gastos) ? data.payload.gastos : []).map((g) => ({
+      nome: g.descricao, detalhe: g.categoria || 'Outros', valor: Number(g.valor || 0),
+    }))
+    setNota([...estoque, ...gastos])
+  }
   const sit = situacaoDe(c, hoje)
   const pagar = c.tipo === 'pagar'
   const rateio = Array.isArray(c.rateio) ? c.rateio.filter((r) => Number(r?.valor) > 0) : []
@@ -452,7 +470,10 @@ function Linha({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onH
       <span className="cp2-bolha" style={fam ? { background: `${fam.cor}1f` } : undefined} aria-hidden="true">{fam ? fam.emoji : '💰'}</span>
       <div className="cp2-info">
         <div className="cp2-nome">
-          <strong>{c.descricao}</strong>
+          {veioDeNota
+            ? <strong role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="Ver o que tinha na nota"
+                onClick={verNota} onKeyDown={(e) => { if (e.key === 'Enter') verNota() }}>{c.descricao}</strong>
+            : <strong>{c.descricao}</strong>}
           {c.parcelas > 1 && <span className="cp2-tag">{c.parcela}/{c.parcelas}</span>}
           {c.recorrencia !== 'nenhuma' && <span className="cp2-tag" title="Se repete">↻</span>}
         </div>
@@ -464,10 +485,45 @@ function Linha({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onH
               ? <button type="button" className="cp2-cat-chip cp2-cat-chip-btn" onClick={() => setDetalhe((d) => !d)}>{cat} +{rateio.length - 1} {detalhe ? '▴' : '▾'}</button>
               : <span className="cp2-cat-chip">{cat}</span>
           )}
+          {veioDeNota && (
+            <button type="button" className="cp2-cat-chip cp2-cat-chip-btn" onClick={verNota}>🧾 Ver itens</button>
+          )}
         </div>
         {detalhe && rateio.length > 1 && (
           <div className="cp2-rateio">
             {rateio.map((r) => <span key={r.categoria}>{r.categoria} <strong>{brl(Number(r.valor))}</strong></span>)}
+          </div>
+        )}
+        {nota && (
+          <div className="modal-overlay" onClick={() => setNota(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+              <h2 style={{ marginBottom: 4 }}>🧾 {c.descricao}</h2>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+                {c.pessoa}{c.pessoa ? ' · ' : ''}{quandoTexto(c, hoje)}
+              </div>
+              {nota === 'carregando' ? <p>Carregando…</p>
+                : nota.length === 0 ? <p>Essa conta não tem os itens guardados (foi lançada antes da tela de compra).</p>
+                  : (
+                    <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '60vh', overflowY: 'auto' }}>
+                      {nota.map((i, k) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>{i.nome}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{i.detalhe}</div>
+                          </div>
+                          <strong style={{ whiteSpace: 'nowrap' }}>{brl(i.valor)}</strong>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontSize: 16 }}>
+                        <span>{nota.length} {nota.length === 1 ? 'item' : 'itens'}</span>
+                        <strong>Total {brl(Number(c.valor))}</strong>
+                      </div>
+                    </div>
+                  )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setNota(null)}>Fechar</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
