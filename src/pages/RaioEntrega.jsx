@@ -35,6 +35,8 @@ export default function RaioEntrega() {
   const mapObjRef = useRef(null)
   const circleRef = useRef(null)
   const ringsRef  = useRef([])
+  const gradeRef  = useRef(null)   // { passo_m, celulas: [[lat,lng,km]] } — mapa pela rua
+  const gradeLayerRef = useRef(null)
   const markerRef = useRef(null)
   const raioVal   = useRef(10)    // espelho do estado, pra funções do mapa lerem o valor de agora
   const taxasVal  = useRef([])
@@ -63,6 +65,9 @@ export default function RaioEntrega() {
   const [aceitaRetirada,  setAceitaRetirada]  = useState(true)
   const [aceitaEntrega,   setAceitaEntrega]   = useState(true)
   const [pelaRua,         setPelaRua]         = useState(false) // taxa pelo caminho da moto (Google)
+  const [gradeStatus,     setGradeStatus]     = useState(null)  // null | 'carregando' | 'ok' | 'erro'
+  const [destaqueKm,      setDestaqueKm]      = useState(null)  // faixa com o mouse em cima
+  const [mapaPronto,      setMapaPronto]      = useState(false)
   const [taxaEntrega,     setTaxaEntrega]     = useState(0)
   const [pedidoMinimo,    setPedidoMinimo]    = useState(0)
   const [taxasKm,         setTaxasKm]         = useState([])  // [{km, taxa}]
@@ -385,6 +390,7 @@ export default function RaioEntrega() {
       }).addTo(map)
 
       desenharAneis(latitude, longitude)
+      setMapaPronto(true)
 
       const icon = L.divIcon({
         html: `<div style="width:44px;height:44px;background:#2563eb;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:22px;">🏪</div>`,
@@ -431,7 +437,7 @@ export default function RaioEntrega() {
     }
 
     initMap()
-    return () => { if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null } }
+    return () => { if (mapObjRef.current) { mapObjRef.current.remove(); mapObjRef.current = null; gradeLayerRef.current = null; setMapaPronto(false) } }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latitude, longitude])
 
@@ -452,6 +458,57 @@ export default function RaioEntrega() {
     desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taxasKm, pelaRua])
+
+  // ── Mapa pela rua (igual ao iFood) ───────────────────────────
+  // Com a chave ligada, a área em volta da loja vira quadradinhos com os km de
+  // moto até a loja. O servidor calcula uma vez e guarda; aqui só desenha.
+  // Pintado de leve = onde a moto chega dentro do raio. Mouse numa faixa =
+  // pinta forte até aquela faixa.
+  useEffect(() => {
+    if (!pelaRua || !empresaId || !latitude) return
+    let vivo = true
+    setGradeStatus('carregando')
+    supabase.functions.invoke('geocodificar-google', { body: { acao: 'grade' } })
+      .then(({ data }) => {
+        if (!vivo) return
+        if (!data?.ok) { setGradeStatus('erro'); return }
+        gradeRef.current = data
+        setGradeStatus('ok')
+      })
+      .catch(() => { if (vivo) setGradeStatus('erro') })
+    return () => { vivo = false }
+  // A grade é a do ponto SALVO da loja; arrastar o pino sem salvar não refaz.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pelaRua, empresaId, raio])
+
+  useEffect(() => {
+    const map = mapObjRef.current
+    if (!map || !L) return
+    if (gradeLayerRef.current) { map.removeLayer(gradeLayerRef.current); gradeLayerRef.current = null }
+    const g = gradeRef.current
+    const ponto = markerRef.current?.getLatLng()
+    desenharAneis(ponto?.lat ?? latitude, ponto?.lng ?? longitude)
+    if (!pelaRua || !g || gradeStatus !== 'ok') return
+    const lat0 = g.origem?.[0] ?? latitude
+    const dLat = g.passo_m / 111320 / 2
+    const dLng = g.passo_m / (111320 * Math.cos(lat0 * Math.PI / 180)) / 2
+    const raioAgora = Number(raio) || 10
+    const renderer = L.canvas({ padding: 0.2 })
+    const camada = L.layerGroup()
+    for (const [la, ln, km] of g.celulas) {
+      if (km > raioAgora) continue
+      const forte = destaqueKm != null && km <= destaqueKm
+      L.rectangle([[la - dLat, ln - dLng], [la + dLat, ln + dLng]], {
+        renderer, stroke: false, interactive: false,
+        fillColor: forte ? '#a21caf' : '#c084fc',
+        fillOpacity: forte ? 0.5 : (destaqueKm != null ? 0.12 : 0.28),
+      }).addTo(camada)
+    }
+    camada.addTo(map)
+    gradeLayerRef.current = camada
+    markerRef.current?.setZIndexOffset(1000)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradeStatus, destaqueKm, pelaRua, raio, mapaPronto])
 
   // ── Faixas de 500 m, cada uma de uma cor ──────────────────────
   // Serve pra conferir as entregas: a cor diz em que "anel" o endereço caiu.
@@ -499,6 +556,8 @@ export default function RaioEntrega() {
     if (!map || !L) return
     ringsRef.current.forEach(l => map.removeLayer(l))
     ringsRef.current = []
+    // Pela rua com o mapa da grade pronto: os anéis da linha reta saem de cena.
+    if (pelaRuaVal.current && gradeRef.current) return
     const raioM = raioVal.current * 1000
     const passo = 500
     const total = Math.ceil(raioM / passo)
@@ -709,7 +768,18 @@ export default function RaioEntrega() {
         {/* ── Mapa ── */}
         <div className="re-map-wrapper">
           {temCoordenadas
-            ? <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+            ? <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+                {pelaRua && (
+                  <div style={{ position: 'absolute', left: 54, top: 10, zIndex: 500, background: '#fff', color: '#4a044e', border: '1px solid #e9d5ff', borderRadius: 8, padding: '5px 9px', font: '600 12px/1.35 system-ui,sans-serif', boxShadow: '0 1px 4px rgba(0,0,0,.2)', maxWidth: 260 }}>
+                    {gradeStatus === 'carregando' ? '⏳ Montando o mapa pela rua… (só demora da primeira vez)'
+                      : gradeStatus === 'erro' ? 'Não deu pra montar o mapa pela rua agora. Clique num ponto pra ver os km.'
+                      : destaqueKm != null
+                        ? <>Até <b>{String(destaqueKm).replace('.', ',')} km</b> pela rua{(() => { const f = taxaAteKm(destaqueKm); return f ? <> · R$ {f.taxa.toFixed(2).replace('.', ',')}</> : null })()}</>
+                        : <>🛵 Pintado = onde a moto chega em até <b>{String(raio).replace('.', ',')} km</b> pela rua. Passe o mouse numa faixa →</>}
+                  </div>
+                )}
+              </div>
             : (
               <div className="re-map-empty">
                 <div className="re-map-empty-icon">
@@ -978,7 +1048,11 @@ export default function RaioEntrega() {
 
                       {/* Linhas */}
                       {taxasKm.map((faixa, i) => (
-                        <div key={i} className="re-faixas-row">
+                        <div key={i} className="re-faixas-row"
+                          onMouseEnter={() => setDestaqueKm(Number(faixa.km) || null)}
+                          onMouseLeave={() => setDestaqueKm(null)}
+                          onFocus={() => setDestaqueKm(Number(faixa.km) || null)}
+                          onBlur={() => setDestaqueKm(null)}>
                           {/* Os três campos guardam o TEXTO digitado, não o número.
                               Guardando número, digitar 23 em cima do 0 deixava "023"
                               preso na tela: pro React "023" == 23, então ele não

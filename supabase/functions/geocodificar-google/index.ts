@@ -249,6 +249,95 @@ async function ruaDentroDoBairro(supabase: any, empresaId: string, e: { rua: str
   return null
 }
 
+// ── MAPA PELA RUA DA LOJA (grade igual a do iFood, 28/10/2026) ──────────
+//
+// Divide o raio da loja em quadradinhos e pergunta ao Google os km de moto da
+// loja ate o meio de cada um (Route Matrix: 625 pontos por chamada). Fica
+// guardado em entrega_grade e so e refeito quando a loja muda de lugar ou
+// aumenta o raio — cada calculo sao ~1.500 pontos, e a cota gratis da matriz
+// e de 10 mil por mes.
+const kmReta = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const r = (x: number) => x * Math.PI / 180
+  const h = Math.sin(r(bLat - aLat) / 2) ** 2 + Math.cos(r(aLat)) * Math.cos(r(bLat)) * Math.sin(r(bLng - aLng) / 2) ** 2
+  return 2 * 6371 * Math.asin(Math.sqrt(h))
+}
+
+// deno-lint-ignore no-explicit-any
+async function gradeDaLoja(supabase: any, empresaId: string, forcar: boolean) {
+  const { data: loja } = await supabase.from('empresas')
+    .select('latitude, longitude, raio_entrega_km').eq('id', empresaId).maybeSingle()
+  const oLat = Number(loja?.latitude), oLng = Number(loja?.longitude)
+  if (!Number.isFinite(oLat) || !Number.isFinite(oLng)) return { ok: false, erro: 'loja_sem_ponto' }
+  const raio = Math.min(Math.max(Number(loja?.raio_entrega_km) || 10, 1), 30)
+
+  const { data: salva } = await supabase.from('entrega_grade').select('*').eq('empresa_id', empresaId).maybeSingle()
+  const mesmoLugar = salva && salva.origem_lat.toFixed(4) === oLat.toFixed(4) && salva.origem_lng.toFixed(4) === oLng.toFixed(4)
+  // Raio menor que o calculado serve: e so recortar.
+  if (!forcar && mesmoLugar && Number(salva.raio_km) >= raio) {
+    // deno-lint-ignore no-explicit-any
+    const celulas = (salva.celulas as any[]).filter((c) => c[2] <= raio)
+    return { ok: true, passo_m: salva.passo_m, celulas, origem: [oLat, oLng], raio, cache: true }
+  }
+
+  // ~22 quadradinhos do centro ate a borda, qualquer que seja o raio: raio
+  // pequeno fica com quadradinho de 200 m, raio de 20 km com ~900 m.
+  const passo = Math.min(1000, Math.max(200, Math.round(raio * 1000 / 22 / 50) * 50))
+  const dLat = passo / 111320
+  const dLng = passo / (111320 * Math.cos(oLat * Math.PI / 180))
+  const n = Math.ceil(raio * 1000 / passo)
+  const pontos: [number, number][] = []
+  for (let i = -n; i <= n; i++) {
+    for (let j = -n; j <= n; j++) {
+      const lat = oLat + i * dLat, lng = oLng + j * dLng
+      // Pela rua nunca e menor que a reta: fora do circulo nao precisa perguntar.
+      if (kmReta(oLat, oLng, lat, lng) <= raio) pontos.push([lat, lng])
+    }
+  }
+
+  const ponto = (lat: number, lng: number) => ({ waypoint: { location: { latLng: { latitude: lat, longitude: lng } } } })
+  const kms: (number | null)[] = new Array(pontos.length).fill(null)
+  let modo = 'TWO_WHEELER'
+  for (let ini = 0; ini < pontos.length; ini += 625) {
+    const lote = pontos.slice(ini, ini + 625)
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      const r = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': GOOGLE_KEY,
+          'X-Goog-FieldMask': 'originIndex,destinationIndex,distanceMeters,condition',
+        },
+        body: JSON.stringify({ origins: [ponto(oLat, oLng)], destinations: lote.map(([a, b]) => ponto(a, b)), travelMode: modo }),
+      })
+      if (!r.ok) {
+        const t = (await r.text()).slice(0, 400)
+        console.warn('[geocode-google] matriz recusou:', modo, r.status, t)
+        // Moto nao disponivel na matriz: o resto todo vai de carro.
+        if (modo === 'TWO_WHEELER' && r.status === 400) { modo = 'DRIVE'; continue }
+        return { ok: false, erro: r.status === 403 ? 'rotas_desligado' : 'matriz_falhou', detalhe: t }
+      }
+      // deno-lint-ignore no-explicit-any
+      for (const el of (await r.json()) as any[]) {
+        if (el?.condition !== 'ROUTE_EXISTS') continue
+        kms[ini + Number(el.destinationIndex ?? 0)] = Math.round(Number(el.distanceMeters ?? 0) / 10) / 100
+      }
+      break
+    }
+  }
+
+  // Quadradinho sem caminho (rio, mangue) ou que so se alcanca alem do raio fica de fora.
+  const celulas = pontos
+    .map(([lat, lng], i) => [Math.round(lat * 1e5) / 1e5, Math.round(lng * 1e5) / 1e5, kms[i]])
+    .filter((c) => c[2] != null)
+  console.log(`[geocode-google] grade ${empresaId}: ${pontos.length} pontos, ${celulas.length} com rua, passo ${passo} m, ${modo}`)
+  await supabase.from('entrega_grade').upsert({
+    empresa_id: empresaId, origem_lat: oLat, origem_lng: oLng, raio_km: raio, passo_m: passo,
+    celulas, created_at: new Date().toISOString(),
+  }, { onConflict: 'empresa_id' })
+  // deno-lint-ignore no-explicit-any
+  return { ok: true, passo_m: passo, celulas: celulas.filter((c: any) => c[2] <= raio), origem: [oLat, oLng], raio }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
@@ -265,6 +354,8 @@ Deno.serve(async (req) => {
     // (senao o teto diario e o aviso de cota nao teriam dono).
     const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '')
     let empresaId: string | undefined
+    // Logado como funcionario da loja (nao a pagina publica nem o robo)
+    let daEquipe = false
     if (token && token === SERVICE_KEY) {
       empresaId = String(b.empresa_id ?? '').trim() || undefined
       if (!empresaId) return json({ ok: false, erro: 'sem_loja' }, 403)
@@ -274,6 +365,7 @@ Deno.serve(async (req) => {
         ? await supabase.from('profiles').select('empresa_id').eq('id', u.user.id).maybeSingle()
         : { data: null }
       empresaId = perfil?.empresa_id as string | undefined
+      daEquipe = !!empresaId
 
       // O CLIENTE TAMBEM PRECISA ACHAR A PROPRIA RUA (25/10/2026)
       //
@@ -364,6 +456,12 @@ Deno.serve(async (req) => {
     // Routes API, SKU basico (US$ 5 por mil com 10 mil gratis por mes).
     // Cache por par de pontos com 4 casas (~11 m): o mesmo cliente nao paga
     // duas vezes e o motoboy nao ve o km mudar por causa de um tremido no GPS.
+    if (b.acao === 'grade') {
+      // So a tela Raio de Entrega, de quem e da loja: e o caminho caro.
+      if (!daEquipe) return json({ ok: false, erro: 'so_equipe' }, 403)
+      return json(await gradeDaLoja(supabase, empresaId!, b.forcar === true))
+    }
+
     if (b.acao === 'rota') {
       const oLat = Number(b.origem_lat), oLng = Number(b.origem_lng)
       const dLat = Number(b.lat), dLng = Number(b.lng)
