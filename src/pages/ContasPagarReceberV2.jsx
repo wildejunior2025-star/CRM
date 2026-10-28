@@ -33,6 +33,7 @@ const FAMILIAS = [
   { id: 'fixos', rotulo: 'Fixos do negócio', emoji: '🏠', cor: '#7c3aed', dica: 'aluguel, luz, água, internet' },
   { id: 'pessoal', rotulo: 'Pessoal', emoji: '👥', cor: '#db2777', dica: 'salários e retiradas' },
   { id: 'impostos', rotulo: 'Impostos, taxas e entrega', emoji: '🧾', cor: '#ea580c', dica: 'imposto, maquininha, aplicativo, frete' },
+  { id: 'sangria', rotulo: 'Sangrias do caixa', emoji: '💸', cor: '#16a34a', dica: 'o que saiu da gaveta pra pagar na hora' },
   { id: 'outros', rotulo: 'Outros', emoji: '📦', cor: '#64748b', dica: 'o que não se encaixa nos outros' },
 ]
 const FAMILIA_DA = {
@@ -46,7 +47,23 @@ const FAMILIA_DA = {
   'Outros': 'outros', 'Sem categoria': 'outros',
 }
 // Categoria que ninguém classificou (inclusive as do catálogo: Picolé, Sucos…) é mercadoria: é o que a loja revende.
-const familiaDe = (cat) => FAMILIAS.find(f => f.id === (FAMILIA_DA[cat] || 'mercadoria'))
+const familiaDe = (cat) => FAMILIAS.find(f => f.id === (String(cat).startsWith('Sangria') ? 'sangria' : FAMILIA_DA[cat] || 'mercadoria'))
+
+// SANGRIAS (AGV, 28/10/2026): o motoboy, a passagem do funcionário… saem da gaveta pelo Caixa e não
+// viravam conta nenhuma — o "Já pago" não mostrava esse dinheiro. Elas entram aqui SÓ PRA LEITURA, como
+// contas já pagas, separadas pelo motivo escrito na sangria. Não se grava nada em contas_financeiras.
+const MOTIVOS_SANGRIA = [
+  ['Sangria · Motoboy', /motoboy|motoqueiro|entregador|entrega|corrida/],
+  ['Sangria · Passagem', /passagem|transporte|onibus|uber/],
+  ['Sangria · Funcionários', /funcionari|diaria|salario|vale|adiantamento|pagamento de/],
+  ['Sangria · Compras', /compra|mercado|feira|gas|gelo|carvao|padaria/],
+  ['Sangria · Retirada / depósito', /retirada|deposit|banco|dono|cofre/],
+]
+const motivoSangria = (obs) => {
+  const n = String(obs || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  return MOTIVOS_SANGRIA.find(([, re]) => re.test(n))?.[0] || 'Sangria · Outras'
+}
+const ROTULO_FORMA = { dinheiro: 'dinheiro', pix: 'PIX', cartao: 'cartão' }
 
 const PRAZOS = [
   ['atrasadas', 'Atrasadas', '#dc2626'],
@@ -68,6 +85,7 @@ const doMes = (c, mes) => String(c.pago_em || c.vencimento || '').slice(0, 7) ==
 export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAntiga }) {
   const [confirmar, avisoConfirmar] = useConfirmar()
   const [contas, setContas] = useState([])
+  const [sangrias, setSangrias] = useState([])
   const [fiado, setFiado] = useState({ total: 0, clientes: 0, lista: [] })
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState(null)
@@ -102,6 +120,19 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
         .order('vencimento').order('created_at').order('id'))
       if (dados.error) throw dados.error
       setContas(dados.data || [])
+      const sg = await fetchAll(() => supabase.from('caixa_movimentos').select('id, valor, forma, observacao, created_at')
+        .eq('empresa_id', empresaId).eq('tipo', 'sangria').gte('created_at', `${corte}T00:00:00`)
+        .order('created_at').order('id'))
+      setSangrias((sg.data || []).map((m) => {
+        const dia = ymd(new Date(m.created_at))
+        return {
+          id: `sg-${m.id}`, sangria: true, tipo: 'pagar', status: 'quitada', recorrencia: 'nenhuma',
+          descricao: (m.observacao || '').trim() || 'Sangria sem motivo escrito',
+          pessoa: `Sangria do caixa · ${ROTULO_FORMA[m.forma] || 'dinheiro'}`,
+          categoria: motivoSangria(m.observacao), valor: Number(m.valor), valor_pago: Number(m.valor),
+          pago_em: dia, vencimento: dia,
+        }
+      }))
       const f = await supabase.from('clientes_saldo_fiado').select('cliente_id, saldo_fiado')
       const devedores = (f.data || []).filter((x) => Number(x.saldo_fiado) > 0)
       // Os nomes: a visão de saldo só traz cliente_id e valor.
@@ -141,9 +172,9 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
     const pagar = abertas.filter((c) => c.tipo === 'pagar')
     const receber = abertas.filter((c) => c.tipo === 'receber')
     const atrasPagar = pagar.filter((c) => c.vencimento < hoje)
-    const pagasMes = contas.filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && doMes(c, mesAtual))
+    const pagasMes = [...contas, ...sangrias].filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && doMes(c, mesAtual))
     const recebidasMes = contas.filter((c) => c.tipo === 'receber' && Number(c.valor_pago) > 0 && doMes(c, mesAtual))
-    const pagoHoje = contas.filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && c.pago_em === hoje)
+    const pagoHoje = [...contas, ...sangrias].filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && c.pago_em === hoje)
     const v = (l) => l.reduce((s, c) => s + Number(c.valor_pago || 0), 0)
     return {
       nPagar: pagar.length, totalPagar: soma(pagar), nAtras: atrasPagar.length, atrasPagar: soma(atrasPagar),
@@ -151,7 +182,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
       pagoMes: v(pagasMes), nPagoMes: pagasMes.length, pagoHoje: v(pagoHoje),
       recebidoMes: v(recebidasMes),
     }
-  }, [contas, hoje, mesAtual])
+  }, [contas, sangrias, hoje, mesAtual])
 
   // ── abas "A pagar" e "A receber": blocos por prazo ──
   const blocos = useMemo(() => {
@@ -165,8 +196,11 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
 
   // ── aba "Já pago": pra onde foi o dinheiro ──
   const pago = useMemo(() => {
-    const dentro = (c) => (periodo === 'tudo' ? true : doMes(c, periodo === 'mes' ? mesAtual : mesPassado))
-    const lista = contas.filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && dentro(c))
+    // 'hoje' (AGV, 28/10/2026): o dono queria ver só o que saiu no dia, não o mês inteiro.
+    const dentro = (c) => (periodo === 'tudo' ? true
+      : periodo === 'hoje' ? (c.pago_em || c.vencimento) === hoje
+        : doMes(c, periodo === 'mes' ? mesAtual : mesPassado))
+    const lista = [...contas, ...sangrias].filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && dentro(c))
       .sort((a, b) => (b.pago_em || b.vencimento).localeCompare(a.pago_em || a.vencimento))
     // Cada conta soma pelo que foi PAGO e, se foi uma nota quebrada por categoria, pelo rateio dela.
     const cats = new Map()
@@ -188,7 +222,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
       return { ...f, cats: cs, valor: cs.reduce((s, g) => s + g.valor, 0) }
     }).filter((f) => f.cats.length).sort((a, b) => b.valor - a.valor)
     return { lista, total, familias }
-  }, [contas, periodo, mesAtual, mesPassado])
+  }, [contas, sangrias, periodo, hoje, mesAtual, mesPassado])
 
   const sugestoes = useMemo(() => {
     const pessoas = { pagar: new Set(), receber: new Set() }
@@ -353,7 +387,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
               {aba === 'pago' && (
                 <>
                   <div className="cp2-periodo">
-                    {[['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['tudo', 'Tudo']].map(([id, lb]) => (
+                    {[['hoje', 'Hoje'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['tudo', 'Tudo']].map(([id, lb]) => (
                       <button key={id} type="button" className={`cp2-chip ${periodo === id ? 'ativo' : ''}`} onClick={() => { setPeriodo(id); setCatAberta(null) }}>{lb}</button>
                     ))}
                     <span className="cp2-periodo-total">Total <strong>{brl(pago.total)}</strong></span>
@@ -531,7 +565,7 @@ function Linha({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onH
         <strong className={pagar ? 'cpr-neg' : 'cpr-pos'}>{brl(valor)}</strong>
         {parcial && <span>pago {brl(c.valor_pago)} de {brl(c.valor)}</span>}
       </div>
-      <div className="cp2-botoes">
+      {c.sangria ? <div className="cp2-botoes" title="Lançada no Caixa — pra corrigir, vá no Caixa" /> : <div className="cp2-botoes">
         {c.status === 'aberta' && (
           <button type="button" className={`btn btn-sm ${pagar ? 'cpr-btn-pagar' : 'cpr-btn-receber'}`} onClick={onBaixa}>{pagar ? 'Pagar' : 'Receber'}</button>
         )}
@@ -546,7 +580,7 @@ function Linha({ c, hoje, menuAberto, onMenu, onBaixa, onEditar, onDuplicar, onH
             </div>
           )}
         </div>
-      </div>
+      </div>}
     </li>
   )
 }
