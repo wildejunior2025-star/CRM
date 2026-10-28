@@ -147,6 +147,108 @@ function partesDoEndereco(results: any[]) {
   }
 }
 
+// "Rua São José" e "R. S. José" sao a mesma: compara sem o tipo do logradouro
+// e exige que as palavras de verdade do nome estejam no que o Google achou.
+const semTipoRua = (s: unknown) => norm(s)
+  .replace(/^(r|rua|av|avenida|trav|travessa|tv|al|alameda|pc|praca|rod|rodovia|estr|estrada|beco|conj|conjunto|lot|loteamento|vl|vila)\.?\s+/, '')
+const mesmaRua = (achada: unknown, pedida: unknown) => {
+  const a = semTipoRua(achada), p = semTipoRua(pedida)
+  if (!a || !p) return false
+  const palavras = p.split(' ').filter(w => w.length >= 3 && !['dos', 'das', 'de', 'da', 'do'].includes(w))
+  return palavras.length > 0 && palavras.every(w => a.includes(w))
+}
+
+type Caixa = { norte: number, sul: number, leste: number, oeste: number }
+const dentro = (c: Caixa, lat: number, lng: number) => {
+  // Folga de 15%: o contorno do Google e um retangulo e a rua da borda do
+  // bairro as vezes passa um pouco dele.
+  const fy = (c.norte - c.sul) * 0.15, fx = (c.leste - c.oeste) * 0.15
+  return lat <= c.norte + fy && lat >= c.sul - fy && lng <= c.leste + fx && lng >= c.oeste - fx
+}
+
+// Procura a rua DENTRO do bairro informado. So roda quando a busca normal caiu
+// em outro bairro, entao e raro (e cada passo pago entra no teto da loja).
+//
+// 1) contorno do bairro (cache de 30 dias: bairro nao muda de lugar);
+// 2) Geocoding com o bairro como preferencia — o mesmo SKU de sempre;
+// 3) nao deu, Places Text Search PRESO ao bairro — so devolve o que esta la.
+// Nenhum achou a rua com aquele nome dentro do bairro: devolve null e quem
+// chamou trata como "bairro nao confere" (o link pede o pino no mapa).
+// deno-lint-ignore no-explicit-any
+async function ruaDentroDoBairro(supabase: any, empresaId: string, e: { rua: string, numero: string, bairro: string, cidade: string, estado: string }) {
+  if (!e.bairro || !e.rua) return null
+  const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
+  const chaveBairro = 'bairro:' + norm([e.bairro, e.cidade, e.estado].filter(Boolean).join('|'))
+  let caixa: Caixa | null = null
+  const { data: cb } = await supabase.from('geocode_cache')
+    .select('partes').eq('chave', chaveBairro).gte('created_at', corte).maybeSingle()
+  if (cb?.partes?.norte != null) caixa = cb.partes as Caixa
+  if (!caixa) {
+    if (!await cobrarConsulta(supabase, empresaId)) return null
+    const g = await fetch('https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams({
+      address: [e.bairro, e.cidade, e.estado].filter(Boolean).join(', '),
+      region: 'br', language: 'pt-BR', components: 'country:BR', key: GOOGLE_KEY,
+    })).then(r => r.json())
+    // deno-lint-ignore no-explicit-any
+    const r0 = (g?.results ?? []).find((r: any) => (r.types ?? []).some((t: string) => ['sublocality', 'sublocality_level_1', 'neighborhood'].includes(t)))
+    const vp = r0?.geometry?.bounds ?? r0?.geometry?.viewport
+    if (!vp) { console.log('[geocode-google] bairro nao achado:', e.bairro, e.cidade); return null }
+    caixa = { norte: vp.northeast.lat, leste: vp.northeast.lng, sul: vp.southwest.lat, oeste: vp.southwest.lng }
+    await supabase.from('geocode_cache').upsert(
+      { chave: chaveBairro, lat: r0.geometry.location.lat, lng: r0.geometry.location.lng, precisao: 'BAIRRO', formatado: r0.formatted_address ?? null, partes: caixa, created_at: new Date().toISOString() },
+      { onConflict: 'chave' })
+  }
+
+  // 2) Geocoding puxado pro bairro
+  if (!await cobrarConsulta(supabase, empresaId)) return null
+  const g2 = await fetch('https://maps.googleapis.com/maps/api/geocode/json?' + new URLSearchParams({
+    address: [e.rua, e.numero, e.bairro, e.cidade, e.estado].filter(Boolean).join(', '),
+    bounds: `${caixa.sul},${caixa.oeste}|${caixa.norte},${caixa.leste}`,
+    region: 'br', language: 'pt-BR', components: 'country:BR', key: GOOGLE_KEY,
+  })).then(r => r.json())
+  // deno-lint-ignore no-explicit-any
+  for (const r of (g2?.results ?? []) as any[]) {
+    const lat = r.geometry?.location?.lat, lng = r.geometry?.location?.lng
+    const partes = partesDoEndereco([r])
+    if (typeof lat === 'number' && dentro(caixa, lat, lng) && mesmaRua(partes.rua, e.rua)) {
+      return { lat, lng, precisao: String(r.geometry?.location_type ?? 'GEOMETRIC_CENTER'), formatado: r.formatted_address ?? null, partes: { ...partes, bairro: partes.bairro || e.bairro } }
+    }
+  }
+
+  // 3) Places preso ao retangulo do bairro
+  if (!await cobrarConsulta(supabase, empresaId)) return null
+  const rp = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': GOOGLE_KEY,
+      'X-Goog-FieldMask': 'places.location,places.formattedAddress,places.addressComponents',
+    },
+    body: JSON.stringify({
+      textQuery: [e.rua, e.numero].filter(Boolean).join(', '),
+      languageCode: 'pt-BR', regionCode: 'BR', pageSize: 5,
+      locationRestriction: { rectangle: {
+        low: { latitude: caixa.sul, longitude: caixa.oeste },
+        high: { latitude: caixa.norte, longitude: caixa.leste },
+      } },
+    }),
+  })
+  if (!rp.ok) { console.warn('[geocode-google] busca no bairro recusou:', rp.status, (await rp.text()).slice(0, 300)); return null }
+  // deno-lint-ignore no-explicit-any
+  for (const p of ((await rp.json())?.places ?? []) as any[]) {
+    // Places devolve os componentes em outro formato (longText/shortText)
+    // deno-lint-ignore no-explicit-any
+    const comps = ((p.addressComponents ?? []) as any[]).map(c => ({ types: c.types, long_name: c.longText, short_name: c.shortText }))
+    const partes = partesDoEndereco([{ address_components: comps }])
+    if (!mesmaRua(partes.rua, e.rua)) continue
+    const lat = p.location?.latitude, lng = p.location?.longitude
+    if (typeof lat !== 'number') continue
+    return { lat, lng, precisao: partes.numero && e.numero ? 'ROOFTOP' : 'GEOMETRIC_CENTER', formatado: p.formattedAddress ?? null, partes: { ...partes, bairro: partes.bairro || e.bairro } }
+  }
+  console.log('[geocode-google] rua nao achada dentro do bairro:', e.rua, '/', e.bairro)
+  return null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
   try {
@@ -253,6 +355,62 @@ Deno.serve(async (req) => {
       return json({ ok: true, sugestoes: sug })
     }
 
+    // ── DISTANCIA PELA RUA (28/10/2026) ────────────────────────────────
+    //
+    // A taxa por km media em LINHA RETA: o cliente do outro lado do rio, a
+    // 2 km no mapa, sao 6 km de moto pela ponte. Aqui vem o caminho de
+    // verdade, do ponto da loja ate o pino do cliente.
+    //
+    // Routes API, SKU basico (US$ 5 por mil com 10 mil gratis por mes).
+    // Cache por par de pontos com 4 casas (~11 m): o mesmo cliente nao paga
+    // duas vezes e o motoboy nao ve o km mudar por causa de um tremido no GPS.
+    if (b.acao === 'rota') {
+      const oLat = Number(b.origem_lat), oLng = Number(b.origem_lng)
+      const dLat = Number(b.lat), dLng = Number(b.lng)
+      if (![oLat, oLng, dLat, dLng].every(Number.isFinite)) return json({ ok: false, erro: 'sem_ponto' }, 400)
+      const chave = `rota:${oLat.toFixed(4)},${oLng.toFixed(4)}>${dLat.toFixed(4)},${dLng.toFixed(4)}`
+      const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
+      const { data: cache } = await supabase.from('geocode_cache')
+        .select('partes').eq('chave', chave).gte('created_at', corte).maybeSingle()
+      if (cache?.partes?.km != null) return json({ ok: true, ...cache.partes, cache: true })
+      if (!await cobrarConsulta(supabase, empresaId)) return json({ ok: false, erro: 'teto_diario' })
+      const ponto = (lat: number, lng: number) => ({ location: { latLng: { latitude: lat, longitude: lng } } })
+      // Moto primeiro (o entregador e de moto); onde o Google nao tem rota de
+      // moto, cai pro carro.
+      let km: number | null = null, minutos: number | null = null, modo = ''
+      for (const travelMode of ['TWO_WHEELER', 'DRIVE']) {
+        const r = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': GOOGLE_KEY,
+            'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+          },
+          body: JSON.stringify({ origin: ponto(oLat, oLng), destination: ponto(dLat, dLng), travelMode, languageCode: 'pt-BR', regionCode: 'BR' }),
+        })
+        if (!r.ok) {
+          const t = (await r.text()).slice(0, 600)
+          console.warn('[geocode-google] rota recusou:', travelMode, r.status, t)
+          // 403 = "Routes API" desligada no projeto ou fora da chave.
+          if (r.status === 403) return json({ ok: false, erro: 'rotas_desligado', detalhe: t })
+          continue
+        }
+        const rota = (await r.json())?.routes?.[0]
+        if (rota?.distanceMeters != null) {
+          km = Math.round(rota.distanceMeters / 10) / 100
+          minutos = Math.round(parseInt(String(rota.duration ?? '0'), 10) / 60)
+          modo = travelMode
+          break
+        }
+      }
+      if (km == null) return json({ ok: false, erro: 'sem_rota' })
+      const res = { km, minutos, modo }
+      await supabase.from('geocode_cache').upsert(
+        { chave, lat: dLat, lng: dLng, precisao: 'ROTA', formatado: null, partes: res, created_at: new Date().toISOString() },
+        { onConflict: 'chave' })
+      return json({ ok: true, ...res })
+    }
+
     // ── PONTO NO MAPA → ENDERECO ESCRITO (reverso) ─────────────────────
     //
     // E o caminho do pininho do WhatsApp: o cliente toca em "minha
@@ -304,7 +462,9 @@ Deno.serve(async (req) => {
     const corte = new Date(Date.now() - DIAS_CACHE * 86400_000).toISOString()
     const { data: cache } = await supabase.from('geocode_cache')
       .select('lat, lng, precisao, formatado, partes').eq('chave', chave).gte('created_at', corte).maybeSingle()
-    if (cache) {
+    // "Bairro nao confere" guardado antes de existir a busca dentro do bairro
+    // nao vale: refaz, senao a rua repetida fica 30 dias no bairro errado.
+    if (cache && cache.precisao !== 'BAIRRO_NAO_CONFERE') {
       // A foto não entra no cache do banco (base64 pesa e o Google não deixa
       // guardar imagem). Endereço repetido não paga a BUSCA de novo; a foto
       // sim, e é o SKU barato.
@@ -346,6 +506,23 @@ Deno.serve(async (req) => {
     // Escolhido na lista do Google, o bairro e o DELE: nao ha o que conferir
     // contra o que o atendente tinha digitado (ele nem digitou ainda).
     const bairroConfere = !!placeId || !bairro || textos.some(t => norm(t).includes(bairro))
+
+    if (!bairroConfere) {
+      // A RUA QUE SE REPETE (28/10/2026): "Rua São José, Amarante" caía na São
+      // José de outro bairro e a taxa saía dela. Antes de desistir, procura a
+      // rua DENTRO do bairro que a pessoa escreveu.
+      const noBairro = await ruaDentroDoBairro(supabase, empresaId, {
+        rua, numero: String(b.numero ?? '').trim(), bairro: String(b.bairro ?? '').trim(),
+        cidade: String(b.cidade ?? '').trim(), estado: String(b.estado ?? '').trim(),
+      })
+      if (noBairro) {
+        await supabase.from('geocode_cache').upsert(
+          { chave, lat: noBairro.lat, lng: noBairro.lng, precisao: noBairro.precisao, formatado: noBairro.formatado, partes: noBairro.partes, created_at: new Date().toISOString() },
+          { onConflict: 'chave' })
+        const foto = b.mapa === true ? await fotoDoMapa(noBairro.lat, noBairro.lng) : null
+        return json({ ok: true, ...noBairro, mapa: foto })
+      }
+    }
 
     const endereco_partes = partesDoEndereco([res])
 

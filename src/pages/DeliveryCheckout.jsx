@@ -358,6 +358,11 @@ async function geocodeGoogle({ empresaId, rua, numero, bairro, cidade, estado, c
     // APPROXIMATE e centro de bairro/cidade — pior que o ponto da rua que o
     // caminho antigo acha. Nesse caso devolve nulo e deixa o antigo tentar.
     if (g.precisao === 'APPROXIMATE') return null
+    // Rua que se repete na cidade (Rua São José, 28/10/2026): o Google achou a
+    // rua com esse nome, mas em OUTRO bairro, e nem procurando dentro do bairro
+    // achou a certa. Usar esse ponto era cobrar a taxa da rua errada; sem ele,
+    // o caminho antigo tenta (e confere o bairro) ou o cliente marca no mapa.
+    if (g.precisao === 'BAIRRO_NAO_CONFERE') return null
     return { lat: g.lat, lng: g.lng, precisao: g.precisao, partes: g.partes ?? null }
   } catch { return null }
 }
