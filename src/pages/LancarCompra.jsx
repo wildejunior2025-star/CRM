@@ -304,6 +304,9 @@ export default function LancarCompra({ empresaId }) {
   const [importando, setImportando] = useState(null)    // texto enquanto trabalha
   const [avisoImport, setAvisoImport] = useState(null)  // { tipo, texto, chave?, ciencia?, tentar?, foto? }
   const fotoRef = useRef(null)
+  // Câmera direto (AGV, 28/10/2026): com "image/*,application/pdf" e sem capture, o celular do dono
+  // abria a galeria em vez da câmera. capture="environment" manda abrir a câmera traseira; no PC é ignorado.
+  const camRef = useRef(null)
   const importarRef = useRef(null)
   const [aberta, setAberta] = useState(null)            // compra aberta no histórico
   const [salvando, setSalvando] = useState(false)
@@ -1199,7 +1202,10 @@ export default function LancarCompra({ empresaId }) {
             placeholder="Chave da nota (44 números)" aria-label="Chave da nota fiscal"
             style={{ ...inp, flex: '1 1 280px', fontSize: 15, padding: '11px 12px' }} />
           <button type="button" className="btn btn-primary" onClick={() => importarChave(chaveInput)} disabled={!!importando || !chaveInput.trim()}>Puxar pela chave</button>
-          <button type="button" className="btn btn-secondary" onClick={() => fotoRef.current?.click()} disabled={!!importando}>📷 Foto ou PDF da nota</button>
+          <button type="button" className="btn btn-secondary" onClick={() => camRef.current?.click()} disabled={!!importando}>📷 Tirar foto</button>
+          <button type="button" className="btn btn-secondary" onClick={() => fotoRef.current?.click()} disabled={!!importando}>🖼 Galeria ou PDF</button>
+          <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Tirar foto da nota"
+            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
           <input ref={fotoRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} aria-label="Foto ou PDF da nota"
             onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
         </div>
@@ -1213,7 +1219,7 @@ export default function LancarCompra({ empresaId }) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
                 {avisoImport.ciencia && <button type="button" className="btn btn-primary btn-sm" onClick={() => importarChave(avisoImport.chave, 'ciencia')} disabled={!!importando}>Registrar ciência e baixar</button>}
                 {avisoImport.tentar && <button type="button" className="btn btn-secondary btn-sm" onClick={() => importarChave(avisoImport.chave)} disabled={!!importando}>Tentar de novo</button>}
-                {avisoImport.foto && <button type="button" className="btn btn-secondary btn-sm" onClick={() => fotoRef.current?.click()} disabled={!!importando}>📷 Tirar foto da nota</button>}
+                {avisoImport.foto && <button type="button" className="btn btn-secondary btn-sm" onClick={() => camRef.current?.click()} disabled={!!importando}>📷 Tirar foto da nota</button>}
               </div>
             )}
           </div>
