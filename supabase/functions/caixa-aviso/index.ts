@@ -79,14 +79,43 @@ serve(async (req) => {
       .map((t) => (t.startsWith("55") ? t : "55" + t)))]
     if (!numeros.length) return json({ ok: false, erro: "sem telefone" }, 400)
 
+    // ZAP DA LOJA CAIU? O AVISO NAO PODE MORRER COM ELE (28/10/2026)
+    //
+    // La em Casa 24 Hrs fechou o caixa 4 vezes em 2 dias e o dono nao recebeu
+    // nada. Nao era o numero: era a instancia Evolution da LOJA, desconectada
+    // ha dias. A Evolution devolve um "TypeError: Cannot read properties of
+    // undefined (reading 'id')" — erro interno dela, que so aparecia num log
+    // que ninguem le.
+    //
+    // O aviso de caixa e sobre DINHEIRO. Ele sai pelo numero da loja porque e
+    // o que o dono reconhece, mas se esse numero esta fora do ar o certo e
+    // sair pelo numero da FWC, dizendo por que. Silencio e a unica resposta
+    // que nao serve.
+    const estado = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${aviso.instancia}`, {
+      headers: { apikey: EVOLUTION_API_KEY },
+    }).then((r) => r.json()).catch(() => ({}))
+    const ligada = (estado?.instance?.state ?? estado?.state) === "open"
+
+    let instancia: string = String(aviso.instancia)
+    let texto: string = String(aviso.texto)
+    if (!ligada) {
+      const { data: cfg } = await sb.from("config_global")
+        .select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+      instancia = cfg?.valor ?? "crmadmin"
+      texto += "\n\n———\n⚠️ Este aviso veio pelo WhatsApp da FWC porque o " +
+               "*WhatsApp da sua loja está desconectado*. Reconecte em " +
+               "Configurações › WhatsApp pra voltar a receber pelo número da loja."
+      console.warn(`[caixa-aviso] instancia ${aviso.instancia} fora do ar; indo por ${instancia}`)
+    }
+
     // Um dono que da erro nao pode calar o aviso dos outros.
     const entregues: string[] = []
     const falhou: string[] = []
     for (const numero of numeros) {
-      const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${aviso.instancia}`, {
+      const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-        body: JSON.stringify({ number: numero, text: aviso.texto }),
+        body: JSON.stringify({ number: numero, text: texto }),
       })
       if (r.ok) entregues.push(numero)
       else {
@@ -94,9 +123,41 @@ serve(async (req) => {
         console.error(`[caixa-aviso] Evolution recusou ${numero}:`, (await r.text()).slice(0, 250))
       }
     }
-    if (!entregues.length) return json({ ok: false, erro: "evolution", falhou }, 502)
 
-    return json({ ok: true, enviado: true, momento: diaId ? "dia" : momento, para: entregues, falhou })
+    // NUMERO QUE NAO EXISTE NO WHATSAPP (28/10/2026). A Agv ficou 2 dias sem
+    // aviso porque o numero do dono estava com um digito errado — a Evolution
+    // respondia `"exists": false` e ninguem via. Quem cuida da plataforma
+    // precisa saber, senao a loja acha que o sistema nao funciona.
+    if (!entregues.length) {
+      const { data: sa } = await sb.from("config_global")
+        .select("valor").eq("chave", "super_admin_phone").maybeSingle()
+      const socorro = String(sa?.valor ?? "").replace(/\D/g, "")
+      if (socorro) {
+        const { data: adm } = await sb.from("config_global")
+          .select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+        // O nome da loja nao vem na RPC; busca aqui, que e um caminho raro.
+        const { data: dono } = diaId
+          ? await sb.from("caixa_dia").select("empresa_id").eq("id", diaId).maybeSingle()
+          : await sb.from("caixas").select("empresa_id").eq("id", caixaId).maybeSingle()
+        const { data: emp } = dono?.empresa_id
+          ? await sb.from("empresas").select("nome").eq("id", dono.empresa_id).maybeSingle()
+          : { data: null }
+        await fetch(`${EVOLUTION_API_URL}/message/sendText/${adm?.valor ?? "crmadmin"}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+          body: JSON.stringify({
+            number: socorro.startsWith("55") ? socorro : "55" + socorro,
+            text: `🚨 *Aviso de caixa não entregue*\n\nLoja: *${emp?.nome ?? "—"}*\n` +
+                  `Número(s) que falharam: ${falhou.join(", ")}\n` +
+                  `Instância usada: ${instancia}${ligada ? "" : " (a da loja está fora do ar)"}\n\n` +
+                  `_O dono não recebeu o fechamento. Confira o número em Configurações › WhatsApp._`,
+          }),
+        }).catch(() => {})
+      }
+      return json({ ok: false, erro: "evolution", falhou, instancia }, 502)
+    }
+
+    return json({ ok: true, enviado: true, momento: diaId ? "dia" : momento, para: entregues, falhou, instancia })
   } catch (e) {
     console.error("[caixa-aviso] erro:", e)
     return json({ ok: false, erro: String(e).slice(0, 300) }, 500)

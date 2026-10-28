@@ -488,10 +488,49 @@ export default function WhatsAppConfig() {
     setSaving(false)
     if (error) {
       setSaveMsg({ type: 'error', text: error.message })
-    } else {
+      return
+    }
+
+    // NÚMERO QUE NÃO EXISTE NO WHATSAPP (28/10/2026)
+    //
+    // A Agv ficou dois dias sem receber o fechamento do caixa porque o número
+    // do dono tinha um dígito a menos. Nada avisava: o aviso saía, o WhatsApp
+    // respondia "exists: false" e isso morria num log. Agora a conferência é
+    // na hora de salvar, que é quando dá pra arrumar.
+    //
+    // Salvar nunca falha por causa disto — o aviso é um aviso, não uma trava.
+    const paraConferir = [
+      String(form.admin_phone ?? '').replace(/\D/g, ''),
+      ...extras,
+    ].filter(t => t.length >= 10).filter((t, i, a) => a.indexOf(t) === i)
+
+    if (!paraConferir.length) {
       setSaveMsg({ type: 'success', text: 'Configurações salvas.' })
       setTimeout(() => setSaveMsg(null), 3500)
+      return
     }
+
+    setSaveMsg({ type: 'success', text: 'Salvo. Conferindo os números no WhatsApp…' })
+    try {
+      const { data: chk } = await supabase.functions.invoke('check-whatsapp', {
+        body: { numbers: paraConferir.map(t => (t.startsWith('55') ? t : '55' + t)) },
+      })
+      const ruins = (chk?.resultado ?? [])
+        .filter(r => r?.exists === false)
+        .map(r => String(r.number).replace(/^55/, ''))
+      if (ruins.length) {
+        setSaveMsg({
+          type: 'error',
+          text: `Salvo, mas atenção: ${ruins.join(', ')} não ${ruins.length > 1 ? 'são números' : 'é um número'} de WhatsApp. ` +
+                `Os avisos de caixa e estoque não vão chegar nesse número. Confira o DDD e o 9 na frente.`,
+        })
+        return                                   // fica na tela até corrigirem
+      }
+    } catch {
+      // Sem resposta da conferência não se inventa problema: salvou, salvou.
+    }
+    setSaveMsg({ type: 'success', text: 'Configurações salvas.' })
+    setTimeout(() => setSaveMsg(null), 3500)
   }
 
   async function handleToggleIa(novoValor) {
