@@ -170,13 +170,21 @@ const json = (d: unknown, s = 200) =>
       // "COD. COB.: CPX CHAVE PIX PRAZO: CHAVE PIX". Isso nao e "nao da pra
       // saber": e uma nota A VISTA, paga na entrega. Perguntar ao dono toda vez
       // e obriga-lo a parar o que esta fazendo pra responder o obvio.
-      "- 'condicao' = como a compra foi COMBINADA, que e diferente de 'pago':",
-      "  'a_prazo' quando existe DUPLICATA, FATURA preenchida, boleto, ou um prazo em DIAS/DATA",
-      "  ('PRAZO PAGTO: 28 DIAS', 'VENC 10/11').",
-      "  'a_vista' quando o bloco FATURA/DUPLICATA esta VAZIO e a cobranca e dinheiro, PIX, cartao ou",
-      "  'a vista' — inclusive quando o campo PRAZO repete a forma em vez de um prazo",
-      "  (ex.: 'COD. COB.: CPX CHAVE PIX  PRAZO: CHAVE PIX' = cobranca por PIX, sem prazo = A VISTA).",
-      "  Cupom fiscal e recibo sao sempre 'a_vista'. Nao der pra saber: null.",
+      "- 'condicao' = como a compra foi COMBINADA, que e diferente de 'pago'.",
+      "  'a_prazo' quando existe DUPLICATA, FATURA PREENCHIDA (com valor e data), boleto, ou um prazo",
+      "  em DIAS/DATA ('PRAZO PAGTO: 28 DIAS', 'VENC 10/11').",
+      "  'a_vista' numa NOTA FISCAL IMPRESSA (DANFE, NF-e, NFC-e, cupom fiscal) quando acontece",
+      "  QUALQUER uma destas:",
+      "    (a) a FATURA diz A VISTA (ex.: 'FATURA  A VISTA  1  28/10/2026  265,57');",
+      "    (b) o bloco FATURA/DUPLICATA esta VAZIO e a cobranca e dinheiro, PIX, cartao ou 'a vista' —",
+      "        inclusive quando o campo PRAZO repete a forma em vez de um prazo",
+      "        (ex.: 'COD. COB.: CPX CHAVE PIX  PRAZO: CHAVE PIX' = cobranca por PIX = A VISTA);",
+      "    (c) o DANFE NAO TEM bloco de FATURA/DUPLICATA nenhum e nao fala em boleto, prazo nem",
+      "        vencimento em lugar algum. Nota a prazo e OBRIGADA a imprimir a duplicata — se ela nao",
+      "        esta la, a compra e a vista.",
+      "  Cupom fiscal e recibo de maquininha sao sempre 'a_vista'.",
+      "  PAPEL ESCRITO A MAO (bloquinho, caderno) NAO entra na regra (c): nele a falta de duplicata nao",
+      "  significa nada. So marque 'a_vista' se estiver escrito. Nao der pra saber: null.",
       // Nota a prazo vira CONTA A PAGAR, e conta a pagar sem vencimento nao
       // serve pra nada: nao entra no "vence em 7 dias" nem no alerta de atraso.
       "  'vencimento' = a data em que a loja PRECISA PAGAR, quando a nota e a prazo. Procure em FATURA,",
