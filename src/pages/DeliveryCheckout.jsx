@@ -3242,7 +3242,7 @@ export default function DeliveryCheckout() {
                 {taxaIndefinida && (
                   <div className="dco-erro-global" style={{ background: 'rgba(234,179,8,.12)', border: '1px solid #eab308', color: '#eab308' }}>
                     {calculandoEntrega
-                      ? '⏳ Carregando a taxa de entrega... se demorar, recarregue a página.'
+                      ? (configNaoCarregou ? '⏳ Carregando a taxa de entrega... se demorar, recarregue a página.' : '⏳ Calculando a entrega pelo caminho da moto...')
                       : <>📍 Falta marcar seu endereço no mapa pra calcular a taxa de entrega. Toque em <strong>“Marcar no mapa”</strong> acima.</>}
                   </div>
                 )}
