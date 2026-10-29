@@ -1578,6 +1578,21 @@ export default function DeliveryCheckout() {
     }
     return taxaEntrega
   })()
+  // FORA DO RAIO não entrega (29/10/2026). O raio só aparecia como aviso no
+  // mapa e o pedido saía cobrando a última faixa: CL Pescados, raio de 3 km,
+  // cliente em Novo Amarante pagando R$ 8 (a faixa de 3 km). Mede com o MESMO
+  // km da taxa (rua se a loja cobra pela rua, meia faixa mais perto). Bairro
+  // com taxa fixa cadastrada continua passando: a loja disse que entrega lá.
+  const raioLoja = Number(lojaEndereco?.raio_entrega_km) || 0
+  const distCliente = (coordCliente && lojaEndereco?.latitude && lojaEndereco?.longitude)
+    ? (() => {
+        const reta = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
+        return pelaRua ? kmCobrado(rotaAtual?.km, reta, lojaEndereco?.fator_rua) : reta
+      })()
+    : null
+  const foraDoRaio = tipo === 'entrega' && raioLoja > 0 && distCliente != null
+    && !bairroTaxaFixa && !bairroBloqueado && !rotaCalculando
+    && meiaFaixa(distCliente) > raioLoja
   // Precisa marcar o ponto pra saber a taxa? (só quando é por km — bairro com taxa fixa não precisa)
   // Loja pela rua: segura também enquanto o Google calcula o caminho, senão o
   // cliente via a taxa da reta e ela pulava um segundo depois.
@@ -1631,7 +1646,7 @@ export default function DeliveryCheckout() {
   // O que vai pro funil: só a taxa que o cliente realmente viu. Enquanto ela
   // está indefinida (ou o bairro nem é atendido) o número seria chute, e chute
   // no relatório é pior que campo vazio.
-  taxaFunilRef.current = (taxaIndefinida || bairroBloqueado) ? null : taxaAplicada
+  taxaFunilRef.current = (taxaIndefinida || bairroBloqueado || foraDoRaio) ? null : taxaAplicada
 
   // Crédito da loja (mig 0178). O saldo aparece pelo telefone porque no
   // checkout da loja online nao existe login: o cliente so e criado no momento
@@ -2164,6 +2179,12 @@ export default function DeliveryCheckout() {
       setErroGlobal(permiteRetirada
         ? 'Poxa, ainda não entregamos no seu bairro 😔. Você pode escolher Retirada, se disponível.'
         : 'Poxa, ainda não entregamos no seu bairro 😔.')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    if (foraDoRaio) {
+      setErroGlobal(`Poxa, seu endereço fica a ${distCliente.toFixed(1)} km e a loja entrega até ${String(raioLoja).replace('.', ',')} km 😔.`
+        + (permiteRetirada ? ' Você pode escolher Retirada.' : ''))
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -3254,6 +3275,13 @@ export default function DeliveryCheckout() {
                   </div>
                 )}
 
+                {foraDoRaio && (
+                  <div className="dco-erro-global" style={{ background: 'rgba(220,38,38,.12)', border: '1px solid #dc2626', color: '#dc2626' }}>
+                    😔 Seu endereço fica a <strong>{distCliente.toFixed(1)} km</strong> e a loja entrega até <strong>{String(raioLoja).replace('.', ',')} km</strong>.
+                    {permiteRetirada && <> Se quiser, escolha <strong>Retirada</strong>.</>}
+                  </div>
+                )}
+
                 {taxaIndefinida && (
                   <div className="dco-erro-global" style={{ background: 'rgba(234,179,8,.12)', border: '1px solid #eab308', color: '#eab308' }}>
                     {calculandoEntrega
@@ -3269,9 +3297,10 @@ export default function DeliveryCheckout() {
                     que a loja tinha recebido. O funil flagrou duas num dia só na
                     CD Bom — uma com R$ 246,20 na sacola. O texto agora diz que
                     falta um passo e pra onde ele vai. */}
-                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
+                <button type="submit" className="dco-btn-submit" disabled={enviando || faltaMinimo || bairroBloqueado || foraDoRaio || taxaIndefinida}>
                   {enviando ? <><span className="dco-spinner" />Enviando pedido...</>
                     : bairroBloqueado ? 'Não entregamos no seu bairro'
+                    : foraDoRaio ? 'Fora da área de entrega'
                     : calculandoEntrega ? 'Calculando a entrega...'
                     : taxaPendente ? 'Marque seu endereço no mapa'
                     : faltaMinimo ? `Faltam R$ ${fmt(faltamParaMinimo)} p/ o mínimo` : 'Fechar e enviar para a loja'}
@@ -3307,11 +3336,13 @@ export default function DeliveryCheckout() {
                 <div className="dco-passos-nav">
                   <button type="button" className="dco-btn-voltar" onClick={voltarPasso}>Voltar</button>
                   <button type="submit" className="dco-btn-submit"
-                    disabled={enviando || faltaMinimo || bairroBloqueado || taxaIndefinida}>
+                    disabled={enviando || faltaMinimo || bairroBloqueado || foraDoRaio || taxaIndefinida}>
                     {enviando
                       ? <><span className="dco-spinner" />Enviando pedido...</>
                       : bairroBloqueado
                       ? 'Não entregamos no seu bairro'
+                      : foraDoRaio
+                      ? 'Fora da área de entrega'
                       : calculandoEntrega
                       ? 'Calculando a entrega...'
                       : taxaPendente
