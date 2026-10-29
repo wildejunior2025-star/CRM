@@ -107,21 +107,29 @@ export default function PresencialDesfeitos() {
               borderBottom: '1px solid var(--border)', border: 'none', borderRadius: 0,
               background: 'transparent', color: 'var(--text)', textAlign: 'left',
               cursor: ev.comanda_id ? 'pointer' : 'default' }}>
-            <span style={{ fontSize: 17 }}>{ev.tipo === 'comanda_cancelada' ? '🚫' : '➖'}</span>
+            <span style={{ fontSize: 17 }}>{ev.tipo === 'comanda_cancelada' ? '🚫' : ev.tipo === 'conta_editada' ? '✏️' : '➖'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>
                 {ev.tipo === 'comanda_cancelada'
                   ? `Cancelou ${ev.rotulo || 'a comanda'}`
-                  : `Tirou ${Number(ev.quantidade || 1)}x ${ev.descricao || 'item'}`}
+                  : ev.tipo === 'conta_editada'
+                    ? `Editou ${ev.rotulo || 'a conta'} depois de fechada`
+                    : `Tirou ${Number(ev.quantidade || 1)}x ${ev.descricao || 'item'}`}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                 {ehAdmin && <>{nomes[ev.quem] || 'alguém'} · </>}
                 {quando(ev.quando)}
                 {ev.tipo === 'item_removido' && ev.rotulo ? ` · ${ev.rotulo}` : ''}
-                {ev.tipo === 'comanda_cancelada' ? ` · ${ev.descricao}` : ''}
+                {ev.tipo !== 'item_removido' ? ` · ${ev.descricao}` : ''}
               </div>
             </div>
-            {Number(ev.valor) > 0 && (
+            {/* Edição pode subir a conta (cobrou mais) ou descer (devolveu). */}
+            {ev.tipo === 'conta_editada' && Number(ev.valor) !== 0 ? (
+              <strong style={{ fontSize: 14, whiteSpace: 'nowrap',
+                color: Number(ev.valor) > 0 ? 'var(--success, #22c55e)' : 'var(--danger)' }}>
+                {Number(ev.valor) > 0 ? '+' : '−'}{fmt(Math.abs(Number(ev.valor)))}
+              </strong>
+            ) : Number(ev.valor) > 0 && (
               <strong style={{ fontSize: 14, color: 'var(--danger)', whiteSpace: 'nowrap' }}>{fmt(ev.valor)}</strong>
             )}
           </button>
@@ -138,7 +146,9 @@ export default function PresencialDesfeitos() {
               background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 16, padding: 18 }}>
             <div style={{ fontWeight: 800, fontSize: 16 }}>{vendo.rotulo || 'Comanda'}</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-              {vendo.tipo === 'comanda_cancelada' ? 'Comanda cancelada' : `Item removido: ${vendo.descricao}`}
+              {vendo.tipo === 'comanda_cancelada' ? 'Comanda cancelada'
+                : vendo.tipo === 'conta_editada' ? `Conta editada: ${vendo.descricao}`
+                : `Item removido: ${vendo.descricao}`}
               {' · '}{quando(vendo.quando)}
               {ehAdmin && <> · {nomes[vendo.quem] || 'alguém'}</>}
             </div>

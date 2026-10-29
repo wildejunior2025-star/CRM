@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import NotaFiscalVenda from '../components/NotaFiscalVenda'
 import { useAuth } from '../hooks/useAuth'
 import ClientePicker from '../components/ClientePicker'
+import EditarContaFechada from '../components/EditarContaFechada'
 import { rotuloComanda } from '../lib/comanda'
 import { imprimirHtml, montarContaPresencialHtml, appFwcDisponivel, aparelhoMovel } from '../utils/imprimirCupom'
 import '../components/Page.css'
@@ -124,6 +125,10 @@ export default function PresencialHistorico() {
   // HOJE (ou depois) está zerado e não pontua no dia — ver `rankingTodos`.
   const [cortes, setCortes] = useState({})
   const [salvandoForma, setSalvandoForma] = useState(false)
+  // Conta fechada com a janela de editar itens aberta, e a que está sendo
+  // cancelada agora (mig 0426).
+  const [editandoConta, setEditandoConta] = useState(null)
+  const [cancelandoConta, setCancelandoConta] = useState(null)
 
   // ── Segunda via de uma conta já fechada ──────────────────────────────────
   //
@@ -313,6 +318,42 @@ export default function PresencialHistorico() {
       return
     }
     setComandas(prev => prev.map(c => c.id === comanda.id ? { ...c, forma_pagamento: 'fiado' } : c))
+  }
+
+  // Relê UMA conta depois de editar: itens, total e forma mudaram no banco.
+  async function recarregarConta(id) {
+    const { data } = await supabase.from('comandas')
+      .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone), comanda_pix_cobrancas(id, mp_payment_id, valor, status)')
+      .eq('id', id).maybeSingle()
+    setComandas(prev => (data && data.status === 'fechada')
+      ? prev.map(c => c.id === id ? data : c)
+      : prev.filter(c => c.id !== id))
+  }
+
+  // CANCELAR A CONTA INTEIRA (mig 0426). O dinheiro que entrou é estornado no
+  // caixa de HOJE, o estoque volta e a venda sai do faturamento. A conta some
+  // daqui e fica registrada em "Cancelamentos e itens removidos".
+  async function cancelarConta(c) {
+    const rot = c.numero_mesa ? rotuloComanda(c) : 'Balcão'
+    const ok = window.confirm(
+      `Cancelar a conta ${rot} de ${fmt(c.total)}?` + '\n\n'
+      + (c.forma_pagamento === 'fiado'
+        ? 'A dívida sai do fiado do cliente e o estoque volta.'
+        : `O valor sai do caixa de HOJE como devolução (${FORMA_LABEL[c.forma_pagamento] ?? c.forma_pagamento}) e o estoque volta.`)
+      + '\n\nIsso não tem volta.'
+    )
+    if (!ok) return
+    const motivo = window.prompt('Motivo do cancelamento (ex.: lançou errado, cliente devolveu):', '')
+    if (motivo === null) return
+    setCancelandoConta(c.id)
+    const { data, error } = await supabase.rpc('cancelar_conta_fechada', { p_comanda_id: c.id, p_motivo: motivo.trim() || null })
+    setCancelandoConta(null)
+    if (error) { window.alert('Não deu pra cancelar: ' + error.message); return }
+    setComandas(prev => prev.filter(x => x.id !== c.id))
+    setAberta(null)
+    window.alert(Number(data?.estornado || 0) !== 0
+      ? `Conta cancelada. ${fmt(data.estornado)} saiu do caixa de hoje como devolução.`
+      : 'Conta cancelada.')
   }
 
   useEffect(() => {
@@ -1287,6 +1328,27 @@ export default function PresencialHistorico() {
                       {c.cliente ? `🧑 ${c.cliente.nome} · trocar cliente` : '➕ Ligar cliente a este pedido'}
                     </button>
                     )}
+
+                    {/* Lançou errado e só viu depois de fechar, ou o cliente
+                        voltou pra devolver (mig 0426). Coisa de dono: mexe no
+                        caixa e no estoque. */}
+                    {ehAdmin && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button type="button" onClick={() => setEditandoConta(c)}
+                          style={{ flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                            border: '1px solid var(--border)', background: 'transparent',
+                            color: 'var(--text)', fontSize: 13.5, fontWeight: 700 }}>
+                          ✏️ Editar itens
+                        </button>
+                        <button type="button" onClick={() => cancelarConta(c)} disabled={cancelandoConta === c.id}
+                          style={{ flex: 1, padding: '10px 0', borderRadius: 10,
+                            cursor: cancelandoConta === c.id ? 'wait' : 'pointer',
+                            border: '1px solid rgba(239,68,68,.5)', background: 'transparent',
+                            color: 'var(--danger, #ef4444)', fontSize: 13.5, fontWeight: 700 }}>
+                          {cancelandoConta === c.id ? 'Cancelando…' : '🚫 Cancelar a conta'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1321,6 +1383,25 @@ export default function PresencialHistorico() {
           permitirTirar={!!pickerComanda.cliente && fiadoPendente !== pickerComanda.id}
           onPick={(cli) => ligarCliente(pickerComanda, cli)}
           onFechar={() => { setPickerComanda(null); setFiadoPendente(null) }}
+        />
+      )}
+
+      {editandoConta && (
+        <EditarContaFechada
+          comanda={editandoConta}
+          empresa={empresa}
+          onFechar={() => setEditandoConta(null)}
+          onSalvo={(r) => {
+            const id = editandoConta.id
+            setEditandoConta(null)
+            recarregarConta(id)
+            const dif = Number(r?.diferenca || 0)
+            if (Math.abs(dif) >= 0.005 && r?.forma !== 'fiado') {
+              window.alert(dif > 0
+                ? `Conta salva. Entrou mais ${fmt(dif)} no caixa de hoje.`
+                : `Conta salva. ${fmt(-dif)} saiu do caixa de hoje como devolução.`)
+            }
+          }}
         />
       )}
     </div>
