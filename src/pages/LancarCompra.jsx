@@ -111,6 +111,30 @@ const custoMedio = (l) => {
 const inp = { fontSize: 14, padding: '8px 10px' }
 const lbl = { fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4, color: 'var(--text-muted)' }
 const tagTipo = (tipo) => ({ background: tipo === 'materia' ? '#fef3c7' : '#dbeafe', color: tipo === 'materia' ? '#92400e' : '#1e40af' })
+// Botão de escolha (Pago / A prazo / Parcelado, Unidade / Caixa): o ligado fica cheio.
+const seg = (ativo) => ({
+  flex: '1 1 0', minWidth: 0, padding: '10px 6px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+  border: `1.5px solid ${ativo ? 'var(--primary)' : 'var(--border)'}`,
+  background: ativo ? 'var(--primary)' : 'var(--surface, transparent)', color: ativo ? '#fff' : 'var(--text)',
+})
+const chip = (ativo) => ({
+  padding: '7px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+  border: `1.5px solid ${ativo ? 'var(--primary)' : 'var(--border)'}`,
+  background: ativo ? 'var(--primary)' : 'transparent', color: ativo ? '#fff' : 'var(--text-muted)',
+})
+// Cabeçalho de cada passo: a tela se lê de cima pra baixo, 1 → 2 → 3.
+function Passo({ n, titulo, dica }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--primary)', color: '#fff', fontWeight: 800, fontSize: 13.5,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{n}</span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: 'block', fontWeight: 800, fontSize: 15.5 }}>{titulo}</span>
+        {dica && <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)' }}>{dica}</span>}
+      </span>
+    </div>
+  )
+}
 
 // UMA linha da nota. Isolada e memorizada de propósito: com 30 itens, redesenhar a tela inteira a cada tecla
 // custava ~0,5 s por tecla (cada linha tem um seletor com ~60 categorias). Agora só a linha mexida se redesenha.
@@ -131,60 +155,59 @@ const LinhaItem = memo(function LinhaItem({ l, ult, catalogoCats, onMudar, onTro
     () => [...new Set([...CATEGORIAS_PAGAR, ...(l.tipo !== 'produto' && !CATEGORIAS_PAGAR.includes(l.cat) ? [l.cat] : [])])],
     [l.tipo, l.cat])
   return (
-    <div style={{ padding: '12px 0', borderTop: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        <strong style={{ fontSize: 14.5 }}>{l.nome}</strong>
-        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, ...tagTipo(l.tipo) }}>
-          {l.tipo === 'materia' ? '→ Estoque de matéria-prima' : l.estoque ? '→ Estoque de produtos' : '→ Só na conta (produto sem controle de estoque)'}
-        </span>
-        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-          {l.apelido ? <>🔗 nota: “{l.apelido}”{' '}</> : null}
-          <button type="button" onClick={() => onDesligar(l)} title="Ligou no item errado? Volta pro quadro de ligar, com a quantidade e o valor"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', color: 'inherit', fontSize: 11.5, padding: 0 }}>trocar item</button>
-        </span>
+    <div style={{ padding: 12, marginTop: 10, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg, transparent)' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong style={{ fontSize: 15, overflowWrap: 'anywhere' }}>{l.nome}</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, ...tagTipo(l.tipo) }}>
+              {l.tipo === 'materia' ? 'Matéria-prima' : l.estoque ? 'Produto' : 'Só na conta'}
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', minWidth: 0, overflowWrap: 'anywhere' }}>
+              {l.apelido ? <>🔗 “{l.apelido}”{' · '}</> : null}
+              <button type="button" onClick={() => onDesligar(l)} title="Ligou no item errado? Volta pro quadro de ligar, com a quantidade e o valor"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', color: 'inherit', fontSize: 11.5, padding: 0 }}>trocar</button>
+            </span>
+          </div>
+        </div>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onTirar(l.key)}
-          style={{ marginLeft: 'auto' }} aria-label={`Tirar ${l.nome}`}>✕</button>
+          style={{ flexShrink: 0 }} aria-label={`Tirar ${l.nome}`}>✕</button>
       </div>
       {l.avisoNota && <div style={{ fontSize: 12.5, color: '#b45309', fontWeight: 700, marginBottom: 8 }}>⚠️ {l.avisoNota}</div>}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        {l.tipo === 'produto' && (
-          <div>
-            <label style={lbl}>Veio em</label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {[['un', 'Unidade'], ['cx', 'Caixa']].map(([v, t]) => (
-                <button key={v} type="button" onClick={() => onTrocaEmb(l, v)} aria-pressed={l.emb === v}
-                  style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
-                    background: l.emb === v ? 'var(--primary)' : 'transparent', color: l.emb === v ? '#fff' : 'var(--text)' }}>{t}</button>
-              ))}
-            </div>
-          </div>
-        )}
+      {l.tipo === 'produto' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {[['un', 'Por unidade'], ['cx', 'Por caixa']].map(([v, t]) => (
+            <button key={v} type="button" onClick={() => onTrocaEmb(l, v)} aria-pressed={l.emb === v} style={{ ...seg(l.emb === v), padding: '8px 6px', fontSize: 13 }}>{t}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(84px, 1fr))', gap: 8 }}>
         {emCx && (
           <div>
-            <label style={lbl}>Unidades por caixa</label>
-            <input inputMode="numeric" value={l.porCx} onChange={e => onMudar(l.key, 'porCx', e.target.value)} style={{ ...inp, width: 90, textAlign: 'center' }} aria-label={`Unidades por caixa de ${l.nome}`} />
+            <label style={lbl}>Un. por caixa</label>
+            <input inputMode="numeric" value={l.porCx} onChange={e => onMudar(l.key, 'porCx', e.target.value)} style={{ ...inp, width: '100%', textAlign: 'center' }} aria-label={`Unidades por caixa de ${l.nome}`} />
           </div>
         )}
         <div>
-          <label style={lbl}>Quantidade{emCx ? ' (caixas)' : l.tipo === 'materia' ? ` (${l.unidade})` : ''}</label>
+          <label style={lbl}>Qtd{emCx ? ' (caixas)' : l.tipo === 'materia' ? ` (${l.unidade})` : ''}</label>
           <input ref={el => registraQtd(l.key, el)} inputMode="decimal" value={l.qtd}
             onChange={e => onMudar(l.key, 'qtd', e.target.value)} onKeyDown={enterVoltaPraBusca}
-            aria-label={`Quantidade de ${l.nome}`} style={{ ...inp, width: 90, textAlign: 'center' }} />
+            aria-label={`Quantidade de ${l.nome}`} style={{ ...inp, width: '100%', textAlign: 'center', fontSize: 15 }} />
         </div>
         <div>
-          <label style={lbl}>{emCx ? 'Valor de 1 caixa (R$)' : 'Valor de 1 unidade (R$)'}</label>
+          <label style={lbl}>{emCx ? 'R$ da caixa' : 'R$ de cada'}</label>
           <input inputMode="decimal" value={l.custo} placeholder="0,00" onChange={e => onMudar(l.key, 'custo', e.target.value)} onKeyDown={enterVoltaPraBusca}
-            aria-label={`Valor unitário de ${l.nome}`} style={{ ...inp, width: 110 }} />
+            aria-label={`Valor unitário de ${l.nome}`} style={{ ...inp, width: '100%', fontSize: 15 }} />
         </div>
         <div>
-          <label style={lbl}>Total desta linha (qtd × valor)</label>
+          <label style={lbl}>Total R$</label>
           <input inputMode="decimal" placeholder="0,00"
             value={l.total !== null ? l.total : (valorLinha(l) ? String(valorLinha(l)).replace('.', ',') : '')}
             onChange={e => onMudar(l.key, 'total', e.target.value)} onKeyDown={enterVoltaPraBusca}
-            aria-label={`Total da linha de ${l.nome}`} style={{ ...inp, width: 110, fontWeight: 700 }} />
+            aria-label={`Total da linha de ${l.nome}`} style={{ ...inp, width: '100%', fontWeight: 800, fontSize: 15 }} />
         </div>
-        <div style={{ flex: '1 1 190px', minWidth: 170 }}>
-          <label style={lbl}>{l.tipo === 'produto' ? 'Categoria (do catálogo ou do gasto)' : 'Categoria do gasto'}</label>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={lbl}>Categoria</label>
           <select value={l.cat} onChange={e => onTrocaCategoria(l, e.target.value)} style={{ ...inp, width: '100%' }} aria-label={`Categoria de ${l.nome}`}>
             {l.tipo === 'produto' && catalogoCats.length > 0 && (
               <optgroup label="Categorias do seu catálogo">
@@ -1239,13 +1262,14 @@ export default function LancarCompra({ empresaId }) {
   ) : null
 
   return (
-    <div>
+    <div className="lc-pagina">
+      <style>{'.lc-pagina > .card { margin-bottom: 12px; }'}</style>
       {camNaTela && <CameraNaTela onFechar={() => setCamNaTela(false)} onFalhou={() => { setCamNaTela(false); abrirCameraDoCelular() }}
         onFoto={(arq) => { setCamNaTela(false); importarFoto(arq) }} />}
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 18, fontWeight: 800 }}>Lançar compra</div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 19, fontWeight: 800 }}>Lançar compra</div>
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          Digite a nota uma vez só. Cada item vai pro estoque certo e o total vira a conta a pagar.
+          Chegou mercadoria? Fotografe a nota que eu preencho. O estoque e a conta a pagar saem juntos.
         </div>
       </div>
 
@@ -1288,19 +1312,27 @@ export default function LancarCompra({ empresaId }) {
       )}
 
       {/* 0. puxar da nota fiscal */}
-      <div className="card" style={{ borderColor: 'var(--primary)' }}>
-        <div style={{ fontWeight: 800, marginBottom: 2 }}>📥 Puxar da nota fiscal</div>
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 10 }}>
-          Bipe o código de barras da nota (ou digite os 44 números da chave), ou tire uma foto dela. Eu preencho fornecedor, itens e valores — você só confere.
+      <div className="card" style={{ border: '2px solid var(--primary)', backgroundImage: 'linear-gradient(rgba(124,58,237,.06), rgba(124,58,237,.06))' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
+          <button type="button" className="btn btn-primary" onClick={abrirCamera} disabled={!!importando}
+            style={{ padding: '16px 12px', fontSize: 16, fontWeight: 800, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <span style={{ fontSize: 26, lineHeight: 1 }}>📷</span>Fotografar a nota
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={abrirGaleria} disabled={!!importando}
+            style={{ padding: '16px 12px', fontSize: 15, fontWeight: 700, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <span style={{ fontSize: 26, lineHeight: 1 }}>🖼</span>Galeria ou PDF
+          </button>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '12px 0 6px', textAlign: 'center' }}>
+          ou bipe o código de barras da nota (ou digite os 44 números)
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
           <input id="lc-chave" value={chaveInput} onChange={e => setChaveInput(e.target.value)} inputMode="numeric" autoComplete="off"
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); importarChave(chaveInput) } }}
-            placeholder="Chave da nota (44 números)" aria-label="Chave da nota fiscal"
-            style={{ ...inp, flex: '1 1 280px', fontSize: 15, padding: '11px 12px' }} />
-          <button type="button" className="btn btn-primary" onClick={() => importarChave(chaveInput)} disabled={!!importando || !chaveInput.trim()}>Puxar pela chave</button>
-          <button type="button" className="btn btn-secondary" onClick={abrirCamera} disabled={!!importando}>📷 Tirar foto</button>
-          <button type="button" className="btn btn-secondary" onClick={abrirGaleria} disabled={!!importando}>🖼 Galeria ou PDF</button>
+            placeholder="Chave da nota" aria-label="Chave da nota fiscal"
+            style={{ ...inp, flex: '1 1 auto', minWidth: 0, fontSize: 15, padding: '11px 12px' }} />
+          <button type="button" className="btn btn-secondary" onClick={() => importarChave(chaveInput)} disabled={!!importando || !chaveInput.trim()}
+            style={{ flexShrink: 0 }}>Puxar</button>
           <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} aria-label="Tirar foto da nota"
             onChange={e => { try { localStorage.removeItem('fwc_volta_camera') } catch { /* ok */ } const f = e.target.files?.[0]; e.target.value = ''; importarFoto(f) }} />
           <input ref={fotoRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} aria-label="Foto ou PDF da nota"
@@ -1374,14 +1406,21 @@ export default function LancarCompra({ empresaId }) {
         </div>
       )}
 
+      {!temConteudo && !fornecedor.trim() && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px', fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 700 }}>
+          <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />ou lance à mão<span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        </div>
+      )}
+
       {/* 1. a nota */}
       <div className="card">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-          <div style={{ position: 'relative' }}>
+        <Passo n={1} titulo="De quem comprou" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+          <div style={{ position: 'relative', gridColumn: '1 / -1' }}>
             <label style={lbl} htmlFor="lc-forn">Fornecedor</label>
             <input id="lc-forn" value={fornecedor} onChange={e => { setFornecedor(e.target.value); setFornAberto(true) }}
               onFocus={() => setFornAberto(true)} onBlur={() => setTimeout(() => setFornAberto(false), 150)}
-              placeholder="De quem comprou" autoComplete="off" style={{ ...inp, width: '100%' }} />
+              placeholder="Nome do fornecedor" autoComplete="off" style={{ ...inp, width: '100%', fontSize: 15, padding: '10px 12px' }} />
             {fornExato && <div style={{ fontSize: 11.5, marginTop: 3, color: '#15803d' }}>✓ fornecedor cadastrado</div>}
             {fornAberto && !fornExato && (fornSugestoes.length > 0 || fornecedor.trim()) && (
               <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, top: '100%', marginTop: 2, background: 'var(--card, #fff)',
@@ -1394,7 +1433,7 @@ export default function LancarCompra({ empresaId }) {
                 {fornecedor.trim() && (
                   <button type="button" className="btn btn-secondary"
                     onMouseDown={e => { e.preventDefault(); escolheNovoFornecedor() }}
-                    style={{ textAlign: 'left', padding: '9px 10px', fontSize: 13.5, borderStyle: 'dashed' }}>
+                    style={{ textAlign: 'left', padding: '9px 10px', fontSize: 13.5, borderStyle: 'dashed', whiteSpace: 'normal' }}>
                     ➕ Cadastrar “{fornecedor.trim()}” como fornecedor novo
                   </button>
                 )}
@@ -1402,78 +1441,25 @@ export default function LancarCompra({ empresaId }) {
             )}
           </div>
           <div>
-            <label style={lbl} htmlFor="lc-nf">Nº da nota (NF)</label>
-            <input id="lc-nf" value={numeroNota} onChange={e => setNumeroNota(e.target.value)} placeholder="opcional" style={{ ...inp, width: '100%' }} />
+            <label style={lbl} htmlFor="lc-nf">Nº da nota</label>
+            <input id="lc-nf" value={numeroNota} onChange={e => setNumeroNota(e.target.value)} placeholder="opcional" inputMode="numeric" style={{ ...inp, width: '100%' }} />
           </div>
           <div>
-            <label style={lbl} htmlFor="lc-data">Data da compra</label>
-            <input id="lc-data" type="date" value={data} max={hoje} onChange={e => aoMudarData(e.target.value)} style={{ ...inp, width: '100%' }} />
-            {data < hoje && <div style={{ fontSize: 11.5, marginTop: 3, color: 'var(--text-muted)' }}>Entra no estoque como {ddmm(data)}.</div>}
+            <label style={lbl} htmlFor="lc-data">Data</label>
+            <input id="lc-data" type="date" value={data} max={hoje} onChange={e => aoMudarData(e.target.value)} style={{ ...inp, width: '100%', minWidth: 0 }} />
           </div>
         </div>
-
-        <div style={{ marginTop: 14 }}>
-          <label style={lbl}>Pagamento</label>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {[['avista', 'Pago agora'], ['prazo', 'A prazo (1 vencimento)'], ['parcelado', 'Parcelado']].map(([v, t]) => (
-              <button key={v} type="button" onClick={() => setModoPag(v)} aria-pressed={modoPag === v}
-                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                  background: modoPag === v ? 'var(--primary)' : 'transparent', color: modoPag === v ? '#fff' : 'var(--text)' }}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, alignItems: 'flex-end' }}>
-            {modoPag === 'avista' && (
-              <div>
-                <label style={lbl} htmlFor="lc-forma">Forma</label>
-                <select id="lc-forma" value={forma} onChange={e => setForma(e.target.value)} style={{ ...inp, minWidth: 170 }}>
-                  {FORMAS.map(([id, t]) => <option key={id} value={id}>{t}</option>)}
-                </select>
-              </div>
-            )}
-            {modoPag === 'prazo' && (
-              <div>
-                <label style={lbl} htmlFor="lc-venc">Vence em</label>
-                <input id="lc-venc" type="date" value={vencimento} onChange={e => { setVencimento(e.target.value); setVencMexido(true) }} style={inp} />
-              </div>
-            )}
-            {modoPag === 'parcelado' && (
-              <>
-                <div>
-                  <label style={lbl} htmlFor="lc-np">Parcelas</label>
-                  <select id="lc-np" value={nParc} onChange={e => { setNParc(Number(e.target.value)); setParcDatas({}) }} style={inp}>
-                    {Array.from({ length: 11 }, (_, i) => i + 2).map(n => <option key={n} value={n}>{n}x</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={lbl} htmlFor="lc-venc1">1ª parcela vence em</label>
-                  <input id="lc-venc1" type="date" value={vencimento} onChange={e => { setVencimento(e.target.value); setVencMexido(true); setParcDatas({}) }} style={inp} />
-                </div>
-              </>
-            )}
-          </div>
-          {modoPag === 'parcelado' && parcelas.length > 0 && (
-            <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
-              {parcelas.map((pc, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13 }}>
-                  <strong>{i + 1}/{parcelas.length}</strong>
-                  <input type="date" value={pc.vencimento} aria-label={`Vencimento da parcela ${i + 1}`}
-                    onChange={e => setParcDatas(d => ({ ...d, [i]: e.target.value }))} style={{ ...inp, padding: '4px 6px', fontSize: 13 }} />
-                  <span style={{ marginLeft: 'auto', fontWeight: 700 }}>{brl(pc.valor)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {data < hoje && <div style={{ fontSize: 11.5, marginTop: 4, color: 'var(--text-muted)' }}>Entra no estoque como {ddmm(data)}.</div>}
       </div>
 
       {/* 2. os itens */}
       <div className="card">
-        <label style={{ ...lbl, fontSize: 13, color: 'var(--text)' }} htmlFor="lc-busca">Adicionar item (produto ou matéria-prima)</label>
+        <Passo n={2} titulo="O que veio" dica={linhas.length || gastos.length
+          ? `${linhas.length + gastos.length} ${linhas.length + gastos.length === 1 ? 'item' : 'itens'} · ${brl(soma)}`
+          : 'Produto do cardápio ou matéria-prima'} />
         <input id="lc-busca" ref={buscaRef} value={busca} onChange={e => { setBusca(e.target.value); setNovo(null); setLigando(null); setSel(0) }} onKeyDown={teclaBusca}
-          disabled={carregando} placeholder="Digite o nome ou passe o leitor… (↑↓ escolhe, Enter adiciona)" autoComplete="off"
-          style={{ width: '100%', fontSize: 16, padding: '12px 14px' }} />
+          disabled={carregando} placeholder="🔎 Buscar item ou passar o leitor" aria-label="Buscar item da compra" autoComplete="off"
+          style={{ width: '100%', fontSize: 16, padding: '12px 14px', borderRadius: 12 }} />
 
         {!busca.trim() && itensDoFornecedor.length > 0 && (
           <div style={{ marginTop: 10 }}>
@@ -1582,28 +1568,69 @@ export default function LancarCompra({ empresaId }) {
             ))}
           </div>
         )}
-        <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}
-          onClick={() => setGastos(gs => [...gs, { id: `g${Date.now()}`, descricao: '', valor: '', cat: 'Outros' }])}>
-          + Gasto que não é estoque (gasolina, estacionamento…)
+        <button type="button" onClick={() => setGastos(gs => [...gs, { id: `g${Date.now()}`, descricao: '', valor: '', cat: 'Outros' }])}
+          style={{ marginTop: 12, width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px dashed var(--border)', background: 'transparent',
+            color: 'var(--text-muted)', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          + Gasto que não é estoque (gasolina, frete…)
         </button>
-
-        {!linhas.length && !gastos.length && !busca.trim() && !carregando && itensDoFornecedor.length === 0 && (
-          <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-muted)' }}>
-            Comece digitando o primeiro item da nota.
-          </div>
-        )}
       </div>
 
       {/* 3. fechamento */}
       {temConteudo && (
         <div className="card">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, alignItems: 'end' }}>
+          <Passo n={3} titulo="Como pagou" />
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[['avista', 'Pago'], ['prazo', 'A prazo'], ['parcelado', 'Parcelado']].map(([v, t]) => (
+              <button key={v} type="button" onClick={() => setModoPag(v)} aria-pressed={modoPag === v} style={seg(modoPag === v)}>{t}</button>
+            ))}
+          </div>
+          {modoPag === 'avista' && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }} role="group" aria-label="Forma de pagamento">
+              {FORMAS.map(([id, t]) => (
+                <button key={id} type="button" onClick={() => setForma(id)} aria-pressed={forma === id} style={chip(forma === id)}>{t}</button>
+              ))}
+            </div>
+          )}
+          {modoPag === 'prazo' && (
+            <div style={{ marginTop: 10 }}>
+              <label style={lbl} htmlFor="lc-venc">Vence em</label>
+              <input id="lc-venc" type="date" value={vencimento} onChange={e => { setVencimento(e.target.value); setVencMexido(true) }} style={{ ...inp, width: '100%', maxWidth: 260 }} />
+            </div>
+          )}
+          {modoPag === 'parcelado' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 10, maxWidth: 420 }}>
+              <div>
+                <label style={lbl} htmlFor="lc-np">Parcelas</label>
+                <select id="lc-np" value={nParc} onChange={e => { setNParc(Number(e.target.value)); setParcDatas({}) }} style={{ ...inp, width: '100%' }}>
+                  {Array.from({ length: 11 }, (_, i) => i + 2).map(n => <option key={n} value={n}>{n}x</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl} htmlFor="lc-venc1">1ª vence em</label>
+                <input id="lc-venc1" type="date" value={vencimento} onChange={e => { setVencimento(e.target.value); setVencMexido(true); setParcDatas({}) }} style={{ ...inp, width: '100%', minWidth: 0 }} />
+              </div>
+            </div>
+          )}
+          {modoPag === 'parcelado' && parcelas.length > 0 && (
+            <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
+              {parcelas.map((pc, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 8, fontSize: 13 }}>
+                  <strong>{i + 1}/{parcelas.length}</strong>
+                  <input type="date" value={pc.vencimento} aria-label={`Vencimento da parcela ${i + 1}`}
+                    onChange={e => setParcDatas(d => ({ ...d, [i]: e.target.value }))} style={{ ...inp, padding: '4px 6px', fontSize: 13, minWidth: 0 }} />
+                  <span style={{ marginLeft: 'auto', fontWeight: 700 }}>{brl(pc.valor)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, alignItems: 'end', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <div>
               <label style={lbl}>Soma dos itens</label>
               <div style={{ fontSize: 20, fontWeight: 800 }}>{brl(soma)}</div>
             </div>
             <div>
-              <label style={lbl} htmlFor="lc-total">Total da nota (se for diferente da soma)</label>
+              <label style={lbl} htmlFor="lc-total">Total da nota</label>
               <input id="lc-total" inputMode="decimal" value={totalNota} placeholder={String(soma).replace('.', ',')}
                 onChange={e => setTotalNota(e.target.value)} style={{ ...inp, width: '100%' }} />
               {diferenca !== 0 && total > 0 && (
@@ -1612,19 +1639,26 @@ export default function LancarCompra({ empresaId }) {
                 </div>
               )}
             </div>
-            <div>
-              <label style={lbl} htmlFor="lc-catconta">Categoria da conta</label>
-              <select id="lc-catconta" value={catConta} onChange={e => setCatConta(e.target.value)} style={{ ...inp, width: '100%' }}>
-                <option value="">Automática (pelos itens)</option>
-                {CATEGORIAS_PAGAR.map(c => <option key={c} value={c}>Tudo em {c}</option>)}
-              </select>
-            </div>
           </div>
+          {!totalNota && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>Só mexa no total se a nota tiver frete ou desconto.</div>}
 
-          <div style={{ marginTop: 12 }}>
-            <label style={lbl} htmlFor="lc-obs">Observação (opcional)</label>
-            <input id="lc-obs" value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Ex.: combinado desconto no próximo pedido" style={{ ...inp, width: '100%' }} />
-          </div>
+          {/* O que quase ninguém mexe fica guardado: a categoria já sai certa pelos itens. */}
+          <details style={{ marginTop: 12 }} open={!!catConta || !!observacao}>
+            <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>Mais opções (categoria, observação)</summary>
+            <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
+              <div>
+                <label style={lbl} htmlFor="lc-catconta">Categoria da conta</label>
+                <select id="lc-catconta" value={catConta} onChange={e => setCatConta(e.target.value)} style={{ ...inp, width: '100%' }}>
+                  <option value="">Automática (pelos itens)</option>
+                  {CATEGORIAS_PAGAR.map(c => <option key={c} value={c}>Tudo em {c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbl} htmlFor="lc-obs">Observação</label>
+                <input id="lc-obs" value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Ex.: combinado desconto no próximo pedido" style={{ ...inp, width: '100%' }} />
+              </div>
+            </div>
+          </details>
 
           {rateio.length > 0 && (
             <div style={{ marginTop: 14 }}>
@@ -1670,10 +1704,11 @@ export default function LancarCompra({ empresaId }) {
           {!fornecedor.trim() && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Falta dizer o fornecedor.</div>}
           {fornecedor.trim() && !semQtd && total <= 0 && <div style={{ fontSize: 12.5, color: 'var(--danger)', marginTop: 10 }}>Falta o valor da compra.</div>}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => { if (confirm('Limpar a nota e começar do zero?')) limpar() }}>Limpar</button>
-            <button className="btn btn-primary" onClick={lancar} disabled={!podeLancar} style={{ padding: '12px 22px', fontSize: 15 }}>
-              {salvando ? 'Lançando…' : `${editandoId ? 'Salvar correção de' : 'Lançar compra de'} ${brl(total)}`}
+          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+            <button type="button" className="btn btn-secondary" onClick={() => { if (confirm('Limpar a nota e começar do zero?')) limpar() }}
+              style={{ flexShrink: 0 }}>Limpar</button>
+            <button className="btn btn-primary" onClick={lancar} disabled={!podeLancar} style={{ flex: 1, padding: '14px 16px', fontSize: 16, fontWeight: 800 }}>
+              {salvando ? 'Lançando…' : `${editandoId ? 'Salvar correção' : '✓ Lançar'} ${brl(total)}`}
             </button>
           </div>
         </div>
