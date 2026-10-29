@@ -406,9 +406,10 @@ async function runPoll(sb: any) {
 async function kmPelaRua(sb: any, empresaId: string, dLat: number, dLng: number): Promise<number | null> {
   const key = Deno.env.get("GOOGLE_MAPS_KEY") ?? ""
   if (!key) return null
-  const { data: e } = await sb.from("empresas").select("latitude, longitude, taxa_pela_rua").eq("id", empresaId).maybeSingle()
+  const { data: e } = await sb.from("empresas").select("latitude, longitude, taxa_pela_rua, entregador_digita_valor").eq("id", empresaId).maybeSingle()
   const oLat = Number(e?.latitude), oLng = Number(e?.longitude)
-  if (!e?.taxa_pela_rua || !oLat || !oLng) return null
+  // Só loja em que o sistema calcula o valor do motoboy usa este km (custa consulta).
+  if (!e?.taxa_pela_rua || !e?.entregador_digita_valor || !oLat || !oLng) return null
   const chave = `rota:${oLat.toFixed(4)},${oLng.toFixed(4)}>${dLat.toFixed(4)},${dLng.toFixed(4)}`
   const corte = new Date(Date.now() - 30 * 86400_000).toISOString()
   const { data: cache } = await sb.from("geocode_cache").select("partes").eq("chave", chave).gte("created_at", corte).maybeSingle()
