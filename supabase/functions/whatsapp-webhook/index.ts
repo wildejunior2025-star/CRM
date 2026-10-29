@@ -4983,7 +4983,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       const respostaConfirmacao = `Oi! 👋 Vi que você já é cliente *FWC Inter* mas ainda não é cliente do *${empresaNome}*.\n\nMe confirma se seus dados estão corretos para eu fazer seu cadastro:\n\n*Nome:* ${profileGlobal.nome}\n*E-mail:* ${emailExibir}\n*Telefone:* ${telExibir}${linhaEndereco}${linhaCep}\n\nEstá tudo certo? Posso te cadastrar? 😊\n👉 ${catalogoUrl}`
       await Promise.all([
         supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaConfirmacao }),
-        supabase.rpc("descontar_credito_whatsapp", { p_empresa_id: empresaId }),
+        supabase.rpc("descontar_credito_bot", { p_empresa_id: empresaId, p_origem: "Robô: resposta ao cliente" }),
       ])
       if (isTest) return new Response(JSON.stringify({ ok: true, resposta: respostaConfirmacao, _debug: { profileGlobal, phoneLocal } }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
       await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
@@ -5013,7 +5013,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
         const respostaOk = `✅ Tudo certo, ${profileGlobal.nome}! Cadastro feito!\n\nO que vai pedir hoje? 🛒`
         await Promise.all([
           supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaOk }),
-          supabase.rpc("descontar_credito_whatsapp", { p_empresa_id: empresaId }),
+          supabase.rpc("descontar_credito_bot", { p_empresa_id: empresaId, p_origem: "Robô: resposta ao cliente" }),
         ])
         if (isTest) return new Response(JSON.stringify({ ok: true, resposta: respostaOk, _debug: { profileGlobal, phoneLocal, confirmou } }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
         await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
@@ -6289,7 +6289,7 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
     await Promise.all([
       supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: resposta }),
       espelharNoChat(supabase, empresaId, phone, resposta, "loja", true),
-      supabase.rpc("descontar_credito_whatsapp", { p_empresa_id: empresaId }),
+      supabase.rpc("descontar_credito_bot", { p_empresa_id: empresaId, p_origem: "Robô: resposta ao cliente" }),
       acaoPromise,
     ])
 

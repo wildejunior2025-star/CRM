@@ -90,7 +90,14 @@ serve(async (req) => {
       })
     }
 
-    // Verifica e desconta créditos antes de enviar
+    // SÓ CONFERE o saldo aqui. O desconto é lá embaixo, DEPOIS que a mensagem
+    // sai — senão a loja paga por mensagem que nunca foi mandada.
+    //
+    // A Agv viu isso em 25 e 26/10/2026: 155 créditos saíram sem UMA mensagem
+    // no banco. Quem descontava antes tinha que lembrar de devolver em cada
+    // saída de erro, e duas não devolviam: o número inválido logo abaixo (que
+    // nem chegava a tentar enviar) e o `catch` lá do fim, quando a rede cai no
+    // meio. Agora não tem o que devolver, porque não tem o que adiantar.
     const { data: empresaData, error: creditError } = await supabaseAdmin
       .from("empresas")
       .select("whatsapp_creditos")
@@ -101,18 +108,6 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "Créditos WhatsApp insuficientes. Contate o suporte para recarregar." }),
         { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      )
-    }
-
-    // Desconta 1 crédito atomicamente via RPC (evita condição de corrida)
-    const { error: debitError } = await supabaseAdmin.rpc("descontar_credito_whatsapp", {
-      p_empresa_id: targetEmpresaId
-    })
-
-    if (debitError) {
-      return new Response(
-        JSON.stringify({ error: "Erro ao processar crédito." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
 
@@ -171,9 +166,6 @@ serve(async (req) => {
         const msg = code === 131047 || code === 131026
           ? "Esse cliente não fala com a loja no WhatsApp há mais de 24h — a Meta não deixa mandar mensagem nova pra ele."
           : `WhatsApp da Meta: ${errJson?.error?.message ?? await cloudRes.text()}`
-        // O crédito é descontado ANTES de enviar; se o envio falhou, devolve —
-        // senão a loja pagava por mensagem que nunca saiu.
-        await supabaseAdmin.rpc("adicionar_credito_whatsapp", { p_empresa_id: targetEmpresaId, p_quantidade: 1 })
         return new Response(JSON.stringify({ error: msg, code }), {
           status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" }
         })
@@ -190,12 +182,21 @@ serve(async (req) => {
 
       if (!evoRes.ok) {
         const errText = await evoRes.text()
-        await supabaseAdmin.rpc("adicionar_credito_whatsapp", { p_empresa_id: targetEmpresaId, p_quantidade: 1 })
         return new Response(JSON.stringify({ error: `Evolution API: ${errText}` }), {
           status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" }
         })
       }
     }
+
+    // A mensagem SAIU. Só agora o crédito sai também — e dizendo de onde veio,
+    // senão o extrato vira o que era: tudo "Resposta do bot".
+    const { error: debitError } = await supabaseAdmin.rpc("descontar_credito_bot", {
+      p_empresa_id: targetEmpresaId,
+      p_origem: `Mensagem enviada pelo painel${body.assunto ? ` (${String(body.assunto).slice(0, 40)})` : ""}`,
+    })
+    // Deu erro pra descontar? A mensagem já foi — não dá pra desfazer, e segurar
+    // a resposta aqui só confundiria quem está na tela. Fica o registro.
+    if (debitError) console.error("[send-whatsapp] nao descontou o credito:", debitError.message)
 
     return new Response(JSON.stringify({ ok: true, message_id: cloudMsgId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
