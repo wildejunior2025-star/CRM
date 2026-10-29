@@ -90,26 +90,19 @@ serve(async (req) => {
       })
     }
 
-    // SÓ CONFERE o saldo aqui. O desconto é lá embaixo, DEPOIS que a mensagem
-    // sai — senão a loja paga por mensagem que nunca foi mandada.
+    // NÃO COBRA CRÉDITO, e nem exige saldo.
     //
-    // A Agv viu isso em 25 e 26/10/2026: 155 créditos saíram sem UMA mensagem
-    // no banco. Quem descontava antes tinha que lembrar de devolver em cada
-    // saída de erro, e duas não devolviam: o número inválido logo abaixo (que
-    // nem chegava a tentar enviar) e o `catch` lá do fim, quando a rede cai no
-    // meio. Agora não tem o que devolver, porque não tem o que adiantar.
-    const { data: empresaData, error: creditError } = await supabaseAdmin
-      .from("empresas")
-      .select("whatsapp_creditos")
-      .eq("id", targetEmpresaId)
-      .single()
-
-    if (creditError || !empresaData || empresaData.whatsapp_creditos <= 0) {
-      return new Response(
-        JSON.stringify({ error: "Créditos WhatsApp insuficientes. Contate o suporte para recarregar." }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      )
-    }
+    // Aqui quem escreveu foi a LOJA, pra um cliente dela, e isso sai pela
+    // Evolution — servidor nosso, custo zero. Cobrar por isso era vender o que
+    // já era de graça, e era o que fazia o lojista desconfiar do extrato
+    // inteiro quando ia conferir (Agv, 29/10/2026). O disparo em massa, que é
+    // o caso em que o volume importa, nem passa por aqui: tem fila própria.
+    //
+    // Antes disto, o crédito saía ANTES do envio — antes até de conferir se o
+    // número era válido. Tinha devolução em alguns erros, mas dois caminhos
+    // não devolviam: número inválido (que nem chegava a tentar enviar) e o
+    // `catch` do fim, quando a rede cai no meio. Loja pagava por mensagem que
+    // nunca saiu.
 
     // instance_name salvo no banco; fallback para nome padrão SaaS
     const instanceName = config.instance_name || `empresa_${targetEmpresaId}`
@@ -187,16 +180,6 @@ serve(async (req) => {
         })
       }
     }
-
-    // A mensagem SAIU. Só agora o crédito sai também — e dizendo de onde veio,
-    // senão o extrato vira o que era: tudo "Resposta do bot".
-    const { error: debitError } = await supabaseAdmin.rpc("descontar_credito_bot", {
-      p_empresa_id: targetEmpresaId,
-      p_origem: `Mensagem enviada pelo painel${body.assunto ? ` (${String(body.assunto).slice(0, 40)})` : ""}`,
-    })
-    // Deu erro pra descontar? A mensagem já foi — não dá pra desfazer, e segurar
-    // a resposta aqui só confundiria quem está na tela. Fica o registro.
-    if (debitError) console.error("[send-whatsapp] nao descontou o credito:", debitError.message)
 
     return new Response(JSON.stringify({ ok: true, message_id: cloudMsgId }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }

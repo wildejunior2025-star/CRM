@@ -81,6 +81,46 @@ function textoDepoisDoCadastro(
 // modelo emite a ação chamar_atendente quando se vê perdido.
 const PEDE_HUMANO = /\b(atendente|atendimento humano|falar com (uma )?pessoa|falar com (o |a )?(dono|gerente|vendedor|humano)|pessoa de verdade|alguem de verdade|algu[eé]m da loja|me transfere|transferir)\b/i
 
+// "Oi", "bom dia", "manda o cardápio": a abertura de conversa, que é sempre a
+// mesma e não precisa de IA nenhuma pra ser respondida — quem sabe preço, taxa
+// e horário é o cardápio online, não o prompt.
+//
+// Na Agv, de 23 a 29/10/2026, isso foi 116 das 258 falas do robô: quase
+// metade do que a loja pagou era a IA escrevendo "bem-vindo, aqui está o
+// link". O robô do link manda esse mesmo texto de graça desde sempre.
+//
+// A mensagem tem que ser SÓ isso. "Bom dia, quero 2 quentinhas" é pedido, e
+// pedido é da IA — por isso o que sobra depois de tirar a saudação e o "por
+// favor" tem que estar vazio ou ser exatamente o pedido de cardápio.
+const SAUDACAO = /^(oi+|ola+|alo+|opa+|e ai|hey|bom dia|boa tarde|boa noite|tudo bem|tudo bom|blz|beleza)$/
+const PEDE_CARDAPIO =
+  /^((me |mim )?(manda|mande|mandar|envia|enviar|envie|favor enviar|passa|passar|tem|queria|quero|gostaria de|gostaria do|gostaria de ver|qual e o|quero ver|ver|poderia enviar|poderia mandar|pode mandar|pode enviar) )?(o |a )?(cardapio|menu|link|link da loja|cardapio de hoje)$/
+
+function soAbrindoConversa(txt: string): boolean {
+  let t = String(txt ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")   // tira acento
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")                        // tira emoji e pontuação
+    .replace(/\s+/g, " ").trim()
+  if (!t || t.length > 45) return false
+  // "por favor" é educação, não conteúdo. "Obrigado" NÃO entra aqui: tirar essa
+  // palavra deixaria "obrigada" virar mensagem vazia, e mensagem vazia passava
+  // como se fosse uma saudação.
+  t = t.replace(/\b(por favor|porfavor|pfvr?|pff)\b/g, " ").replace(/\s+/g, " ").trim()
+  if (!t) return false
+  // Tira UMA saudação do começo, se tiver ("bom dia cardápio" é as duas coisas).
+  for (const s of ["bom dia", "boa tarde", "boa noite", "tudo bem", "tudo bom", "e ai"]) {
+    if (t === s) return true
+    if (t.startsWith(s + " ")) { t = t.slice(s.length).trim(); break }
+  }
+  const primeira = t.split(" ")[0]
+  if (SAUDACAO.test(primeira)) {
+    if (t === primeira) return true
+    t = t.slice(primeira.length).trim()
+  }
+  return PEDE_CARDAPIO.test(t)
+}
+
 // ── handleAtualizar_carrinho ─────────────────────────────────────────────────
 // Usa PATCH (update) + POST (insert) separados — upsert via on_conflict tem falhas intermitentes
 async function handleAtualizar_carrinho(
@@ -3790,7 +3830,10 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento, delivery_ativo, delivery_fechado_por)")
+      // resposta_presencial_ativo entra por causa da resposta de abertura, que
+      // é o robô do link rodando dentro da loja com IA: sem essa chave ele não
+      // conta que dá pra comer ali.
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, resposta_presencial_ativo, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento, delivery_ativo, delivery_fechado_por, agendamento_ativo, presencial_ativo, bairro, aceita_entrega, aceita_retirada, tempo_entrega_min, tempo_entrega_max)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
@@ -3965,6 +4008,51 @@ serve(async (req) => {
         ? Promise.resolve()
         : espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
     ])
+    // ── ABRIU A CONVERSA: texto pronto, sem IA e sem crédito ────────────────
+    // Fica ANTES do portão de crédito de propósito: é de graça, então tem que
+    // responder até com o saldo zerado. Loja com robô mudo não vira hábito de
+    // ninguém.
+    //
+    // Quem responde é o mesmo robô do link que as lojas sem IA já usam — ele
+    // sabe o horário, o feriado, o presencial e o link com o telefone dentro.
+    // Se ele resolver ficar calado (conversa já assumida, mídia sem texto), a
+    // chamada segue para a IA como era antes.
+    if (!retomada && soAbrindoConversa(text)) {
+      const umaHora = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+      const { data: faladoAgora } = await supabase.from("whatsapp_conversas")
+        .select("id").eq("empresa_id", empresaId).like("phone", `%${phone.slice(-8)}`)
+        .eq("role", "assistant").gte("created_at", umaHora).limit(1)
+      // Conversa que já está andando não é abertura: ali "oi" pode ser resposta
+      // a uma pergunta que o robô fez, e quem tem que ler isso é a IA.
+      if (!(faladoAgora ?? []).length) {
+        let saiuTexto = ""
+        const respondeu = await responderSemIA({
+          supabase,
+          cfg: { ...(config as Record<string, unknown>), resposta_link_ativo: true },
+          phone,
+          mensagem: text,
+          enviar: (txt: string) => {
+            saiuTexto = txt
+            if (isTest) return Promise.resolve(null)
+            return fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: phone, text: txt }),
+            })
+          },
+          espelhar: (txt: string) => espelharNoChat(supabase, empresaId, phone, txt, "loja", true),
+        })
+        if (respondeu) {
+          console.log("[abertura] texto pronto, sem IA e sem crédito:", phone)
+          if (isTest) {
+            return new Response(JSON.stringify({ ok: true, robo: "abertura", resposta: saiuTexto, credito: 0 }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+          }
+          return new Response("ok", { headers: corsHeaders })
+        }
+      }
+    }
+
     if (!creditRes.data || creditRes.data.whatsapp_creditos <= 0) return new Response("ok", { headers: corsHeaders })
 
     // ── RAJADA: "quero sorvete" / "100 picolé" / "e caixa de açaí" ─────────────
@@ -4981,10 +5069,11 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       const linhaEndereco = enderecoExibir ? `\n*Endereço:* ${enderecoExibir}` : `\n*Endereço:* não informado`
       const linhaCep = profileGlobal.cep ? `\n*CEP:* ${profileGlobal.cep}` : ""
       const respostaConfirmacao = `Oi! 👋 Vi que você já é cliente *FWC Inter* mas ainda não é cliente do *${empresaNome}*.\n\nMe confirma se seus dados estão corretos para eu fazer seu cadastro:\n\n*Nome:* ${profileGlobal.nome}\n*E-mail:* ${emailExibir}\n*Telefone:* ${telExibir}${linhaEndereco}${linhaCep}\n\nEstá tudo certo? Posso te cadastrar? 😊\n👉 ${catalogoUrl}`
-      await Promise.all([
-        supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaConfirmacao }),
-        supabase.rpc("descontar_credito_bot", { p_empresa_id: empresaId, p_origem: "Robô: resposta ao cliente" }),
-      ])
+      // Sem crédito: este texto é montado aqui mesmo, com os dados que já
+      // estavam no banco. Não passou pela IA, então não custa nada pra gente —
+      // e o que não custa pra gente não cobra da loja.
+      await supabase.from("whatsapp_conversas")
+        .insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaConfirmacao })
       if (isTest) return new Response(JSON.stringify({ ok: true, resposta: respostaConfirmacao, _debug: { profileGlobal, phoneLocal } }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
       await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
         method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
@@ -5011,10 +5100,9 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
           }).eq("empresa_id", empresaId).eq("phone", phone)
         }
         const respostaOk = `✅ Tudo certo, ${profileGlobal.nome}! Cadastro feito!\n\nO que vai pedir hoje? 🛒`
-        await Promise.all([
-          supabase.from("whatsapp_conversas").insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaOk }),
-          supabase.rpc("descontar_credito_bot", { p_empresa_id: empresaId, p_origem: "Robô: resposta ao cliente" }),
-        ])
+        // Sem crédito, mesma razão da confirmação acima: texto pronto.
+        await supabase.from("whatsapp_conversas")
+          .insert({ empresa_id: empresaId, phone, role: "assistant", content: respostaOk })
         if (isTest) return new Response(JSON.stringify({ ok: true, resposta: respostaOk, _debug: { profileGlobal, phoneLocal, confirmou } }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
         await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
           method: "POST", headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
@@ -5117,6 +5205,29 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       const leu = Number(u.cache_read_input_tokens ?? 0)
       const usd = (entrada / 1e6) * 1 + (gravou / 1e6) * 1.25 + (leu / 1e6) * 0.10 + (saida / 1e6) * 5
       console.log(`[custo] in=${entrada} cache_gravou=${gravou} cache_leu=${leu} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
+      // E GUARDA. Até aqui o custo só existia nesse console.log, que o Supabase
+      // joga fora em 24 horas — então "a conta fecha?" não tinha resposta, só
+      // opinião. O assistente do grupo já grava o dele nesta mesma tabela; o
+      // robô do cliente passa a gravar também, em canal próprio pra não mexer
+      // na franquia de ninguém (verCarteira só soma portal e whatsapp_pergunta).
+      //
+      // Não bloqueia a resposta: se falhar, o cliente não pode ficar esperando
+      // por causa de um registro de contabilidade.
+      supabase.from("assistente_conversas").insert({
+        empresa_id: empresaId,
+        canal: "whatsapp_cliente",
+        modelo: "claude-haiku-4-5-20251001",
+        tokens_in: entrada,
+        tokens_cache: gravou + leu,
+        tokens_out: saida,
+        custo_usd: Number(usd.toFixed(6)),
+        custo_brl: Math.round(usd * 5.4 * 10000) / 10000,
+        creditos_cobrados: 1,
+        pergunta: String(text ?? "").slice(0, 500),
+        resposta: "",
+      }).then(({ error }: { error: unknown }) => {
+        if (error) console.error("[custo] nao gravou:", (error as { message?: string })?.message)
+      })
     }
     let resposta: string = claudeData.content?.[0]?.text ?? ""
 
