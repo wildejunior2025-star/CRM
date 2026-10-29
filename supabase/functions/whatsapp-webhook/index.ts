@@ -3830,10 +3830,12 @@ serve(async (req) => {
 
     const configRes = await supabase
       .from("whatsapp_config")
-      // resposta_presencial_ativo entra por causa da resposta de abertura, que
-      // é o robô do link rodando dentro da loja com IA: sem essa chave ele não
-      // conta que dá pra comer ali.
-      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, resposta_presencial_ativo, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento, delivery_ativo, delivery_fechado_por, agendamento_ativo, presencial_ativo, bairro, aceita_entrega, aceita_retirada, tempo_entrega_min, tempo_entrega_max)")
+      // resposta_presencial_ativo e resposta_link_texto entram por causa da
+      // resposta de abertura, que é o robô do link rodando dentro da loja com
+      // IA. Sem a primeira ele não conta que dá pra comer ali; sem a segunda
+      // ele ignora o texto que a loja escreveu pra si (o Braseiro e a CDBom
+      // têm o deles) e manda o padrão por cima.
+      .select("empresa_id, ia_ativo, ia_instrucoes, admin_phone, resposta_presencial_ativo, resposta_link_texto, empresas(id, nome, slug, descricao, email_contato, chave_pix, pix_nome, taxa_entrega, pedido_minimo, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, latitude, longitude, aceita_delivery, endereco, numero, cidade, estado, cep, horario_abertura, horario_fechamento, horarios_funcionamento, feriados_fecha, indicador_profile_id, mp_conectado, formas_pagamento, delivery_ativo, delivery_fechado_por, agendamento_ativo, presencial_ativo, bairro, aceita_entrega, aceita_retirada, tempo_entrega_min, tempo_entrega_max)")
       .eq("instance_name", instanceName)
       .eq("ativo", true)
       .single()
