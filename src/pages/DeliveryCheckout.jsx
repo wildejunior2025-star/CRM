@@ -269,10 +269,15 @@ async function kmPelaRua({ empresaId, origem, destino }) {
 const kmCobrado = (kmRua, kmReta, fator = 1) =>
   (kmRua == null ? kmReta : Math.max(kmRua / (Number(fator) >= 1 ? Number(fator) : 1), kmReta))
 
+// Km arredonda pra MEIA FAIXA MAIS PERTO antes de olhar a tabela (28/10/2026):
+// 2,7 cobra 2,5 e 2,8 cobra 3. A conferência do banco (taxa_entrega_esperada,
+// mig 0425) usa a mesma regra.
+const meiaFaixa = km => Math.round(Number(km) * 2) / 2
 function calcTaxaKm(faixas, distKm) {
   const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
   if (!arr.length) return null
-  const faixa = arr.find(f => distKm <= Number(f.km)) ?? arr[arr.length - 1]
+  const km = meiaFaixa(distKm)
+  const faixa = arr.find(f => km <= Number(f.km)) ?? arr[arr.length - 1]
   return Number(faixa.taxa) || 0
 }
 // O Nominatim é gratuito e limita 1 consulta por segundo — ele engasga e às

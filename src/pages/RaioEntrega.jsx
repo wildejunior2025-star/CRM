@@ -508,7 +508,7 @@ export default function RaioEntrega() {
     const camada = L.layerGroup()
     for (const [la, ln, km] of g.celulas) {
       if (km > raioAgora) continue
-      const forte = destaqueKm != null && km / fatorVal.current <= destaqueKm
+      const forte = destaqueKm != null && meiaFaixa(km / fatorVal.current) <= destaqueKm
       L.rectangle([[la - dLat, ln - dLng], [la + dLat, ln + dLng]], {
         renderer, stroke: false, interactive: false,
         fillColor: forte ? '#a21caf' : '#c026d3',
@@ -534,12 +534,14 @@ export default function RaioEntrega() {
     }
     return pts
   }
+  // Meia faixa mais perto (2,7 → 2,5 ; 2,8 → 3), igual ao link e ao banco.
+  const meiaFaixa = km => Math.round(Number(km) * 2) / 2
   function taxaAteKm(km) {
     const faixas = [...(taxasVal.current || [])]
       .map(f => ({ km: Number(f.km), taxa: Number(f.taxa) }))
       .filter(f => Number.isFinite(f.km) && Number.isFinite(f.taxa))
       .sort((a, b) => a.km - b.km)
-    return faixas.find(f => km <= f.km + 1e-9) ?? null
+    return faixas.find(f => meiaFaixa(km) <= f.km + 1e-9) ?? null
   }
   const kmTxt = km => (km % 1 === 0 ? String(km) : km.toFixed(1).replace('.', ',')) + ' km'
   // kmRua: undefined = loja em linha reta (ou o Google falhou); null = ainda calculando.
@@ -1025,19 +1027,6 @@ export default function RaioEntrega() {
                   : 'Hoje a taxa sai da distância em linha reta (os círculos do mapa).'}
                 <br />
                 <span style={{ opacity: .75 }}>Pela rua a distância costuma ser 30% a 50% maior que a reta. Revise as faixas antes de ligar. Vale para a loja online e o app.</span>
-                {pelaRua && (
-                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 600 }}>Ajuste da rua: km da rua ÷</span>
-                    <input type="number" min="1" max="3" step="0.01" value={fatorRua}
-                      onChange={e => setFatorRua(e.target.value)}
-                      style={{ width: 70, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 6 }} />
-                    <span style={{ opacity: .8, flexBasis: '100%' }}>
-                      {fatorVal.current > 1
-                        ? `Deixa a taxa parecida com a de antes: uma entrega de ${(fatorVal.current * 2).toFixed(1).replace('.', ',')} km pela rua cai na faixa de 2 km. Quando ajustar as faixas pro km da rua, ponha 1.`
-                        : 'Cobra o km exato da rua nas faixas acima.'}
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
             <div className="re-toggle-controls">
