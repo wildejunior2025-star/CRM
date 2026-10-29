@@ -42,6 +42,7 @@ export default function RaioEntrega() {
   const raioVal   = useRef(10)    // espelho do estado, pra funções do mapa lerem o valor de agora
   const taxasVal  = useRef([])
   const pelaRuaVal = useRef(false)
+  const fatorVal = useRef(1)
   const anelTimer = useRef(null)
 
   // Dados
@@ -66,6 +67,7 @@ export default function RaioEntrega() {
   const [aceitaRetirada,  setAceitaRetirada]  = useState(true)
   const [aceitaEntrega,   setAceitaEntrega]   = useState(true)
   const [pelaRua,         setPelaRua]         = useState(false) // taxa pelo caminho da moto (Google)
+  const [fatorRua,        setFatorRua]        = useState('1')   // km da rua ÷ fator na tabela (texto do campo)
   const [gradeStatus,     setGradeStatus]     = useState(null)  // null | 'carregando' | 'ok' | 'erro'
   const [destaqueKm,      setDestaqueKm]      = useState(null)  // faixa com o mouse em cima
   const [mapaPronto,      setMapaPronto]      = useState(false)
@@ -81,6 +83,7 @@ export default function RaioEntrega() {
   raioVal.current = raio
   taxasVal.current = taxasKm
   pelaRuaVal.current = pelaRua
+  fatorVal.current = Math.max(1, Number(String(fatorRua).replace(',', '.')) || 1)
 
   // Puxa os bairros das cidades DENTRO do raio de entrega (via OpenStreetMap/Overpass).
   // Genérico: funciona pra qualquer cidade — sem cadastrar lista fixa. Debounce pra
@@ -197,6 +200,7 @@ export default function RaioEntrega() {
       aceitaRetirada: o.aceitaRetirada !== false,
       aceitaEntrega:  o.aceitaEntrega  !== false,
       pelaRua: !!o.pelaRua,
+      fatorRua: String(o.fatorRua ?? '1').replace(',', '.'),
       taxaEntrega: String(o.taxaEntrega ?? ''),
       pedidoMinimo: String(o.pedidoMinimo ?? ''),
       taxasKm: (o.taxasKm ?? []).map(f => ({ km: Number(f.km) || 0, taxa: Number(f.taxa) || 0, tempo: (f.tempo == null || f.tempo === '') ? null : Number(f.tempo) })),
@@ -209,14 +213,14 @@ export default function RaioEntrega() {
     })
   }
   function snapshotAtual() {
-    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
+    return normSnap({ aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, fatorRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado })
   }
   function descartarAlteracoes() {
     if (!baselineRef.current) return
     if (!window.confirm('Descartar as alterações não salvas e voltar ao que estava salvo?')) return
     const b = JSON.parse(baselineRef.current)
     setAceitaDelivery(!!b.aceitaDelivery); setAceitaRetirada(b.aceitaRetirada !== false)
-    setAceitaEntrega(b.aceitaEntrega !== false); setPelaRua(!!b.pelaRua)
+    setAceitaEntrega(b.aceitaEntrega !== false); setPelaRua(!!b.pelaRua); setFatorRua(b.fatorRua ?? '1')
     setTaxaEntrega(b.taxaEntrega); setPedidoMinimo(b.pedidoMinimo)
     setTaxasKm(Array.isArray(b.taxasKm) ? b.taxasKm : [])
     setTempoMin(b.tempoMin); setTempoMax(b.tempoMax); setCategoria(b.categoria); setRaio(b.raio)
@@ -230,7 +234,7 @@ export default function RaioEntrega() {
     if (!profile?.empresa_id) return
     supabase
       .from('empresas')
-      .select('id, aceita_delivery, aceita_retirada, taxa_entrega, pedido_minimo, aceita_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude, taxa_pela_rua')
+      .select('id, aceita_delivery, aceita_retirada, taxa_entrega, pedido_minimo, aceita_entrega, taxas_entrega_km, tempo_entrega_min, tempo_entrega_max, cep, endereco, numero, bairro, cidade, estado, categoria_delivery, raio_entrega_km, latitude, longitude, taxa_pela_rua, fator_rua')
       .eq('id', profile.empresa_id)
       .single()
       .then(({ data }) => {
@@ -240,6 +244,7 @@ export default function RaioEntrega() {
         setAceitaRetirada(data.aceita_retirada !== false)
         setAceitaEntrega(data.aceita_entrega !== false)
         setPelaRua(!!data.taxa_pela_rua)
+        setFatorRua(String(data.fator_rua ?? 1))
         setTaxaEntrega(data.taxa_entrega ?? 0)
         setPedidoMinimo(data.pedido_minimo ?? 0)
         setTempoMin(data.tempo_entrega_min ?? 30)
@@ -278,6 +283,7 @@ export default function RaioEntrega() {
           aceitaRetirada: data.aceita_retirada !== false,
           aceitaEntrega:  data.aceita_entrega  !== false,
           pelaRua: !!data.taxa_pela_rua,
+          fatorRua: String(data.fator_rua ?? 1),
           taxaEntrega: data.taxa_entrega ?? 0,
           pedidoMinimo: data.pedido_minimo ?? 0,
           taxasKm: faixas,
@@ -294,7 +300,7 @@ export default function RaioEntrega() {
           if (raw && raw !== baselineRef.current) {
             const d = JSON.parse(raw)
             setAceitaDelivery(!!d.aceitaDelivery); setAceitaRetirada(d.aceitaRetirada !== false)
-            setAceitaEntrega(d.aceitaEntrega !== false); setPelaRua(!!d.pelaRua)
+            setAceitaEntrega(d.aceitaEntrega !== false); setPelaRua(!!d.pelaRua); setFatorRua(d.fatorRua ?? String(data.fator_rua ?? 1))
             setTaxaEntrega(d.taxaEntrega ?? 0); setPedidoMinimo(d.pedidoMinimo ?? 0)
             setTaxasKm(Array.isArray(d.taxasKm) ? d.taxasKm : [])
             setTempoMin(d.tempoMin ?? 30); setTempoMax(d.tempoMax ?? 60); setCategoria(d.categoria ?? ''); setRaio(d.raio ?? 10)
@@ -322,7 +328,7 @@ export default function RaioEntrega() {
       try { mudou ? localStorage.setItem(draftKey, snap) : localStorage.removeItem(draftKey) } catch { /* ignore */ }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
+  }, [aceitaDelivery, aceitaRetirada, aceitaEntrega, pelaRua, fatorRua, taxaEntrega, pedidoMinimo, taxasKm, tempoMin, tempoMax, categoria, raio, cep, rua, numero, bairro, cidade, estado])
 
   // ── Carrega bairros: config salva + sugestões dos pedidos passados ──
   useEffect(() => {
@@ -502,7 +508,7 @@ export default function RaioEntrega() {
     const camada = L.layerGroup()
     for (const [la, ln, km] of g.celulas) {
       if (km > raioAgora) continue
-      const forte = destaqueKm != null && km <= destaqueKm
+      const forte = destaqueKm != null && km / fatorVal.current <= destaqueKm
       L.rectangle([[la - dLat, ln - dLng], [la + dLat, ln + dLng]], {
         renderer, stroke: false, interactive: false,
         fillColor: forte ? '#a21caf' : '#c026d3',
@@ -513,7 +519,7 @@ export default function RaioEntrega() {
     gradeLayerRef.current = camada
     markerRef.current?.setZIndexOffset(1000)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gradeStatus, destaqueKm, pelaRua, raio, mapaPronto])
+  }, [gradeStatus, destaqueKm, pelaRua, raio, mapaPronto, fatorRua])
 
   // ── Faixas de 500 m, cada uma de uma cor ──────────────────────
   // Serve pra conferir as entregas: a cor diz em que "anel" o endereço caiu.
@@ -544,9 +550,11 @@ export default function RaioEntrega() {
       if (km > r) return `${reta}<br><span style="color:#dc2626">Fora do raio de ${kmTxt(r)}</span>`
       if (kmRua == null) return reta
       // Mesma régua do link: nunca cobra abaixo da reta.
-      const cobrado = Math.max(kmRua, km)
+      const rua = Math.max(kmRua, km)
+      const cobrado = Math.max(kmRua / fatorVal.current, km)
       const f = taxaAteKm(cobrado) ?? [...(taxasVal.current || [])].map(x => ({ km: Number(x.km), taxa: Number(x.taxa) })).sort((a, b) => b.km - a.km)[0]
-      return `${reta}<br><b>${cobrado.toFixed(2).replace('.', ',')} km pela rua</b> (caminho da moto)`
+      return `${reta}<br><b>${rua.toFixed(2).replace('.', ',')} km pela rua</b> (caminho da moto)`
+        + (fatorVal.current > 1 ? `<br>Na tabela: ${cobrado.toFixed(2).replace('.', ',')} km (rua ÷ ${String(fatorVal.current).replace('.', ',')})` : '')
         + (f ? `<br>Taxa: <b>R$ ${f.taxa.toFixed(2).replace('.', ',')}</b>` : '')
     }
     const f = taxaAteKm(km)
@@ -716,6 +724,7 @@ export default function RaioEntrega() {
       aceita_retirada:      aceitaRetirada,
       aceita_entrega:       aceitaEntrega,
       taxa_pela_rua:        pelaRua,
+      fator_rua:            Math.min(3, Math.max(1, Number(String(fatorRua).replace(',', '.')) || 1)),
       taxa_entrega:         taxaPiso,
       pedido_minimo:        parseFloat(pedidoMinimo) || 0,
       taxas_entrega_km:     faixasOrdenadas,
@@ -780,7 +789,7 @@ export default function RaioEntrega() {
                     {gradeStatus === 'carregando' ? '⏳ Montando o mapa pela rua… (só demora da primeira vez)'
                       : gradeStatus === 'erro' ? 'Não deu pra montar o mapa pela rua agora. Clique num ponto pra ver os km.'
                       : destaqueKm != null
-                        ? <>Até <b>{String(destaqueKm).replace('.', ',')} km</b> pela rua{(() => { const f = taxaAteKm(destaqueKm); return f ? <> · R$ {f.taxa.toFixed(2).replace('.', ',')}</> : null })()}</>
+                        ? <>Faixa até <b>{String(destaqueKm).replace('.', ',')} km</b>{fatorVal.current > 1 ? <> = até {(destaqueKm * fatorVal.current).toFixed(1).replace('.', ',')} km pela rua</> : ' pela rua'}{(() => { const f = taxaAteKm(destaqueKm); return f ? <> · R$ {f.taxa.toFixed(2).replace('.', ',')}</> : null })()}</>
                         : <>🛵 Pintado = onde a moto chega em até <b>{String(raio).replace('.', ',')} km</b> pela rua. Passe o mouse numa faixa →</>}
                   </div>
                 )}
@@ -1016,6 +1025,19 @@ export default function RaioEntrega() {
                   : 'Hoje a taxa sai da distância em linha reta (os círculos do mapa).'}
                 <br />
                 <span style={{ opacity: .75 }}>Pela rua a distância costuma ser 30% a 50% maior que a reta. Revise as faixas antes de ligar. Vale para a loja online e o app.</span>
+                {pelaRua && (
+                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600 }}>Ajuste da rua: km da rua ÷</span>
+                    <input type="number" min="1" max="3" step="0.01" value={fatorRua}
+                      onChange={e => setFatorRua(e.target.value)}
+                      style={{ width: 70, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 6 }} />
+                    <span style={{ opacity: .8, flexBasis: '100%' }}>
+                      {fatorVal.current > 1
+                        ? `Deixa a taxa parecida com a de antes: uma entrega de ${(fatorVal.current * 2).toFixed(1).replace('.', ',')} km pela rua cai na faixa de 2 km. Quando ajustar as faixas pro km da rua, ponha 1.`
+                        : 'Cobra o km exato da rua nas faixas acima.'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="re-toggle-controls">
