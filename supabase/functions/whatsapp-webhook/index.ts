@@ -2723,7 +2723,12 @@ async function handleFecharPedido(
       const nomeCliente = String(acao.cliente_nome).trim()
       const emailReal   = acao.cliente_email ? String(acao.cliente_email).trim().toLowerCase() : null
       const emailLogin  = emailReal || `${phoneLocal}@wpp.vendamais.app`
-      const telCliente  = acao.cliente_telefone ? String(acao.cliente_telefone).replace(/\D/g, "") : phoneLocal
+      // O telefone é SEMPRE o número de quem está conversando, nunca o que o
+      // modelo escreveu. Ele não sabe nada que a conversa não saiba, e um
+      // dígito trocado aqui vira cliente que não recebe aviso nenhum do pedido
+      // — aconteceu na Agv, pedidos #13 e #32, com o cliente esperando sem
+      // saber que a comida já tinha saído.
+      const telCliente  = phoneLocal
 
       // 0. SELECT-first: cliente pode já existir de sessão anterior ou ter o mesmo email/telefone que a conta da loja
       const { data: clienteJaExiste } = await supabase
@@ -4825,7 +4830,7 @@ FORMAS DE PAGAMENTO (SÓ estas — nunca ofereça outra): ${opcoesDePagamento(pa
 📒 FIADO NÃO PASSA POR VOCÊ. Se o cliente pedir fiado ("na conta", "anota aí", "pendura", "deixa pra semana", "pago depois"), NUNCA aceite nem feche o pedido assim — fiado é dívida, e quem libera é o dono da loja, olhando o cadastro. Responda exatamente nesta linha:
 "Fiado é só com o dono da loja. 😊 Faça o pedido escolhendo uma forma de pagamento normal, e depois é só falar com a loja que eles acertam o fiado por lá."
 Em seguida siga normalmente perguntando ${opcoesDePagamento(pagamentos).replace(/\*/g, "")}.
-${pedidoAberto ? `
+${pedidoAberto ? `⟦VAR⟧
 ⚠️ ESTE CLIENTE JÁ TEM UM PEDIDO NA MÃO DA LOJA: *#${pedidoAberto.numero_pedido}*, R$ ${Number(pedidoAberto.total).toFixed(2)}, situação atual: *${pedidoAberto.status}*.
 💳 A FORMA DE PAGAMENTO DESSE PEDIDO VOCÊ PODE TROCAR — e SÓ ela, e SÓ se ele ainda NÃO PAGOU. Quem já pagou (PIX confirmado, ou já mandou o comprovante aqui) não troca de forma: aí é cancelar e refazer, e quem faz isso é a loja — chame um atendente. Mas primeiro pergunte o que falta, numa frase curta, e só emita a ação com a resposta:
 • Ele disse "cartão"${pagamentos.credito && pagamentos.debito ? ` → pergunte "crédito ou débito?" e espere a resposta` : ""}.
@@ -4838,7 +4843,7 @@ Não escreva o resultado você mesmo — o sistema confirma e avisa a loja. ⛔ 
 ⛔ O RESTO DO PEDIDO VOCÊ NÃO MUDA: endereço, item, quantidade ou cancelar — a comida já pode estar na chapa e quem decide é a loja. Se ele pedir isso, NUNCA responda que está feito; diga que vai chamar alguém da loja e emita na MESMA mensagem:
 ACAO: {"tipo": "chamar_atendente", "motivo": "quer mudar o pedido #${pedidoAberto.numero_pedido}"}
 Pedido NOVO é outra coisa: se ele quiser pedir mais alguma coisa, monte normalmente.
-` : ""}
+⟦/VAR⟧` : ""}
 ${pagamentos.pixOnline ? `• PIX (online): o sistema gera o QR Code e o copia-e-cola ao fechar o pedido — o pedido só vai para a loja depois que o pagamento for confirmado. Você NÃO envia chave PIX nesse caso.\n` : ""}${pagamentos.pixEntrega ? `• PIX${pagamentos.pixOnline ? " na entrega" : ""}: o cliente faz o PIX pelo app do banco dele, para a chave PIX da loja${pagamentos.chavePix ? ` (${pagamentos.chavePix})` : ""}, e manda o COMPROVANTE aqui na conversa pra concluir o pedido — igual à Loja Online. NÃO usa maquininha e não tem QR. NUNCA diga pra pagar só quando o pedido chegar. O sistema manda a chave junto da confirmação do pedido; você nunca confirma que o pagamento caiu (quem confere é a loja).${pagamentos.pixOnline ? "" : " Quando o cliente disser \"PIX\", é este."}\n` : ""}${!pagamentos.pixOnline && !pagamentos.pixEntrega ? `• PIX NÃO é aceito nesta loja pelo WhatsApp — se pedirem, ofereça as formas acima.\n` : ""}${aceitaCartao(pagamentos) ? `• Cartão: se for ENTREGA, o entregador leva a maquininha. Se for RETIRADA, paga no balcão da loja (aí não tem entregador — nunca fale dele).${pagamentos.credito && pagamentos.debito ? " Pergunte se é *crédito* ou *débito*." : ""}\n` : ""}
 
 ${totalProdutos > MENU_INTEIRO_ATE ? `⚠️ CATÁLOGO GRANDE: esta loja tem ${totalProdutos} produtos e eles NÃO cabem aqui. A lista abaixo é só o que casou com o que o cliente falou até agora — NÃO é o catálogo inteiro.
@@ -4909,7 +4914,7 @@ Colete UM POR VEZ, nesta ordem exata:
      ⚠️ O cliente pode mandar o endereço em PEDAÇOS (a rua numa mensagem, o bairro na outra). Trate como um endereço só: quando vier o bairro solto depois da rua, emita salvar_rua de novo com a rua que você já tem MAIS o bairro novo.
   4. Recebeu o número → emita salvar_numero. O sistema pergunta entrega/retirada automaticamente.
      Lugar SEM número (quiosque, sítio, barraca, "não tem número", só um ponto de referência) → emita salvar_numero com "S/N" na hora. Ponto de referência NÃO é número e NUNCA diga "anotei" sem emitir a ação — o pino do mapa é que guia o entregador.
-O telefone já temos (${phoneLocal}) — NUNCA peça.
+O telefone já temos (está no bloco CLIENTE, campo TELEFONE) — NUNCA peça.
 ⚠️ CRÍTICO: só o *nome* é obrigatório. ⛔ NUNCA peça e-mail — o sistema não precisa dele.
 
 ▶ PASSO 4 — ENTREGA OU RETIRADA
@@ -4931,9 +4936,12 @@ Após ter entrega/retirada E pagamento confirmados, envie o resumo completo:
 ${aceitaDelivery
   // Taxa zero é FRETE GRÁTIS, e é a melhor notícia da mensagem: escrever
   // "R$ 0.00" faz o cliente ler duas vezes pra entender que não vai pagar.
-  ? (taxaEntregaCalc > 0
-      ? `🚚 Taxa de entrega: R$ ${taxaEntregaCalc.toFixed(2)} (só se for entrega — use EXATAMENTE este valor)`
-      : "🚚 Entrega *grátis*! (só se for entrega — a entrega deste endereço não tem taxa, NUNCA escreva \"R$ 0,00\")")
+  // O VALOR da taxa não entra aqui: ele muda de cliente pra cliente (depende
+  // do endereço) e este trecho é do pedaço CACHEADO do prompt — um número
+  // diferente por pessoa fazia o cache nunca casar, e cada conversa nova
+  // pagava a gravação inteira do prompt. O valor certo está no bloco ENTREGA,
+  // em DADOS DESTE MOMENTO.
+  ? "🚚 Taxa de entrega: use EXATAMENTE o valor que está no bloco ENTREGA (se for entrega). Taxa zero é *Entrega grátis!* — NUNCA escreva \"R$ 0,00\"."
   : ""}
 💰 *Total: R$ [total]*
 
@@ -4952,7 +4960,7 @@ O sistema avisa sozinho quando a loja confirma o pedido, quando ele sai para ent
 REGRAS IMPORTANTES
 ══════════════════════════════════════
 1. NUNCA invente produtos ou preços — use APENAS a lista acima
-2. NUNCA peça o telefone — já temos: ${phoneLocal}
+2. NUNCA peça o telefone — já temos (bloco CLIENTE, campo TELEFONE)
 3. NUNCA peça CEP nem endereço se já temos o endereço do cliente (ver o bloco CLIENTE)
 4. O resumo (PASSO 6) é OBRIGATÓRIO antes de fechar. NUNCA emita fechar_pedido sem antes mostrar o resumo e receber confirmação. E NUNCA mostre resumo/total ANTES de ter entrega/retirada E pagamento definidos — ao fechar a sacola, se o cliente não é cadastrado, a próxima coisa é pedir o NOME (PASSO 3), sem resumo ainda.
 5. Para cliente novo colete SÓ o nome — e SÓ depois que a sacola estiver fechada (nunca durante a montagem). ⛔ NUNCA peça e-mail.
@@ -5029,7 +5037,7 @@ ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "entrega", "forma_pagamento": "d
 ⚠️ SE for retirada, omita os campos cliente_rua/numero/bairro/cidade/estado
 
 Fechar pedido — CLIENTE SEM CADASTRO (raro: CLIENTE = "Não identificado" e cadastrar_cliente não foi emitido):
-ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_telefone": "${phoneLocal}", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
+ACAO: {"tipo": "fechar_pedido", "tipo_entrega": "retirada", "forma_pagamento": "dinheiro", "cliente_nome": "[nome]", "cliente_telefone": "[o TELEFONE do bloco CLIENTE, só os números]", "items": [{"produto_id": "ID_REAL", "nome": "Nome", "qtd": 1, "preco": 0.00}]}
 ⚠️ CRÍTICO: sem cliente_nome o pedido NÃO é criado
 
 COMPROVANTE DE PAGAMENTO (foto ou print de PIX/transferência):
