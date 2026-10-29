@@ -69,22 +69,26 @@ export default function ContagemEstoque({ empresaId }) {
     setCarregando(true)
     setErro(null)
     try {
-      const [m, p, comEntrada, sp, u] = await Promise.all([
+      const [m, p, comEntrada, fichas, sp, u] = await Promise.all([
         fetchAll(() => supabase.from('materia_prima_saldo').select('materia_prima_id, nome, unidade, custo, quantidade_atual, categoria').order('materia_prima_id')),
         fetchAll(() => supabase.from('produtos').select('id, nome, categoria, preco_custo, ativo, pausado_por_estoque, controla_estoque')
           .eq('empresa_id', empresaId).order('id')),
-        // Revenda = o que a loja COMPRA pronto (já teve entrada). Prato feito na cozinha não se conta na prateleira.
+        // Revenda = o que fica na prateleira: todo produto com estoque, menos o prato feito
+        // na cozinha (tem ficha técnica que baixa insumo), a não ser que já tenha tido compra.
+        // Loja que nunca lançou compra (Branka) também precisa contar pra começar.
         fetchAll(() => supabase.from('estoque_movimentos').select('produto_id').eq('empresa_id', empresaId).eq('tipo', 'entrada').order('id')),
+        fetchAll(() => supabase.from('fichas_tecnicas').select('produto_id, baixa_estoque').eq('empresa_id', empresaId).is('complemento_opcao_id', null).order('id')),
         fetchAll(() => supabase.from('estoque_saldo').select('produto_id, quantidade_atual').order('produto_id')),
         supabase.from('contagens_estoque').select('*').eq('empresa_id', empresaId).order('feita_em', { ascending: false }).limit(1),
       ])
-      for (const r of [m, p, comEntrada, sp]) if (r.error) throw r.error
+      for (const r of [m, p, comEntrada, fichas, sp]) if (r.error) throw r.error
       const saldo = new Map((sp.data || []).map(x => [x.produto_id, Number(x.quantidade_atual || 0)]))
-      const revenda = new Set((comEntrada.data || []).map(x => x.produto_id))
+      const comprado = new Set((comEntrada.data || []).map(x => x.produto_id))
+      const prato = new Set((fichas.data || []).filter(x => x.baixa_estoque !== false).map(x => x.produto_id))
       setInsumos((m.data || []).map(x => ({ id: x.materia_prima_id, nome: x.nome, unidade: x.unidade || 'un', custo: Number(x.custo || 0),
         saldo: Number(x.quantidade_atual || 0), categoria: x.categoria || 'Sem categoria' })))
       setProdutos((p.data || [])
-        .filter(x => revenda.has(x.id) && x.controla_estoque !== false && (x.ativo !== false || x.pausado_por_estoque))
+        .filter(x => (comprado.has(x.id) || !prato.has(x.id)) && x.controla_estoque !== false && (x.ativo !== false || x.pausado_por_estoque))
         .map(x => ({ id: x.id, nome: x.nome, unidade: 'un', custo: Number(x.preco_custo || 0), saldo: saldo.get(x.id) ?? 0, categoria: x.categoria || 'Sem categoria' })))
       setUltima(u.error ? null : (u.data?.[0] || null))
     } catch (e) {
@@ -206,7 +210,7 @@ export default function ContagemEstoque({ empresaId }) {
         style={{ ...campo, width: '100%', textAlign: 'left', marginBottom: 10, boxSizing: 'border-box' }} />
 
       {!grupos.length && <div style={{ ...cartao, padding: 14, color: 'var(--text-muted)' }}>
-        {busca ? 'Nada com esse nome.' : aba === 'mp' ? 'Nenhum insumo cadastrado.' : 'Nenhum produto de revenda (só aparece o que já teve compra lançada).'}
+        {busca ? 'Nada com esse nome.' : aba === 'mp' ? 'Nenhum insumo cadastrado.' : 'Nenhum produto com estoque ligado.'}
       </div>}
 
       {grupos.map(({ cat, itens }) => {
