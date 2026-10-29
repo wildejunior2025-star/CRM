@@ -399,6 +399,41 @@ async function runPoll(sb: any) {
 // ─────────────────────────────────────────────────────────────────────
 // Busca detalhes do pedido no iFood e insere em pedidos_delivery
 // ─────────────────────────────────────────────────────────────────────
+// Km pelo caminho da moto, da loja até o cliente (mig 0427): é o km que paga o
+// motoboy do iFood, o mesmo que o link cobra do cliente. Mesmo cache e mesma
+// chave do geocodificar-google ('rota:'), então o par de pontos só é pago uma
+// vez. Qualquer falha devolve null e o pedido segue na linha reta.
+async function kmPelaRua(sb: any, empresaId: string, dLat: number, dLng: number): Promise<number | null> {
+  const key = Deno.env.get("GOOGLE_MAPS_KEY") ?? ""
+  if (!key) return null
+  const { data: e } = await sb.from("empresas").select("latitude, longitude, taxa_pela_rua").eq("id", empresaId).maybeSingle()
+  const oLat = Number(e?.latitude), oLng = Number(e?.longitude)
+  if (!e?.taxa_pela_rua || !oLat || !oLng) return null
+  const chave = `rota:${oLat.toFixed(4)},${oLng.toFixed(4)}>${dLat.toFixed(4)},${dLng.toFixed(4)}`
+  const corte = new Date(Date.now() - 30 * 86400_000).toISOString()
+  const { data: cache } = await sb.from("geocode_cache").select("partes").eq("chave", chave).gte("created_at", corte).maybeSingle()
+  if (cache?.partes?.km != null) return Number(cache.partes.km)
+  const ponto = (lat: number, lng: number) => ({ location: { latLng: { latitude: lat, longitude: lng } } })
+  for (const travelMode of ["TWO_WHEELER", "DRIVE"]) {
+    const r = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": "routes.distanceMeters,routes.duration" },
+      body: JSON.stringify({ origin: ponto(oLat, oLng), destination: ponto(dLat, dLng), travelMode, languageCode: "pt-BR", regionCode: "BR" }),
+    })
+    if (!r.ok) { if (r.status === 403) return null; continue }
+    const rota = (await r.json())?.routes?.[0]
+    if (rota?.distanceMeters != null) {
+      const km = Math.round(rota.distanceMeters / 10) / 100
+      const minutos = Math.round(parseInt(String(rota.duration ?? "0"), 10) / 60)
+      await sb.from("geocode_cache").upsert(
+        { chave, lat: dLat, lng: dLng, precisao: "ROTA", formatado: null, partes: { km, minutos, modo: travelMode }, created_at: new Date().toISOString() },
+        { onConflict: "chave" })
+      return km
+    }
+  }
+  return null
+}
+
 async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: string): Promise<boolean> {
   // Já existe? (idempotência — o polling pode repetir antes do ack)
   const { data: existente } = await sb
@@ -585,6 +620,14 @@ async function criarPedidoDoIfood(sb: any, cfg: Config, token: string, orderId: 
     // Corrida: outro polling inseriu primeiro (viola índice único) — ok
     if (String(error.message).includes("uq_pedidos_delivery_ifood_order")) return false
     throw new Error(`insert pedido: ${error.message}`)
+  }
+
+  // Km pela rua pro valor do motoboy (mig 0427). Não trava o pedido se falhar.
+  if (ehEntrega && lat != null && lng != null) {
+    try {
+      const km = await kmPelaRua(sb, cfg.empresa_id, Number(lat), Number(lng))
+      if (km != null) await sb.from("pedidos_delivery").update({ km_rua: km }).eq("ifood_order_id", novo.ifood_order_id)
+    } catch (e) { console.warn("[ifood] km pela rua falhou:", (e as Error).message) }
   }
 
   // Opção B (OPCIONAL, off por padrão): preenche o catálogo automaticamente
