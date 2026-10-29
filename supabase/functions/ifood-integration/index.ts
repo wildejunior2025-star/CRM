@@ -410,6 +410,11 @@ async function kmPelaRua(sb: any, empresaId: string, dLat: number, dLng: number)
   const oLat = Number(e?.latitude), oLng = Number(e?.longitude)
   // Só loja em que o sistema calcula o valor do motoboy usa este km (custa consulta).
   if (!e?.taxa_pela_rua || !e?.entregador_digita_valor || !oLat || !oLng) return null
+  // ...e só se algum motoboy dela tem o botão "iFood pela taxa da casa" (mig 0413);
+  // sem ele, a corrida do iFood paga a taxa do iFood e o km não é usado.
+  const { count } = await sb.from("profiles").select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresaId).eq("perfil", "entregador").eq("entregador_ifood_pelo_km", true)
+  if (!count) return null
   const chave = `rota:${oLat.toFixed(4)},${oLng.toFixed(4)}>${dLat.toFixed(4)},${dLng.toFixed(4)}`
   const corte = new Date(Date.now() - 30 * 86400_000).toISOString()
   const { data: cache } = await sb.from("geocode_cache").select("partes").eq("chave", chave).gte("created_at", corte).maybeSingle()
