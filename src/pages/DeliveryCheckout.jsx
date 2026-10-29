@@ -258,10 +258,16 @@ async function kmPelaRua({ empresaId, origem, destino }) {
   if (km == null) _kmRua.delete(chave) // erro não fica guardado: tenta de novo depois
   return km
 }
+// Km que entra na TABELA de faixas.
+//
+// `fator` (empresas.fator_rua) é quanto a rua dá a mais que a reta naquela
+// loja: as faixas foram montadas na reta, então os km da rua são divididos por
+// ele e a taxa média fica a de antes (28/10/2026). Fator 1 = km exato da rua.
+//
 // A conferência do banco ainda mede em linha reta e recusa taxa MENOR que a
-// dela. Pela rua quase sempre dá mais, mas o ponto do Google "encosta" na rua
-// e pode encurtar uns metros: nunca cobra abaixo da reta.
-const kmCobrado = (kmRua, kmReta) => (kmRua == null ? kmReta : Math.max(kmRua, kmReta))
+// dela: nunca cobra abaixo da reta.
+const kmCobrado = (kmRua, kmReta, fator = 1) =>
+  (kmRua == null ? kmReta : Math.max(kmRua / (Number(fator) >= 1 ? Number(fator) : 1), kmReta))
 
 function calcTaxaKm(faixas, distKm) {
   const arr = Array.isArray(faixas) ? [...faixas].sort((a, b) => a.km - b.km) : []
@@ -506,7 +512,7 @@ async function reverseGeocode(lat, lng) {
 //     que o buscador chutou. Aberto na cara, o cliente vê o erro sozinho.
 //   * modal — tela cheia, pro ajuste fino (arrastar num mapa pequeno, dentro de
 //     uma página que rola, é briga de dedo).
-function MapaLocalizador({ empresaIdMapa, pelaRua, storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
+function MapaLocalizador({ empresaIdMapa, pelaRua, fatorRua, storeLat, storeLng, raioKm, taxas, taxaBairro, bairroBloqueado, initial, endereco, exigeManual, embutido, autoLocalizar, forcado, onChange, onAmpliar, onConfirm, onClose }) {
   const mapRef = useRef(null)
   const mapObj = useRef(null)
   const pinRef = useRef(null)
@@ -742,7 +748,10 @@ function MapaLocalizador({ empresaIdMapa, pelaRua, storeLat, storeLng, raioKm, t
   }, [pelaRua, pontoMapa, definido]) // eslint-disable-line react-hooks/exhaustive-deps
   const rotaMapaAtual = pelaRua && rotaMapa?.para === pontoMapa ? rotaMapa : null
   const calculandoRotaMapa = pelaRua && definido && !!pontoMapa && !rotaMapaAtual
-  const dist = reta == null ? null : pelaRua ? kmCobrado(rotaMapaAtual?.km, reta) : reta
+  // `dist` é o km que o cliente LÊ (o da rua, quando há); `kmTabela` é o que
+  // entra nas faixas (ver kmCobrado).
+  const dist = reta == null ? null : pelaRua && rotaMapaAtual?.km != null ? Math.max(rotaMapaAtual.km, reta) : reta
+  const kmTabela = reta == null ? null : pelaRua ? kmCobrado(rotaMapaAtual?.km, reta, fatorRua) : reta
   // O BAIRRO MANDA, igual ao resumo do pedido.
   //
   // Aqui só se calculava pelo km. Mas quando o bairro do cliente tem taxa fixa
@@ -750,9 +759,9 @@ function MapaLocalizador({ empresaIdMapa, pelaRua, storeLat, storeLng, raioKm, t
   // CDBom, 02/10: pino a 2,3 km (faixa = R$ 7,00) em Nossa Senhora da
   // Apresentação (bairro = R$ 6,00); o mapa dizia 7 e o resumo cobrava 6, na
   // mesma tela. Bairro bloqueado não mostra taxa nenhuma: ali não tem entrega.
-  const taxaKm = dist != null ? calcTaxaKm(taxas, dist) : null
+  const taxaKm = kmTabela != null ? calcTaxaKm(taxas, kmTabela) : null
   const taxa = bairroBloqueado ? null : (taxaBairro != null ? Number(taxaBairro) : taxaKm)
-  const foraRaio = dist != null && raioKm && dist > Number(raioKm)
+  const foraRaio = reta != null && raioKm && reta > Number(raioKm)
   // Pino caiu longe do bairro digitado? (protege contra geocode/GPS errado que
   // infla a taxa). 3,5 km é folgado pra não reclamar de bairro grande.
   const distBairro = coord && bairroCentro ? haversineKm(coord.lat, coord.lng, bairroCentro.lat, bairroCentro.lng) : null
@@ -1083,7 +1092,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct, taxa_pela_rua')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct, taxa_pela_rua, fator_rua')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -1558,7 +1567,7 @@ export default function DeliveryCheckout() {
     // 2) km (fallback pros bairros não configurados)
     if (coordCliente && lojaEndereco?.latitude && lojaEndereco?.longitude && temFaixas) {
       const reta = haversineKm(coordCliente.lat, coordCliente.lng, Number(lojaEndereco.latitude), Number(lojaEndereco.longitude))
-      const dist = pelaRua ? kmCobrado(rotaAtual?.km, reta) : reta
+      const dist = pelaRua ? kmCobrado(rotaAtual?.km, reta, lojaEndereco?.fator_rua) : reta
       const t = calcTaxaKm(lojaEndereco.taxas_entrega_km, dist)
       if (t != null) return t
     }
@@ -2898,6 +2907,7 @@ export default function DeliveryCheckout() {
                         embutido
                         empresaIdMapa={state?.empresaId}
                         pelaRua={!!lojaEndereco?.taxa_pela_rua}
+                        fatorRua={lojaEndereco?.fator_rua}
                         storeLat={lojaEndereco.latitude}
                         storeLng={lojaEndereco.longitude}
                         raioKm={lojaEndereco.raio_entrega_km}
@@ -3316,6 +3326,7 @@ export default function DeliveryCheckout() {
         <MapaLocalizador
           empresaIdMapa={state?.empresaId}
           pelaRua={!!lojaEndereco?.taxa_pela_rua}
+                        fatorRua={lojaEndereco?.fator_rua}
           storeLat={lojaEndereco?.latitude}
           storeLng={lojaEndereco?.longitude}
           raioKm={lojaEndereco?.raio_entrega_km}
