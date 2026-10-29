@@ -92,6 +92,10 @@ export default function Estoque({ embutido = false }) {
   const [clientes, setClientes] = useState([])
   const [cascoSaldo, setCascoSaldo] = useState([])
   const [custos, setCustos] = useState({})          // produto_id -> preco_custo (pro valor parado)
+  const [codigos, setCodigos] = useState({})        // produto_id -> codigo_barras (bipar no computador)
+  // Bipar o código na lista é só no computador (leitor USB); no celular a linha fica limpa.
+  const [noComputador] = useState(() => typeof window !== 'undefined'
+    && !window.matchMedia?.('(pointer: coarse)').matches && window.innerWidth >= 900)
   const [catAberta, setCatAberta] = useState(() => new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -213,7 +217,7 @@ export default function Estoque({ embutido = false }) {
       supabase.from('clientes').select('id, nome').eq('ativo', true).order('nome'),
       supabase.from('casco_saldo').select('*').order('cliente_nome'),
       empresaId
-        ? fetchAll(() => supabase.from('produtos').select('id, preco_custo').eq('empresa_id', empresaId).eq('controla_estoque', true).order('id'))
+        ? fetchAll(() => supabase.from('produtos').select('id, preco_custo, codigo_barras').eq('empresa_id', empresaId).eq('controla_estoque', true).order('id'))
         : Promise.resolve({ data: [] }),
     ])
 
@@ -226,6 +230,7 @@ export default function Estoque({ embutido = false }) {
     setClientes(clientesRes.data ?? [])
     setCascoSaldo((cascoRes.data ?? []).filter((c) => c.saldo_cascos !== 0))
     setCustos(Object.fromEntries((custoRes.data ?? []).map((p) => [p.id, p.preco_custo])))
+    setCodigos(Object.fromEntries((custoRes.data ?? []).map((p) => [p.id, p.codigo_barras ?? ''])))
 
     setLoading(false)
   }
@@ -584,7 +589,11 @@ export default function Estoque({ embutido = false }) {
                           <div key={s.produto_id} style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)',
                             ...(sit === 'zerado' ? { background: 'rgba(220,38,38,.05)', boxShadow: 'inset 3px 0 0 #dc2626' } : sit === 'baixo' ? { boxShadow: 'inset 3px 0 0 #f59e0b' } : {}) }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
-                              <span style={{ fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{s.nome}</span>
+                              <span style={{ fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere', flex: 1 }}>{s.nome}</span>
+                              {noComputador && (
+                                <CampoCodigo produtoId={s.produto_id} empresaId={empresaId} valor={codigos[s.produto_id] ?? ''}
+                                  aoSalvar={(c) => setCodigos((m) => ({ ...m, [s.produto_id]: c }))} />
+                              )}
                               <strong style={{ whiteSpace: 'nowrap' }}>{custo > 0 ? brl(valorDe(s)) : '—'}</strong>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 3, fontSize: 13.5 }}>
@@ -913,5 +922,58 @@ export default function Estoque({ embutido = false }) {
         </div>
       )}
     </div>
+  )
+}
+
+// Campo de código de barras na linha do produto (só computador). O leitor USB digita
+// o código e manda Enter: salva na hora e pula pro campo do próximo produto, pra bipar
+// a prateleira inteira em sequência sem tocar no mouse.
+function CampoCodigo({ produtoId, empresaId, valor, aoSalvar }) {
+  const [texto, setTexto] = useState(valor)
+  const [estado, setEstado] = useState(null) // null | 'salvando' | 'ok' | mensagem de erro
+  useEffect(() => { setTexto(valor) }, [valor])
+
+  async function salvar(el) {
+    const codigo = texto.trim()
+    if (codigo === (valor ?? '')) return true
+    setEstado('salvando')
+    const { error } = await supabase.from('produtos').update({ codigo_barras: codigo || null })
+      .eq('id', produtoId).eq('empresa_id', empresaId)
+    if (error) {
+      if (error.code === '23505') {
+        const { data } = await supabase.from('produtos').select('nome').eq('empresa_id', empresaId)
+          .eq('codigo_barras', codigo).is('arquivado_em', null).limit(1)
+        setEstado(`Já é do "${data?.[0]?.nome ?? 'outro produto'}"`)
+      } else setEstado(error.message)
+      el?.select()
+      return false
+    }
+    aoSalvar(codigo)
+    setEstado('ok')
+    return true
+  }
+
+  async function aoTeclar(e) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const el = e.currentTarget
+    if (!(await salvar(el))) return
+    const todos = [...document.querySelectorAll('input[data-campo-codigo]')]
+    const prox = todos[todos.indexOf(el) + 1]
+    if (prox) { prox.focus(); prox.select() }
+  }
+
+  const erro = estado && estado !== 'ok' && estado !== 'salvando'
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      {estado === 'ok' && <span style={{ color: '#16a34a', fontSize: 12.5, fontWeight: 700 }}>✓ salvo</span>}
+      {erro && <span style={{ color: 'var(--danger, #dc2626)', fontSize: 12.5, fontWeight: 700 }}>{estado}</span>}
+      <input data-campo-codigo="" value={texto} placeholder="▥ Bipar código" autoComplete="off" spellCheck={false}
+        onChange={(e) => { setTexto(e.target.value); setEstado(null) }}
+        onKeyDown={aoTeclar} onBlur={(e) => salvar(e.currentTarget)} onFocus={(e) => e.currentTarget.select()}
+        style={{ width: 170, padding: '5px 9px', fontSize: 13, borderRadius: 8, fontFamily: 'monospace',
+          border: `1px solid ${erro ? 'var(--danger, #dc2626)' : valor ? '#16a34a' : 'var(--border)'}`,
+          background: 'var(--bg-card, transparent)', color: 'var(--text)' }} />
+    </span>
   )
 }
