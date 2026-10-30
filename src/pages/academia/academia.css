@@ -296,3 +296,14 @@ body { overflow-x: hidden; }
   border: 1px solid rgba(255,255,255,.25);
 }
 .ac-rec-sair:active { background: rgba(0,0,0,.85); }
+/* Liberar na mao, do lado oposto ao sair, pra nao trocar um pelo outro
+   com a tela de lado. Roxo porque e acao, nao saida. */
+.ac-rec-abrir {
+  position: absolute; z-index: 20;
+  top: calc(10px + env(safe-area-inset-top));
+  right: calc(10px + env(safe-area-inset-right));
+  background: var(--primary); color: #fff; border: none;
+  font-weight: 700; font-size: 15px; padding: 12px 20px; border-radius: 999px;
+}
+.ac-rec-abrir:active { filter: brightness(.85); }
+.ac-rec-abrir:disabled { opacity: .6; }

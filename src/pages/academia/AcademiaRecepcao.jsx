@@ -335,6 +335,14 @@ export default function AcademiaRecepcao() {
           lateral e, no celular, fora da tela: pra sair da Recepção a pessoa
           tinha que adivinhar que precisava rolar a tela pra baixo. */}
       <Link to="/" className="ac-rec-sair" title="Voltar para os alunos">← Alunos</Link>
+      {/* Liberar na mão sem sair da recepção: visitante, aluno que o dono
+          deixou entrar, rosto que não pegou. Antes era preciso voltar pros
+          Alunos só pra apertar o botão lá de cima — com fila no balcão. */}
+      <button type="button" className="ac-rec-abrir" onClick={() => abrirCatraca(null)}
+        disabled={catraca === 'abrindo'}
+        title="Soltar a catraca uma vez, sem reconhecer ninguém">
+        {catraca === 'abrindo' ? '🔓 Abrindo...' : '🔓 Abrir catraca'}
+      </button>
       <div className="ac-rec-video-caixa">
         <video ref={videoRef} className="ac-video" playsInline muted />
         {estado.fase !== 'rodando' && (
