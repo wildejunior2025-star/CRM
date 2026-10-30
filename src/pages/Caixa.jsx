@@ -118,6 +118,11 @@ export default function Caixa() {
   const cego = caixaCego && !isAdmin
   const [naoBateu, setNaoBateu] = useState(null)     // formas que não bateram: ['dinheiro', ...]
   const [liberando, setLiberando] = useState(false)
+  // Código de 4 dígitos que o dono recebe no WhatsApp quando o caixa não bate e
+  // passa pro vendedor. Evita o dono ter que entrar no sistema e redigitar tudo.
+  const [codigoLib, setCodigoLib] = useState('')
+  const [codigoErro, setCodigoErro] = useState('')
+  const [fechouOk, setFechouOk] = useState(false)
 
   // Regra "abre com o que fechou" (por loja). Quando está ligada, a abertura não
   // é digitada: vem do último caixa fechado. O banco trava do mesmo jeito — isto
@@ -835,6 +840,51 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     }
 
     setShowFechamento(false)
+    loadAll()
+  }
+
+  // O vendedor digita o código que o dono mandou. Libera e fecha na mesma ação:
+  // pra ele é um passo só, que é o ponto de existir o código.
+  async function fecharComCodigo() {
+    if (!caixaAtual?.id) return
+    const cod = codigoLib.replace(/\D/g, '')
+    if (cod.length !== 4) { setCodigoErro('Digite os 4 números.'); return }
+    setCodigoErro('')
+    setLiberando(true)
+
+    const { error: errLib } = await supabase.rpc('liberar_fechamento_por_codigo', {
+      p_caixa_id: caixaAtual.id,
+      p_codigo: cod,
+    })
+    if (errLib) {
+      setLiberando(false)
+      // O banco não diz quantas tentativas sobraram, de propósito.
+      setCodigoErro(
+        errLib.message?.includes('CODIGO_EXPIRADO')
+          ? 'Esse código venceu. Tente fechar de novo que o dono recebe um novo.'
+          : 'Código errado. Confira com o dono.',
+      )
+      return
+    }
+
+    const { error: errFechar } = await supabase.rpc('fechar_caixa', {
+      p_caixa_id: caixaAtual.id,
+      p_valor_fechamento: Number(valorFechamento),
+      p_observacoes: obsFechamento || null,
+      p_valor_fechamento_pix: valorFechamentoPix === '' ? null : Number(valorFechamentoPix),
+      p_valor_fechamento_cartao: valorFechamentoCartao === '' ? null : Number(valorFechamentoCartao),
+      p_conferido_vales: montarValesConferidos(),
+    })
+    setLiberando(false)
+    if (errFechar) { setCodigoErro(errFechar.message); return }
+
+    // Nada de valor pro vendedor: ele continua sem saber quanto faltou ou
+    // sobrou. A diferença sai na mensagem de fechamento, que vai pro dono.
+    setCodigoLib('')
+    setNaoBateu(null)
+    setShowFechamento(false)
+    setFechouOk(true)
+    setTimeout(() => setFechouOk(false), 4000)
     loadAll()
   }
 
@@ -2274,6 +2324,46 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                       {caixaAtual.liberado_em ? '✅ O dono liberou — clique em Fechar caixa.' : '⏳ Aguardando o dono…'}
                     </div>
                   )}
+
+                  {/* O dono pode resolver pelo WhatsApp: ele recebe um código de
+                      4 dígitos junto do aviso e dita pro vendedor. */}
+                  {!caixaAtual?.liberado_em && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed rgba(239,68,68,.35)' }}>
+                      <div style={{ fontSize: 12.5, marginBottom: 6 }}>
+                        O dono te passou um <strong>código</strong>? Digite aqui:
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <input
+                          id="codigo-liberacao"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={4}
+                          value={codigoLib}
+                          onChange={e => { setCodigoLib(e.target.value.replace(/\D/g, '')); setCodigoErro('') }}
+                          placeholder="0000"
+                          style={{
+                            width: 110, padding: '10px 12px', borderRadius: 8,
+                            border: '1.5px solid var(--border)', fontSize: 20, fontWeight: 800,
+                            letterSpacing: 6, textAlign: 'center',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={fecharComCodigo}
+                          disabled={liberando || codigoLib.length !== 4}
+                        >
+                          {liberando ? 'Fechando...' : 'Fechar com o código'}
+                        </button>
+                      </div>
+                      {codigoErro && (
+                        <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: '#dc2626' }}>
+                          {codigoErro}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2291,6 +2381,24 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Fechou com o código do dono. Só isso: sem valor, sem diferença — quem
+          recebe a conta é o dono, na mensagem de fechamento que já existe. */}
+      {fechouOk && (
+        <div
+          role="status"
+          style={{
+            position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+            bottom: `calc(24px + env(safe-area-inset-bottom, 0px))`, zIndex: 9999,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 16px', borderRadius: 999,
+            background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 14,
+            boxShadow: '0 8px 24px rgba(0,0,0,.18)', maxWidth: 'calc(100vw - 32px)',
+          }}
+        >
+          ✅ Seu caixa foi fechado com sucesso
         </div>
       )}
     </div>
