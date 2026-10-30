@@ -37,6 +37,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
   // banco: ninguém conseguia ligar nem desligar sem eu mexer no SQL.
   const [caixaPorDia, setCaixaPorDia] = useState(false)
   const [caixaAbreComFechamento, setCaixaAbreComFechamento] = useState(false)
+  const [caixaCego, setCaixaCego] = useState(false)
   // Papel que sai sozinho (migs 0386 / 0388). Padrão ligado nos dois: é como
   // toda loja trabalha hoje, e as chaves só existem pra quem não quer o papel.
   const [imprimirCupomBalcao, setImprimirCupomBalcao] = useState(true)
@@ -393,6 +394,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setFormasPagamento(formasAtivas(empresa))
     setCaixaPorDia(!!empresa.caixa_por_dia)
     setCaixaAbreComFechamento(!!empresa.caixa_abre_com_fechamento)
+    setCaixaCego(!!empresa.caixa_cego)
     // !== false: loja que nunca mexeu (coluna nova, ou campo que não veio na
     // consulta) continua imprimindo, que é o jeito de hoje.
     setImprimirCupomBalcao(empresa.imprimir_cupom_balcao !== false)
@@ -574,6 +576,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
         taxa_cartao_pct: pctNum(taxasCartao.taxa_cartao_pct),
         caixa_por_dia: caixaPorDia,
         caixa_abre_com_fechamento: caixaAbreComFechamento,
+        caixa_cego: caixaCego,
         imprimir_cupom_balcao: imprimirCupomBalcao,
         imprimir_conta_mesa: imprimirContaMesa,
         repasse_credito_pct: cobrarDoCliente ? pctNum(repasses.repasse_credito_pct) : 0,
@@ -1100,6 +1103,23 @@ export default function MinhaLoja({ secao = 'loja' }) {
                 <strong>Desligado</strong>: a abertura começa em R$ 0,00. É o certo pra
                 quem recolhe todo o dinheiro no fim do expediente — senão o troco que
                 ficou aparece como sobra todo dia.
+              </span>
+            </span>
+          </label>
+
+          {/* Caixa cego (mig 0430): vale só pro VENDEDOR; o dono vê tudo como sempre. */}
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', marginTop: 14 }}>
+            <input type="checkbox" checked={caixaCego} style={{ marginTop: 3, width: 18, height: 18, flexShrink: 0 }}
+              onChange={e => setCaixaCego(e.target.checked)} />
+            <span>
+              <strong style={{ fontSize: 14 }}>Vendedor não vê o valor do caixa</strong>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 3 }}>
+                O vendedor abre o caixa e lança sangria e suprimento, mas <strong>não vê
+                quanto tem</strong>. No fechamento ele digita o que contou: se não bater
+                com o sistema, <strong>o caixa não fecha sozinho</strong> — ele anota o que
+                faltou ou pede a sua liberação (aparece na tela do Caixa pra você liberar).
+                <br />
+                <strong>Desligado</strong>: o vendedor vê e fecha o caixa normalmente.
               </span>
             </span>
           </label>

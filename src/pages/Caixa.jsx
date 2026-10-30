@@ -109,6 +109,17 @@ export default function Caixa() {
   const [carregandoHist, setCarregandoHist] = useState(false)
   const [usuarios, setUsuarios] = useState([])
 
+  // ── CAIXA CEGO (mig 0430) ──
+  // Loja com a chave ligada: o VENDEDOR abre e lança os valores, mas não vê quanto
+  // tem no caixa, e só fecha se o contado bater (quem confere é o banco, em
+  // fechar_caixa). Não bateu: anota o que faltou ou pede ao dono pra liberar.
+  // O admin vê e fecha tudo como sempre.
+  const [caixaCego, setCaixaCego] = useState(false)
+  const cego = caixaCego && !isAdmin
+  const [naoBateu, setNaoBateu] = useState(null)     // formas que não bateram: ['dinheiro', ...]
+  const [pedindoLib, setPedindoLib] = useState(false)
+  const [liberando, setLiberando] = useState(false)
+
   // Regra "abre com o que fechou" (por loja). Quando está ligada, a abertura não
   // é digitada: vem do último caixa fechado. O banco trava do mesmo jeito — isto
   // aqui é só pra tela não pedir um número que seria ignorado.
@@ -400,10 +411,11 @@ export default function Caixa() {
       caixaAtivaQuery,
       isAdmin ? supabase.from('profiles').select('id, nome, email') : Promise.resolve({ data: [] }),
       profile?.empresa_id
-        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento, caixa_por_dia').eq('id', profile.empresa_id).maybeSingle()
+        ? supabase.from('empresas').select('taxa_cartao_pct, taxa_credito_pct, taxa_debito_pct, caixa_abre_com_fechamento, caixa_por_dia, caixa_cego').eq('id', profile.empresa_id).maybeSingle()
         : Promise.resolve({ data: null }),
     ])
     setRegraFechamento(!!empresaRes.data?.caixa_abre_com_fechamento)
+    setCaixaCego(!!empresaRes.data?.caixa_cego)
     // RPC (e não select) porque pela RLS o vendedor não enxerga o caixa que
     // outra pessoa fechou — e é justamente esse valor que ele precisa ver.
     const { data: fech } = await supabase.rpc('ultimo_fechamento_caixa')
@@ -717,13 +729,17 @@ export default function Caixa() {
   function openFechamento() {
     // Sem o resumo carregado o esperado é zero — melhor abrir vazio do que
     // sugerir R$ 0,00 e alguém confirmar sem olhar.
-    setValorFechamento(resumo ? valorEsperadoDinheiro.toFixed(2) : '')
-    setValorFechamentoPix(resumo ? valorEsperadoPix.toFixed(2) : '')
-    setValorFechamentoCartao(resumo ? valorEsperadoCartao.toFixed(2) : '')
+    // Caixa cego: tudo vazio. Preencher com o esperado entregaria o número que o
+    // vendedor não pode ver — ele tem que CONTAR.
+    setValorFechamento(resumo && !cego ? valorEsperadoDinheiro.toFixed(2) : '')
+    setValorFechamentoPix(resumo && !cego ? valorEsperadoPix.toFixed(2) : '')
+    setValorFechamentoCartao(resumo && !cego ? valorEsperadoCartao.toFixed(2) : '')
     setObsFechamento('')
     setFormError(null)
+    setNaoBateu(null)
     setValesEsperados({}); setValesContados({})
     setShowFechamento(true)
+    if (cego) return
     carregarValesPorBandeira().then(v => {
       setValesEsperados(v)
       setValesContados(Object.fromEntries(Object.entries(v).map(([k, n]) => [k, n > 0 ? n.toFixed(2) : ''])))
@@ -800,6 +816,12 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     setSaving(false)
 
     if (rpcError) {
+      // O banco recusou porque o contado não bateu (só acontece pro vendedor em
+      // loja de caixa cego). Ele diz QUAIS formas, nunca quanto.
+      if (rpcError.message?.startsWith('CAIXA_NAO_BATEU')) {
+        setNaoBateu(rpcError.message.split(':')[1]?.split(',').filter(Boolean) ?? [])
+        return
+      }
       setFormError(rpcError.message)
       return
     }
@@ -807,6 +829,38 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     setShowFechamento(false)
     loadAll()
   }
+
+  async function pedirLiberacao() {
+    if (!caixaAtual?.id) return
+    setPedindoLib(true)
+    const { error: rpcError } = await supabase.rpc('pedir_liberacao_fechamento', { p_caixa_id: caixaAtual.id })
+    setPedindoLib(false)
+    if (rpcError) { setFormError(rpcError.message); return }
+    setCaixaAtual(c => ({ ...c, liberacao_pedida_em: new Date().toISOString() }))
+  }
+
+  async function liberarFechamento() {
+    if (!caixaAtual?.id) return
+    setLiberando(true)
+    const { error: rpcError } = await supabase.rpc('liberar_fechamento_caixa', { p_caixa_id: caixaAtual.id })
+    setLiberando(false)
+    if (rpcError) { setError(rpcError.message); return }
+    setCaixaAtual(c => ({ ...c, liberado_em: new Date().toISOString() }))
+  }
+
+  // Quem pediu espera o dono, e o dono espera o pedido: sem tempo real aqui,
+  // olha o caixa de tempos em tempos (é uma linha só, só em loja de caixa cego).
+  useEffect(() => {
+    const id = caixaAtual?.id
+    if (!caixaCego || !id || caixaAtual.liberado_em) return
+    if (!(isAdmin || caixaAtual.liberacao_pedida_em)) return
+    const t = setInterval(async () => {
+      const { data } = await supabase.from('caixas')
+        .select('liberacao_pedida_em, liberacao_pedida_por, liberado_em').eq('id', id).maybeSingle()
+      if (data) setCaixaAtual(c => (c && c.id === id ? { ...c, ...data } : c))
+    }, 15000)
+    return () => clearInterval(t)
+  }, [caixaCego, caixaAtual?.id, caixaAtual?.liberado_em, caixaAtual?.liberacao_pedida_em, isAdmin])
 
   // Só o que é EM DINHEIRO mexe no caixa físico. Sangria/suprimento por PIX não entra
   // aqui (fica registrado, mas não altera o dinheiro esperado na gaveta).
@@ -818,7 +872,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
     : 0
 
   const diferencaFechamento =
-    showFechamento && valorFechamento !== ''
+    showFechamento && !cego && valorFechamento !== ''
       ? Number(valorFechamento) - valorEsperadoDinheiro
       : null
 
@@ -831,7 +885,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       Number(resumo.total_sangrias_pix || 0)
     : 0
   const diferencaFechamentoPix =
-    showFechamento && valorFechamentoPix !== ''
+    showFechamento && !cego && valorFechamentoPix !== ''
       ? Number(valorFechamentoPix) - valorEsperadoPix
       : null
 
@@ -853,7 +907,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       Number(resumo.total_sangrias_cartao || 0)
     : 0
   const diferencaFechamentoCartao =
-    showFechamento && valorFechamentoCartao !== ''
+    showFechamento && !cego && valorFechamentoCartao !== ''
       ? Number(valorFechamentoCartao) - valorEsperadoCartao
       : null
 
@@ -993,14 +1047,18 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                   : new Date(caixaAtual.aberto_em).toLocaleString('pt-BR')}
               </div>
             </div>
-            <div>
-              <div className="label">💵 Dinheiro inicial</div>
-              <div className="value-sm">R$ {Number(caixaAtual.valor_abertura).toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="label">📱 PIX inicial</div>
-              <div className="value-sm">R$ {Number(caixaAtual.valor_abertura_pix || 0).toFixed(2)}</div>
-            </div>
+            {!cego && (
+              <>
+                <div>
+                  <div className="label">💵 Dinheiro inicial</div>
+                  <div className="value-sm">R$ {Number(caixaAtual.valor_abertura).toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="label">📱 PIX inicial</div>
+                  <div className="value-sm">R$ {Number(caixaAtual.valor_abertura_pix || 0).toFixed(2)}</div>
+                </div>
+              </>
+            )}
             {caixaAtual.observacoes_abertura && (
               <div>
                 <div className="label">Observações</div>
@@ -1008,6 +1066,42 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
               </div>
             )}
           </div>
+
+          {/* DONO: o vendedor não conseguiu fechar porque o caixa não bateu e pediu
+              liberação. Liberar deixa ele fechar mesmo assim; a diferença fica
+              guardada no caixa. */}
+          {caixaCego && isAdmin && caixaAtual?.id && caixaAtual.liberacao_pedida_em && !caixaAtual.liberado_em && (
+            <div className="card" style={{ marginBottom: 12, border: '1.5px solid #f59e0b', background: 'rgba(245,158,11,.10)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <div style={{ fontWeight: 800, color: '#d97706', marginBottom: 2 }}>
+                  🔔 {nomeUsuario(caixaAtual.liberacao_pedida_por)} pediu liberação pra fechar o caixa
+                </div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  O que ele contou não bateu com o sistema. Confira os valores abaixo; se estiver tudo certo,
+                  libere e ele fecha. Você também pode fechar o caixa direto, pelo seu login.
+                </div>
+              </div>
+              <button type="button" className="btn btn-primary" disabled={liberando} onClick={liberarFechamento}>
+                {liberando ? 'Liberando...' : 'Liberar fechamento'}
+              </button>
+            </div>
+          )}
+          {caixaCego && isAdmin && caixaAtual?.liberado_em && (
+            <div style={{ marginBottom: 12, fontSize: 12.5, color: 'var(--text-muted)' }}>
+              ✅ Fechamento liberado — o vendedor já pode fechar este caixa.
+            </div>
+          )}
+          {/* VENDEDOR: em que pé está o pedido. */}
+          {cego && caixaAtual?.id && caixaAtual.liberacao_pedida_em && (
+            <div className="card" style={{ marginBottom: 12, border: `1.5px solid ${caixaAtual.liberado_em ? '#16a34a' : '#f59e0b'}`,
+              background: caixaAtual.liberado_em ? 'rgba(22,163,74,.08)' : 'rgba(245,158,11,.10)' }}>
+              <div style={{ fontWeight: 800 }}>
+                {caixaAtual.liberado_em
+                  ? '✅ O dono liberou. Pode fechar o caixa.'
+                  : '⏳ Aguardando o dono liberar o fechamento…'}
+              </div>
+            </div>
+          )}
 
           <div className="caixa-actions" style={{ marginBottom: 20 }}>
             <button className="btn btn-secondary" onClick={() => openMovimento('sangria')}>
@@ -1029,7 +1123,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
             )}
           </div>
 
-          {resumo && (
+          {resumo && !cego && (
             <>
             {/* Faturamento total — soma de TODAS as formas, em destaque (cor diferente). */}
             <div className="card" style={{ marginBottom: 14, border: '2px solid var(--primary)', background: 'var(--primary-bg, rgba(124,58,237,.08))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -1293,6 +1387,9 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
         </>
       )}
 
+      {/* Caixa cego: o histórico e o total da semana são só valores de caixa — o
+          vendedor não os vê. */}
+      {!cego && (<>
       <h2 className="caixa-table-title">{porDia ? 'Histórico de dias' : 'Histórico de caixas'}</h2>
 
       {/* Uma semana por vez. As setas andam; "Hoje" volta pra semana atual e
@@ -1706,6 +1803,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
           )}
         </div>
       )}
+      </>)}
 
       {showAbertura && (
         <div className="modal-overlay" onClick={() => setShowAbertura(false)}>
@@ -1725,15 +1823,15 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
                         <div>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>💵 Dinheiro</div>
-                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_dinheiro || 0).toFixed(2)}</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>{cego ? '•••' : 'R$ ' + Number(ultimoFech.valor_dinheiro || 0).toFixed(2)}</div>
                         </div>
                         <div>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>📱 PIX</div>
-                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_pix || 0).toFixed(2)}</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>{cego ? '•••' : 'R$ ' + Number(ultimoFech.valor_pix || 0).toFixed(2)}</div>
                         </div>
                         <div>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>💳 Cartão</div>
-                          <div style={{ fontSize: 20, fontWeight: 800 }}>R$ {Number(ultimoFech.valor_cartao || 0).toFixed(2)}</div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>{cego ? '•••' : 'R$ ' + Number(ultimoFech.valor_cartao || 0).toFixed(2)}</div>
                         </div>
                       </div>
                       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 8 }}>
@@ -1953,7 +2051,14 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
         <div className="modal-overlay" onClick={() => setShowFechamento(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>{porDia ? 'Fechar o dia ' + ddmmDeYMD(dia) : 'Fechar caixa'}</h2>
-            <p className="caixa-esperado">
+            {cego && (
+              <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Conte o que tem e digite. <strong>Se não bater com o sistema, o caixa não fecha</strong> —
+                aí anote o que faltou (venda, sangria ou suprimento) ou peça ao dono pra liberar.
+                Se não tem PIX ou maquineta, ponha 0.
+              </p>
+            )}
+            {!cego && <p className="caixa-esperado">
               Faturamento total: <strong style={{ color: 'var(--primary)' }}>R$ {faturamentoTotal.toFixed(2)}</strong><br />
               {/* Avisa ANTES de contar a gaveta por que o faturamento e maior
                   que o esperado: parte da venda caiu no iFood / no Mercado Pago. */}
@@ -1965,7 +2070,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
               {valeDe(resumo) > 0 && (
                 <><br />Recebido em vales: <strong>R$ {valeDe(resumo).toFixed(2)}</strong> — confira na maquineta de cada um, abaixo</>
               )}
-            </p>
+            </p>}
             <form onSubmit={handleFechar}>
               <div className="form-grid">
                 <div className="form-field full">
@@ -1983,7 +2088,9 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                     autoFocus
                   />
                   <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Já veio com o esperado. <strong>Conte a gaveta</strong> — se der outro valor, apague e ponha o que contou.
+                    {cego
+                      ? <><strong>Conte a gaveta</strong> e digite o valor.</>
+                      : <>Já veio com o esperado. <strong>Conte a gaveta</strong> — se der outro valor, apague e ponha o que contou.</>}
                   </span>
                 </div>
                 {diferencaFechamento !== null && !Number.isNaN(diferencaFechamento) && (
@@ -2017,7 +2124,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                     value={valorFechamentoPix}
                     onChange={(e) => setValorFechamentoPix(e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    placeholder={`Esperado: ${valorEsperadoPix.toFixed(2)}`}
+                    placeholder={cego ? '0.00' : `Esperado: ${valorEsperadoPix.toFixed(2)}`}
                   />
                 </div>
                 {diferencaFechamentoPix !== null && !Number.isNaN(diferencaFechamentoPix) && (
@@ -2054,17 +2161,17 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                     value={valorFechamentoCartao}
                     onChange={(e) => setValorFechamentoCartao(e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    placeholder={`Esperado: ${valorEsperadoCartao.toFixed(2)}`}
+                    placeholder={cego ? '0.00' : `Esperado: ${valorEsperadoCartao.toFixed(2)}`}
                   />
                   {/* A conta mostra o que CAIU (líquido). Deixar aqui o valor
                       cheio da venda fazia o esperado não fechar com a conta de
                       cima — a taxa sumia no meio sem explicação. */}
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                  {!cego && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                     Abriu com R$ {Number(caixaAtual.valor_abertura_cartao || 0).toFixed(2)} · caiu na conta R$ {totalCartaoLiquido.toFixed(2)}
                     {totalCartaoSistema - totalCartaoLiquido > 0.005
                       && ` (venda R$ ${totalCartaoSistema.toFixed(2)} − maquineta R$ ${(totalCartaoSistema - totalCartaoLiquido).toFixed(2)})`}
                     {Number(resumo?.total_sangrias_cartao || 0) > 0 && ` · sangrou R$ ${Number(resumo.total_sangrias_cartao).toFixed(2)}`}
-                  </span>
+                  </span>}
                 </div>
                 {diferencaFechamentoCartao !== null && !Number.isNaN(diferencaFechamentoCartao) && (
                   <div className="form-field full">
@@ -2096,7 +2203,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                 {/* VALES: uma conferência por bandeira, cada uma com a maquineta dela.
                     Aparece pra quem aceita o vale (ligado em Minha Loja → Pagamento) ou
                     que recebeu algum hoje — loja que não usa não vê nada disso. */}
-                {(() => {
+                {!cego && (() => {
                   const ligadas = Array.isArray(empresa?.formas_pagamento) ? empresa.formas_pagamento : []
                   const marcas = FORMAS_VALE.filter(v => ligadas.includes(v.value) || Number(valesEsperados[v.value] || 0) > 0)
                   if (!marcas.length) return null
@@ -2151,6 +2258,29 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
               </div>
 
               {formError && <p className="error-text">{formError}</p>}
+
+              {/* O banco recusou: não bateu. Diz qual forma, nunca quanto. */}
+              {cego && naoBateu && (
+                <div style={{ margin: '4px 0 12px', padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ef4444', background: 'rgba(239,68,68,.08)' }}>
+                  <div style={{ fontWeight: 800, color: '#dc2626', marginBottom: 4 }}>
+                    ❌ O caixa não bateu{naoBateu.length > 0 && ': ' + naoBateu.map(f => ({ dinheiro: 'dinheiro', pix: 'PIX', cartao: 'maquineta' }[f] ?? f)).join(', ')}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Veja se falta anotar alguma venda, sangria ou suprimento, e conte de novo.
+                    Se estiver tudo certo e mesmo assim não bate, peça ao dono pra liberar.
+                  </div>
+                  {caixaAtual?.liberacao_pedida_em ? (
+                    <div style={{ marginTop: 8, fontWeight: 700, fontSize: 13 }}>
+                      {caixaAtual.liberado_em ? '✅ O dono liberou — clique em Fechar caixa.' : '⏳ Pedido enviado. Aguarde o dono liberar.'}
+                    </div>
+                  ) : (
+                    <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }}
+                      disabled={pedindoLib} onClick={pedirLiberacao}>
+                      {pedindoLib ? 'Enviando...' : 'Pedir liberação ao dono'}
+                    </button>
+                  )}
+                </div>
+              )}
 
               <div className="modal-actions">
                 <button
