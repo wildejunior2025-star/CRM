@@ -96,6 +96,11 @@ const SAUDACAO = /^(oi+|ola+|alo+|opa+|e ai|hey|bom dia|boa tarde|boa noite|tudo
 const PEDE_CARDAPIO =
   /^((me |mim )?(manda|mande|mandar|envia|enviar|envie|favor enviar|passa|passar|tem|queria|quero|gostaria de|gostaria do|gostaria de ver|qual e o|quero ver|ver|poderia enviar|poderia mandar|pode mandar|pode enviar) )?(o |a )?(cardapio|menu|link|link da loja|cardapio de hoje)$/
 
+// Confirmação seca: o cliente só acusou que leu. Não pergunta, não pede, não
+// espera resposta. Emoji sozinho entra aqui também (👍, 🙏, ❤️).
+const SO_UM_OK =
+  /^[\s\p{Extended_Pictographic}‍️\p{Emoji_Modifier}]*(ok+|okay|oka|blz|beleza|certo|ta bom|tudo bem|t[áa] bom|t[áa] certo|entendi|perfeito|show|valeu|vlw|obrigad[oa]|obg|obgda|brigad[oa]|grat[oa]|gratid[ãa]o|isso|sim|uhum|aham|j[óo]ia|combinado|fechou|otimo|[óo]timo)?[\s!.,\p{Extended_Pictographic}‍️\p{Emoji_Modifier}]*$/iu
+
 function soAbrindoConversa(txt: string): boolean {
   let t = String(txt ?? "")
     .normalize("NFD").replace(/[̀-ͯ]/g, "")   // tira acento
@@ -108,15 +113,24 @@ function soAbrindoConversa(txt: string): boolean {
   // como se fosse uma saudação.
   t = t.replace(/\b(por favor|porfavor|pfvr?|pff)\b/g, " ").replace(/\s+/g, " ").trim()
   if (!t) return false
-  // Tira UMA saudação do começo, se tiver ("bom dia cardápio" é as duas coisas).
-  for (const s of ["bom dia", "boa tarde", "boa noite", "tudo bem", "tudo bom", "e ai"]) {
-    if (t === s) return true
-    if (t.startsWith(s + " ")) { t = t.slice(s.length).trim(); break }
-  }
-  const primeira = t.split(" ")[0]
-  if (SAUDACAO.test(primeira)) {
-    if (t === primeira) return true
-    t = t.slice(primeira.length).trim()
+  // Tira as saudações do começo, uma atrás da outra. São várias porque a
+  // pessoa cumprimenta duas vezes sem pensar: "Olá bom dia" é o jeito mais
+  // comum de abrir conversa, e com uma volta só sobrava "bom dia" — que não é
+  // pedido de cardápio, então caía na IA e cobrava crédito (Agv, 30/10/2026).
+  const DUPLAS = ["bom dia", "boa tarde", "boa noite", "tudo bem", "tudo bom", "e ai"]
+  for (let volta = 0; volta < 4; volta++) {
+    const antes = t
+    for (const s of DUPLAS) {
+      if (t === s) return true
+      if (t.startsWith(s + " ")) { t = t.slice(s.length).trim(); break }
+    }
+    const primeira = t.split(" ")[0]
+    if (SAUDACAO.test(primeira)) {
+      if (t === primeira) return true
+      t = t.slice(primeira.length).trim()
+    }
+    if (t === antes) break            // não tirou nada: o que sobrou é conteúdo
+    if (!t) return true               // era só saudação
   }
   return PEDE_CARDAPIO.test(t)
 }
@@ -4015,6 +4029,30 @@ serve(async (req) => {
         ? Promise.resolve()
         : espelharNoChat(supabase, empresaId, phone, text, "cliente", false, coordsMsg, midiaChat),
     ])
+    // ── "OK" DEPOIS DE UM AVISO DE PEDIDO: calar é a resposta ───────────────
+    // Agv, 30/10/2026, 11:17. O pedido #2 tinha acabado de SAIR PRA ENTREGA, o
+    // cliente respondeu "Ok" e o robô emendou "Tudo certo! O que você gostaria
+    // de pedir hoje?" — oferecendo cardápio pra quem está com a comida a
+    // caminho. Fica ridículo, e é o mesmo erro do comprovante.
+    //
+    // "Ok" não pede nada. Loja nenhuma responde isso. A trava só vale quando a
+    // última fala do robô foi um AVISO AUTOMÁTICO de pedido: aí não houve
+    // pergunta, então o "ok" não é resposta a nada e não tem o que engolir.
+    if (!retomada && SO_UM_OK.test(text)) {
+      const { data: ultimaDoBot } = await supabase.from("whatsapp_conversas")
+        .select("content").eq("empresa_id", empresaId).like("phone", `%${phone.slice(-8)}`)
+        .eq("role", "assistant").order("created_at", { ascending: false }).limit(1)
+      const ultima = String(ultimaDoBot?.[0]?.content ?? "")
+      if (/\*?Pedido #\d+/.test(ultima)) {
+        console.log("[ok] cliente só confirmou o aviso do pedido — robô calado:", phone)
+        if (isTest) {
+          return new Response(JSON.stringify({ ok: true, robo: "calado", resposta: "(calado)", credito: 0 }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } })
+        }
+        return new Response("ok", { headers: corsHeaders })
+      }
+    }
+
     // ── ABRIU A CONVERSA: texto pronto, sem IA e sem crédito ────────────────
     // Fica ANTES do portão de crédito de propósito: é de graça, então tem que
     // responder até com o saldo zerado. Loja com robô mudo não vira hábito de
