@@ -3682,6 +3682,8 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
     <select value={valor} onChange={e => onChange(e.target.value)}
       style={{ flex: 1, minWidth: 0, padding: '9px 8px', borderRadius: 8, border: '1.5px solid var(--border)',
         background: 'var(--surface)', color: 'var(--text)', fontSize: 14, fontWeight: 700 }}>
+      {/* forma que o pedido já tem mas não está na lista (ex.: 'alelo'): aparece como está */}
+      {valor && !FORMAS_DIVIDIR.some(f => f.id === valor) && <option value={valor}>{nomeForma(valor)}</option>}
       {FORMAS_DIVIDIR.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
     </select>
   )
@@ -4203,6 +4205,17 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           <span className="pp-badge" style={{ background: 'rgba(245,158,11,.15)', color: '#b45309', fontWeight: 800, border: '1px solid #f59e0b' }}>
             💵 Cobrar do cliente · {fmt(aCobrarNaEntrega(pedido))}
           </span>
+        )}
+        {/* Pedido dividido também precisa de "trocar": a tela de troca já sabe
+            desfazer/refazer a divisão, mas o botão só existia no pedido de 1 forma
+            (Agv #16, 30/10: dinheiro + Alelo, a loja não achava como corrigir). */}
+        {onTrocarPagamento && pedido.status !== 'cancelado' && (
+          <button type="button" onClick={() => onTrocarPagamento(pedido)}
+            title="O cliente pagou de outro jeito? Corrija aqui"
+            style={{ marginLeft: 2, padding: '1px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+              border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)' }}>
+            ✏️ trocar
+          </button>
         )}
       </div>
       ) : (
