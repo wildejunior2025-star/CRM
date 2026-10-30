@@ -47,7 +47,7 @@ serve(async (req) => {
     // R$ 2.692,45 com o aviso LIGADO e ninguem recebeu nada, porque o aviso so
     // conhecia a primeira.
     const diaId = String(body?.caixa_dia_id ?? "")
-    if (!diaId && (!caixaId || !["abertura", "fechamento"].includes(momento))) {
+    if (!diaId && (!caixaId || !["abertura", "fechamento", "nao_bateu"].includes(momento))) {
       return json({ ok: false, erro: "informe caixa_id + momento, ou caixa_dia_id" }, 400)
     }
 

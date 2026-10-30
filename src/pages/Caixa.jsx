@@ -117,7 +117,6 @@ export default function Caixa() {
   const [caixaCego, setCaixaCego] = useState(false)
   const cego = caixaCego && !isAdmin
   const [naoBateu, setNaoBateu] = useState(null)     // formas que não bateram: ['dinheiro', ...]
-  const [pedindoLib, setPedindoLib] = useState(false)
   const [liberando, setLiberando] = useState(false)
 
   // Regra "abre com o que fechou" (por loja). Quando está ligada, a abertura não
@@ -820,6 +819,15 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       // loja de caixa cego). Ele diz QUAIS formas, nunca quanto.
       if (rpcError.message?.startsWith('CAIXA_NAO_BATEU')) {
         setNaoBateu(rpcError.message.split(':')[1]?.split(',').filter(Boolean) ?? [])
+        // Avisa o dono no WhatsApp (forma, contado, esperado e diferença) e abre o
+        // pedido de liberação na tela dele. Se falhar, o vendedor ainda vê o aviso.
+        const { error: avisoErr } = await supabase.rpc('registrar_nao_bateu', {
+          p_caixa_id: caixaAtual.id,
+          p_dinheiro: valor,
+          p_pix: valorFechamentoPix === '' ? 0 : Number(valorFechamentoPix),
+          p_cartao: valorFechamentoCartao === '' ? 0 : Number(valorFechamentoCartao),
+        })
+        if (!avisoErr) setCaixaAtual(c => ({ ...c, liberacao_pedida_em: c.liberacao_pedida_em ?? new Date().toISOString() }))
         return
       }
       setFormError(rpcError.message)
@@ -828,15 +836,6 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
 
     setShowFechamento(false)
     loadAll()
-  }
-
-  async function pedirLiberacao() {
-    if (!caixaAtual?.id) return
-    setPedindoLib(true)
-    const { error: rpcError } = await supabase.rpc('pedir_liberacao_fechamento', { p_caixa_id: caixaAtual.id })
-    setPedindoLib(false)
-    if (rpcError) { setFormError(rpcError.message); return }
-    setCaixaAtual(c => ({ ...c, liberacao_pedida_em: new Date().toISOString() }))
   }
 
   async function liberarFechamento() {
@@ -2267,17 +2266,13 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                     Veja se falta anotar alguma venda, sangria ou suprimento, e conte de novo.
-                    Se estiver tudo certo e mesmo assim não bate, peça ao dono pra liberar.
+                    Se estiver tudo certo e mesmo assim não bate, <strong>o dono já foi avisado</strong> no
+                    WhatsApp — ele fecha o caixa ou libera pra você.
                   </div>
-                  {caixaAtual?.liberacao_pedida_em ? (
+                  {caixaAtual?.liberacao_pedida_em && (
                     <div style={{ marginTop: 8, fontWeight: 700, fontSize: 13 }}>
-                      {caixaAtual.liberado_em ? '✅ O dono liberou — clique em Fechar caixa.' : '⏳ Pedido enviado. Aguarde o dono liberar.'}
+                      {caixaAtual.liberado_em ? '✅ O dono liberou — clique em Fechar caixa.' : '⏳ Aguardando o dono…'}
                     </div>
-                  ) : (
-                    <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }}
-                      disabled={pedindoLib} onClick={pedirLiberacao}>
-                      {pedindoLib ? 'Enviando...' : 'Pedir liberação ao dono'}
-                    </button>
                   )}
                 </div>
               )}
