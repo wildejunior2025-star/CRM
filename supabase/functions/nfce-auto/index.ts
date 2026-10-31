@@ -25,6 +25,10 @@ const MAX_POR_RODADA = 10
 const MAX_TENTATIVAS = 4
 
 const GRUPOS: Record<string, string[]> = {
+  // Crédito e débito se marcam separados (a Agv quis testar só com crédito).
+  // "cartao" fica como atalho dos dois, pra quem salvou antes da separação.
+  credito: ["credito"],
+  debito: ["debito"],
   cartao: ["credito", "debito", "cartao"],
   pix: ["pix", "pix_entrega", "online"],
   dinheiro: ["dinheiro"],
@@ -58,16 +62,37 @@ async function avisarDono(sb: any, texto: string) {
   } catch (e) { console.error("[nfce-auto] aviso falhou:", e) }
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
   const sb = createClient(SUPABASE_URL, SERVICE_KEY)
   const resumo: Record<string, unknown>[] = []
   let emitidas = 0
 
+  // ENSAIO: { dry: true, empresa_id, formas: ["credito"], horas: 24 } lista o que o robô
+  // EMITIRIA nas últimas `horas`, com as formas dadas, sem emitir nem gravar nada e
+  // mesmo que a loja ainda não tenha ligado o automático. Pra conferir a regra com
+  // vendas reais antes de ligar de verdade.
+  let corpo: any = {}
+  try { corpo = await req.json() } catch { corpo = {} }
+  const ensaio = corpo?.dry === true && !!corpo?.empresa_id
+
   try {
-    const { data: lojas } = await sb.from("empresa_fiscal")
-      .select("empresa_id, nfce_auto_formas, nfce_auto_espera_min, nfce_auto_desde, empresas(nome)")
-      .eq("ativo", true).eq("nfce_auto", true).eq("focus_registrada", true)
-      .not("nfce_auto_desde", "is", null)
+    let lojas: any[] | null
+    if (ensaio) {
+      const { data } = await sb.from("empresa_fiscal")
+        .select("empresa_id, nfce_auto_formas, nfce_auto_espera_min, nfce_auto_desde, empresas(nome)")
+        .eq("empresa_id", corpo.empresa_id)
+      lojas = (data ?? []).map((l: any) => ({
+        ...l,
+        nfce_auto_formas: Array.isArray(corpo.formas) ? corpo.formas : l.nfce_auto_formas,
+        nfce_auto_desde: new Date(Date.now() - (Number(corpo.horas) || 24) * 3600 * 1000).toISOString(),
+      }))
+    } else {
+      const { data } = await sb.from("empresa_fiscal")
+        .select("empresa_id, nfce_auto_formas, nfce_auto_espera_min, nfce_auto_desde, empresas(nome)")
+        .eq("ativo", true).eq("nfce_auto", true).eq("focus_registrada", true)
+        .not("nfce_auto_desde", "is", null)
+      lojas = data
+    }
 
     for (const loja of lojas ?? []) {
       if (emitidas >= MAX_POR_RODADA) break
@@ -79,16 +104,23 @@ Deno.serve(async () => {
 
       const cand: { tipo: "pedido" | "comanda"; id: string; rotulo: string }[] = []
 
+      // A forma de pagamento filtra NO BANCO (e ordena pela mais antiga): buscar as
+      // N primeiras vendas de qualquer forma e filtrar depois deixava de fora venda
+      // de crédito numa loja movimentada (visto no ensaio com a Agv, 27/10/2026).
+      const formasOk = [...new Set(marcados.flatMap((g) => GRUPOS[g] ?? []))]
+      if (!formasOk.length) continue
+
       const { data: coms } = await sb.from("comandas")
         .select("id, forma_pagamento, fechada_at")
-        .eq("empresa_id", loja.empresa_id).eq("status", "fechada")
-        .gte("fechada_at", desde).lte("fechada_at", ate).limit(60)
+        .eq("empresa_id", loja.empresa_id).eq("status", "fechada").in("forma_pagamento", formasOk)
+        .gte("fechada_at", desde).lte("fechada_at", ate).order("fechada_at", { ascending: true }).limit(100)
       for (const c of coms ?? []) if (formasPermitidas(c, marcados)) cand.push({ tipo: "comanda", id: c.id, rotulo: "mesa" })
 
       const { data: peds } = await sb.from("pedidos_delivery")
         .select("id, status, origem, forma_pagamento, pagamentos, updated_at")
         .eq("empresa_id", loja.empresa_id).in("status", ["entregue", "pronto"])
-        .gte("updated_at", desde).lte("updated_at", ate).limit(100)
+        .in("forma_pagamento", [...formasOk, "dividido"])   // 'dividido' tem as partes em `pagamentos`
+        .gte("updated_at", desde).lte("updated_at", ate).order("updated_at", { ascending: true }).limit(100)
       for (const p of peds ?? []) {
         if (p.status === "pronto" && p.origem !== "balcao") continue   // delivery 'pronto' ainda nao saiu
         if (formasPermitidas(p, marcados)) cand.push({ tipo: "pedido", id: p.id, rotulo: p.origem ?? "pedido" })
@@ -117,6 +149,8 @@ Deno.serve(async () => {
         if (feitos.has(c.id)) continue
         const t = tentPorId.get(c.id)
         if (t && (t.desistiu || new Date(t.proxima_em).getTime() > Date.now())) continue
+
+        if (ensaio) { resumo.push({ loja: nome, id: c.id, tipo: c.tipo, origem: c.rotulo, emitiria: true }); continue }
 
         emitidas++
         let ok = false, erro = ""
@@ -163,7 +197,7 @@ Deno.serve(async () => {
     // nota antiga nem de loja que desligou). A SEFAZ aceita cancelar por um prazo;
     // passou dele, o emissor recusa e o dono da FWC e avisado pra resolver a mao.
     let canceladas = 0
-    for (const loja of lojas ?? []) {
+    for (const loja of ensaio ? [] : (lojas ?? [])) {
       if (canceladas >= MAX_POR_RODADA) break
       const nome = (loja as any).empresas?.nome ?? loja.empresa_id
       const desde = new Date(Math.max(new Date(loja.nfce_auto_desde).getTime(), Date.now() - 3 * 24 * 3600 * 1000)).toISOString()

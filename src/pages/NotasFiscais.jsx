@@ -59,12 +59,42 @@ export default function NotasFiscais() {
   }
   useEffect(() => { carregar() }, [profile?.empresa_id, mes]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Total desde o início (todas as notas autorizadas de produção). Pagina de 1000
+  // em 1000: o Supabase corta a resposta em 1000 linhas.
+  const [geral, setGeral] = useState(null)
+  useEffect(() => {
+    if (!profile?.empresa_id) return
+    let vivo = true
+    ;(async () => {
+      const g = { notas: 0, valor: 0, trib: 0 }
+      for (let ini = 0; ; ini += 1000) {
+        const { data } = await supabase.from('nfce_notas')
+          .select('valor_total, tributos_valor')
+          .eq('empresa_id', profile.empresa_id).eq('ambiente', 'producao').eq('status', 'autorizada')
+          .order('created_at').range(ini, ini + 999)
+        for (const n of data ?? []) { g.notas++; g.valor += Number(n.valor_total) || 0; g.trib += Number(n.tributos_valor) || 0 }
+        if (!data || data.length < 1000) break
+      }
+      if (vivo) setGeral(g)
+    })()
+    return () => { vivo = false }
+  }, [profile?.empresa_id])
+
   // Nota de teste (homologação) não tem valor fiscal: fica fora dos totais.
   const resumo = useMemo(() => {
-    const r = { aut: 0, valor: 0, canc: 0, rej: 0, proc: 0, teste: 0 }
+    const r = { aut: 0, valor: 0, canc: 0, rej: 0, proc: 0, teste: 0, trib: 0, fed: 0, est: 0, semTrib: 0 }
     for (const n of notas) {
       if (n.ambiente !== 'producao') { r.teste++; continue }
-      if (n.status === 'autorizada') { r.aut++; r.valor += Number(n.valor_total) || 0 }
+      if (n.status === 'autorizada') {
+        r.aut++; r.valor += Number(n.valor_total) || 0
+        // Notas emitidas antes de 27/10/2026 não guardaram o valor dos tributos.
+        if (n.tributos_valor == null) r.semTrib++
+        else {
+          r.trib += Number(n.tributos_valor) || 0
+          r.fed += Number(n.tributos_federal) || 0
+          r.est += Number(n.tributos_estadual) || 0
+        }
+      }
       else if (n.status === 'cancelada') r.canc++
       else if (n.status === 'rejeitada') r.rej++
       else r.proc++
@@ -226,8 +256,27 @@ export default function NotasFiscais() {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <div style={cartao}><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Autorizadas</div><div style={{ fontSize: 22, fontWeight: 700 }}>{resumo.aut}</div></div>
         <div style={cartao}><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Valor emitido</div><div style={{ fontSize: 22, fontWeight: 700 }}>{fmtBRL(resumo.valor)}</div></div>
+        <div style={cartao}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Impostos nas notas</div>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>{fmtBRL(resumo.trib)}</div>
+          {resumo.fed + resumo.est > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              Federal {fmtBRL(resumo.fed)} · Estadual {fmtBRL(resumo.est)}
+            </div>
+          )}
+          {resumo.semTrib > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumo.semTrib} nota(s) antigas sem o valor</div>
+          )}
+        </div>
         <div style={cartao}><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Canceladas</div><div style={{ fontSize: 22, fontWeight: 700 }}>{resumo.canc}</div></div>
         <div style={cartao}><div style={{ fontSize: 12, color: resumo.rej ? 'var(--danger)' : 'var(--text-muted)' }}>Rejeitadas</div><div style={{ fontSize: 22, fontWeight: 700, color: resumo.rej ? 'var(--danger)' : undefined }}>{resumo.rej}</div></div>
+        {geral && (
+          <div style={cartao}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Total desde o início</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{geral.notas} notas</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtBRL(geral.valor)} em notas · {fmtBRL(geral.trib)} de impostos</div>
+          </div>
+        )}
         {resumo.proc > 0 && <div style={cartao}><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Processando</div><div style={{ fontSize: 22, fontWeight: 700 }}>{resumo.proc}</div></div>}
         {resumo.teste > 0 && <div style={cartao}><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>De teste (fora dos totais)</div><div style={{ fontSize: 22, fontWeight: 700 }}>{resumo.teste}</div></div>}
       </div>

@@ -2006,7 +2006,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
           {fiscalCfg.nfce_auto && (
             <>
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
-                {[['cartao', 'Cartão'], ['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['vale', 'Vale / benefício']].map(([k, rotulo]) => (
+                {[['credito', 'Cartão de crédito'], ['debito', 'Cartão de débito'], ['pix', 'Pix'], ['dinheiro', 'Dinheiro'], ['vale', 'Vale / benefício']].map(([k, rotulo]) => (
                   <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                     <input
                       type="checkbox"
