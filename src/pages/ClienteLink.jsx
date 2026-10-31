@@ -292,11 +292,35 @@ export default function ClienteLink() {
         {aberto && (
           <div style={{ marginTop: 10, borderTop: '1px solid #2c2350', paddingTop: 10 }}>
             {(p.itens ?? []).map((it, j) => (
-              <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, opacity: .85, marginTop: 4 }}>
-                <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
-                <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>
+              <div key={j} style={{ marginTop: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, opacity: .85 }}>
+                  <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
+                  {/* Pedido antigo às vezes não guardou o preço do item; melhor
+                      não mostrar nada do que mostrar R$ 0,00. */}
+                  {Number(it.valor) > 0 && <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>}
+                </div>
+                {(it.complementos ?? []).map((c, k) => (
+                  <div key={k} style={{ fontSize: 11.5, color: '#8b7bb8', marginLeft: 14 }}>
+                    + {Number(c.qtd) > 1 ? `${qtdBR(c.qtd)}× ` : ''}{c.nome}
+                  </div>
+                ))}
               </div>
             ))}
+            {/* Fecha a conta: sem isto a soma dos itens não bate com o total e
+                parece cobrança errada. */}
+            {Number(p.taxa) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, opacity: .85, marginTop: 6 }}>
+                <span>Taxa de entrega</span><span>{fmt(p.taxa)}</span>
+              </div>
+            )}
+            {Number(p.desconto) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, color: '#22c55e', marginTop: 6 }}>
+                <span>Desconto</span><span>− {fmt(p.desconto)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 10, fontWeight: 800 }}>
+              <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(p.total)}</span>
+            </div>
             {ANDANDO.includes(p.status) && (
               <a href={`${dominioLoja}/pedido/${p.id}`} target="_blank" rel="noreferrer"
                 style={{ display: 'block', marginTop: 12, height: 44, lineHeight: '44px', borderRadius: 10, textAlign: 'center',
