@@ -5184,8 +5184,19 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       : ""
     // O bloco fixo tem que ser o MESMO byte a byte entre uma mensagem e outra,
     // senão o cache não casa e a economia não acontece.
+    // CACHE DE 1 HORA, não os 5 minutos do padrão.
+    //
+    // O cache vence por RELÓGIO, não por mudança de cardápio. Medido na Agv em
+    // 30/10/2026, depois de tirar o telefone do bloco fixo: das respostas que
+    // vieram mais de 5 minutos depois da anterior, 16 de 16 gravaram o cache de
+    // novo. Loja de almoço atende espaçado — o prazo de 5 minutos quase nunca
+    // alcança a próxima mensagem.
+    //
+    // Gravar com 1 hora custa 2x (contra 1,25x), mas grava UMA vez em vez de
+    // dezessete. Ler continua 0,1x e RENOVA o prazo de graça, então no pico ele
+    // se mantém vivo sozinho.
     const systemBlocos: any[] = [
-      { type: "text", text: promptFixo, cache_control: { type: "ephemeral" } },
+      { type: "text", text: promptFixo, cache_control: { type: "ephemeral", ttl: "1h" } },
     ]
     if (promptAgora) systemBlocos.push({ type: "text", text: promptAgora })
 
@@ -5251,8 +5262,16 @@ ACAO: {"tipo": "pausar_bot", "motivo": "descrição curta do porquê"}
       // pro preco de leitura a partir da segunda mensagem.
       const gravou = Number(u.cache_creation_input_tokens ?? 0)
       const leu = Number(u.cache_read_input_tokens ?? 0)
-      const usd = (entrada / 1e6) * 1 + (gravou / 1e6) * 1.25 + (leu / 1e6) * 0.10 + (saida / 1e6) * 5
-      console.log(`[custo] in=${entrada} cache_gravou=${gravou} cache_leu=${leu} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
+      // Gravação de 5 minutos custa 1,25x; a de 1 hora custa 2x. O `usage` separa
+      // as duas, e é por aí que a conta sai certa — somar tudo a 1,25x fazia o
+      // medidor subestimar justo depois de a gente ligar a de 1 hora.
+      const grav5m = Number(u.cache_creation?.ephemeral_5m_input_tokens ?? 0)
+      const grav1h = Number(u.cache_creation?.ephemeral_1h_input_tokens ?? 0)
+      const custoGravacao = (grav5m + grav1h) > 0
+        ? (grav5m / 1e6) * 1.25 + (grav1h / 1e6) * 2
+        : (gravou / 1e6) * 2   // sem a quebra: hoje só gravamos com 1 hora
+      const usd = (entrada / 1e6) * 1 + custoGravacao + (leu / 1e6) * 0.10 + (saida / 1e6) * 5
+      console.log(`[custo] in=${entrada} cache_gravou=${gravou} (5m=${grav5m} 1h=${grav1h}) cache_leu=${leu} out=${saida} ≈ US$ ${usd.toFixed(5)} (~R$ ${(usd * 5.4).toFixed(3)}) | crédito da loja: R$ 0,07`)
       // E GUARDA. Até aqui o custo só existia nesse console.log, que o Supabase
       // joga fora em 24 horas — então "a conta fecha?" não tinha resposta, só
       // opinião. O assistente do grupo já grava o dele nesta mesma tabela; o
