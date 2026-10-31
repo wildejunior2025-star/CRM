@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import NotaFiscalVenda from '../components/NotaFiscalVenda'
@@ -85,6 +85,10 @@ export default function PresencialHistorico() {
   const meuId = user?.id
 
   const [comandas, setComandas] = useState([])
+  // Dia escolhido no filtro (YYYY-MM-DD). Vazio = as últimas 100 contas, como sempre foi.
+  const [dia, setDia] = useState('')
+  const [carregandoDia, setCarregandoDia] = useState(false)
+  const primeiraCargaDia = useRef(true)
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
   // { profile_id: perfil } — quem é ADM não divide o bolo (ver ehDaEquipe).
   const [perfis, setPerfis]     = useState({})
@@ -622,15 +626,47 @@ export default function PresencialHistorico() {
     () => (ehAdmin ? rankingTodos : rankingTodos.filter(r => r.id === meuId)),
     [rankingTodos, ehAdmin, meuId])
 
-  // Resumo de hoje
+  // Filtro por data: busca as contas fechadas do dia escolhido (até 500) e troca a
+  // lista. Limpar o campo volta às últimas 100. A 1ª execução não faz nada: a
+  // carga normal da tela já trouxe a lista.
+  useEffect(() => {
+    if (primeiraCargaDia.current) { primeiraCargaDia.current = false; return }
+    if (!empresaId) return
+    let cancelado = false
+    setCarregandoDia(true)
+    let q = supabase.from('comandas')
+      .select('*, comanda_itens(*), cliente:clientes(id, nome, telefone), comanda_pix_cobrancas(id, mp_payment_id, valor, status)')
+      .eq('empresa_id', empresaId)
+      .eq('status', 'fechada')
+    if (dia) {
+      const ini = new Date(`${dia}T00:00:00`)
+      const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
+      q = q.gte('fechada_at', ini.toISOString()).lt('fechada_at', fim.toISOString())
+    }
+    q.order('fechada_at', { ascending: false }).limit(dia ? 500 : 100).then(({ data, error }) => {
+      if (cancelado) return
+      setCarregandoDia(false)
+      if (error) { window.alert('Não consegui buscar esse dia: ' + error.message); return }
+      const todas = data ?? []
+      const participou = (c) => c.garcom_id === meuId
+        || c.fechada_por === meuId
+        || (c.comanda_itens ?? []).some(i => i.entregue_por === meuId || i.lancado_por === meuId)
+      setComandas(ehAdmin ? todas : todas.filter(participou))
+    })
+    return () => { cancelado = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dia])
+
+  // Resumo do dia (hoje, ou o dia escolhido no filtro)
   const resumoHoje = useMemo(() => {
-    const hoje = new Date().toDateString()
-    const doDia = comandas.filter(c => c.fechada_at && new Date(c.fechada_at).toDateString() === hoje)
+    const alvo = (dia ? new Date(`${dia}T00:00:00`) : new Date()).toDateString()
+    const doDia = comandas.filter(c => c.fechada_at && new Date(c.fechada_at).toDateString() === alvo)
     return {
       qtd: doDia.length,
       total: doDia.reduce((s, c) => s + Number(c.total || 0), 0),
     }
-  }, [comandas])
+  }, [comandas, dia])
+  const rotuloDia = dia ? new Date(`${dia}T00:00:00`).toLocaleDateString('pt-BR') : 'hoje'
 
   // Pontos que ELE fez nesta mesa. Não dá pra mostrar R$ por mesa: o bolo é
   // do DIA e o valor do ponto só existe depois que o dia fecha — quanto mais a
@@ -676,7 +712,7 @@ export default function PresencialHistorico() {
       <div style={{ marginBottom: 12, display: 'flex', gap: 10 }}>
         <div className="card" style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-            {ehAdmin ? 'Contas fechadas hoje' : 'Mesas fechadas hoje'}
+            {ehAdmin ? 'Contas fechadas' : 'Mesas fechadas'} {dia ? `em ${rotuloDia}` : 'hoje'}
           </div>
           <div style={{ fontSize: 26, fontWeight: 800, marginTop: 2 }}>{resumoHoje.qtd}</div>
         </div>
@@ -685,7 +721,7 @@ export default function PresencialHistorico() {
               das mesas pra ele daria a impressão errada de que aquele dinheiro
               é o ganho dele. */}
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.3 }}>
-            {ehAdmin ? 'Recebido hoje (com a taxa)' : 'Você ganhou hoje'}
+            {ehAdmin ? `Recebido ${dia ? `em ${rotuloDia}` : 'hoje'} (com a taxa)` : 'Você ganhou hoje'}
           </div>
           <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: 'var(--success)', overflowWrap: 'anywhere' }}>
             {fmt(ehAdmin ? resumoHoje.total : meuGanhoHoje)}
@@ -1139,9 +1175,28 @@ export default function PresencialHistorico() {
         )
       })()}
 
+      {/* Filtro por data */}
+      <div className="card" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 13, fontWeight: 700 }} htmlFor="hist-dia">📅 Dia</label>
+        <input id="hist-dia" type="date" value={dia} max={new Date().toLocaleDateString('en-CA')}
+          onChange={e => setDia(e.target.value)}
+          style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--text)', fontSize: 14, fontWeight: 600 }} />
+        {dia && (
+          <button type="button" onClick={() => setDia('')}
+            style={{ padding: '7px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+              border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
+            Voltar às últimas
+          </button>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {carregandoDia ? 'buscando...' : dia ? `contas fechadas em ${rotuloDia}` : 'mostrando as últimas 100 contas'}
+        </span>
+      </div>
+
       {comandas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
-          {ehAdmin ? 'Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾' : 'Você ainda não teve mesa fechada. Assim que fechar, ela aparece aqui. 🧾'}
+          {dia ? 'Nenhuma conta fechada nesse dia.' : ehAdmin ? 'Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾' : 'Você ainda não teve mesa fechada. Assim que fechar, ela aparece aqui. 🧾'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
