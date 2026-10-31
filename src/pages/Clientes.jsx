@@ -405,7 +405,7 @@ export default function Clientes() {
                       <>
                         <button
                           className="btn btn-secondary btn-sm"
-                          title="Link do cliente: ele pede sozinho e vê o que está devendo"
+                          title="Link do cliente: a conta dele — fiado, pedidos e indicação"
                           onClick={() => setLinkCliente(c)}
                         >
                           🔗 Link
@@ -764,8 +764,8 @@ export default function Clientes() {
         const url = `https://lojaonline.fwcinter.com/c/${linkCliente.token}`
         const tel = String(linkCliente.telefone ?? '').replace(/\D/g, '')
         const mensagem =
-          `Oi ${linkCliente.nome}! Esse é o seu link pra fazer pedido direto com a gente 👇\n${url}\n\n` +
-          `Por ele você monta o pedido, acompanha quando fica pronto e vê o que está devendo.`
+          `Oi ${linkCliente.nome}! Esse é o seu link com a gente 👇\n${url}\n\n` +
+          `Por ele você faz seu pedido, acompanha quando fica pronto e vê o que está devendo.`
         const zap = tel.length >= 10
           ? `https://wa.me/${tel.startsWith('55') ? tel : '55' + tel}?text=${encodeURIComponent(mensagem)}`
           : null
@@ -780,8 +780,9 @@ export default function Clientes() {
             <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
               <h2 style={{ marginTop: 0 }}>🔗 Link de {linkCliente.nome}</h2>
               <p style={{ color: 'var(--text-muted)', fontSize: 13.5, lineHeight: 1.5, marginTop: 0 }}>
-                Só dele. Por esse link o cliente monta o pedido (que cai como comanda na cozinha,
-                no nome dele), acompanha quando fica pronto e vê quanto está devendo de fiado.
+                Só dele. Por esse link o cliente vê quanto está devendo de fiado, acompanha os
+                pedidos que fez e pega o link de indicação dele. O botão "Fazer pedido" leva pro
+                seu catálogo já com os dados dele preenchidos — e o pedido cai no Delivery.
               </p>
               {/* Prévia do que vai ser copiado: o texto explicando + o link. Copiar
                   só a URL deixava o cliente sem entender o que era aquilo. */}

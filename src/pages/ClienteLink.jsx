@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import ModalComplementos, { btnQtd as btnQ } from '../components/ModalComplementos'
-import SenhaCliente from '../components/SenhaCliente'
-import { carregarCardapio, itensParaPedido } from '../lib/cardapioPublico'
 import { comoFicaNoDia } from '../lib/feriados'
 import { pollVisivel } from '../utils/pollVisivel'
 
-// LINK DO CLIENTE (mig 0147) — a página que o freguês abre pelo link só dele.
-// Sem login: quem identifica é o token na URL. Quatro abas:
-//   Cardápio     → monta o pedido; ao enviar vira uma comanda no nome dele
-//   Meu pedido   → o que está na cozinha agora, ao vivo
+// LINK DO CLIENTE (mig 0147, redesenhado na 0434) — a página que o freguês abre
+// pelo link só dele. Agora é a CONTA dele, não um canal de pedido. Três abas:
+//   Meus pedidos → os pedidos que ele fez, com o status ao vivo
 //   Minha conta  → o que ele deve e o que já pagou (o fiado, sem precisar perguntar)
 //   Indicar      → o link dele, o saldo, quem ele trouxe e o extrato (mig 0176)
 //
-// A aba escolhida vai pra URL (?aba=), então voltar pra página não perde o lugar.
+// Pedir é no CATÁLOGO da loja, pelo botão "Fazer pedido": o link vai com o
+// telefone dele (?t=), que é o que faz o checkout abrir com nome, endereço e
+// pino preenchidos e enxergar o crédito dele. O pedido cai na tela de Delivery.
 //
-// Mesmo cardápio e mesmo modal de montagem do QR da mesa (lib/cardapioPublico e
-// components/ModalComplementos) — se mudar o cardápio, muda nos dois.
+// POR QUE mudou (decisão do Wilde, 31/10/2026): antes o pedido daqui virava uma
+// COMANDA de balcão, na tela do Salão. Em 3 meses foram 8 pedidos nas duas lojas
+// que tinham a função ligada — e na CDBom duas comandas ficaram abertas no Salão
+// sem ninguém saber de onde vinham, porque a loja não usa mesa e ninguém olha
+// aquela tela. "Acho que vai funciona melhor se chega na tela de delivery."
+//
+// A aba escolhida vai pra URL (?aba=), então voltar pra página não perde o lugar.
 
 const fmt = (v) => `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
 const dataBR = (iso) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
@@ -27,57 +30,54 @@ const qtdBR = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDig
 const dataHoraBR = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 const FORMAS = { debito: 'débito', credito: 'crédito', dinheiro: 'dinheiro', pix: 'PIX', a_vista: 'à vista', fiado: 'fiado', voucher: 'voucher' }
 const formaBR = (f) => FORMAS[f] ?? String(f ?? '').replace(/_/g, ' ')
-const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
+
+// Status do pedido de delivery, do jeito que o cliente entende.
+const STATUS = {
+  aguardando_pagamento: { label: '💳 Aguardando pagamento', cor: '#fbbf24' },
+  aguardando:           { label: '⏳ Aguardando a loja confirmar', cor: '#fbbf24' },
+  confirmado:           { label: '✅ Confirmado', cor: '#60a5fa' },
+  em_preparo:           { label: '👨‍🍳 Em preparo', cor: '#60a5fa' },
+  pronto:               { label: '🔔 Pronto!', cor: '#22c55e' },
+  saiu_entrega:         { label: '🛵 Saiu para entrega', cor: '#a78bfa' },
+  entregue:             { label: '🍽️ Entregue', cor: '#22c55e' },
+  cancelado:            { label: '❌ Cancelado', cor: '#f87171' },
+}
+const stInfo = (s) => STATUS[s] ?? { label: String(s ?? '').replace(/_/g, ' '), cor: '#a78bfa' }
+// Pedido andando (vale acompanhar) x pedido que já acabou (vai pro histórico).
+const ANDANDO = ['aguardando_pagamento', 'aguardando', 'confirmado', 'em_preparo', 'pronto', 'saiu_entrega']
 
 export default function ClienteLink() {
   const { token } = useParams()
   const [info, setInfo] = useState(null)
-  const [produtos, setProdutos] = useState([])
-  const [catOrdem, setCatOrdem] = useState({})
-  const [compMap, setCompMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
   // A aba mora na URL (?aba=indicar), não só na memória da tela. Sem isso,
   // sair da página e voltar — ou dar F5, ou usar o botão voltar do celular —
-  // sempre jogava o cliente de volta no Cardápio, mesmo que ele estivesse
+  // sempre jogava o cliente de volta na primeira aba, mesmo que ele estivesse
   // olhando o saldo. Como é query param, também dá pra mandar o link já aberto
-  // na aba certa.
+  // na aba certa. 'cardapio' era a aba antiga (mig 0147): link velho cai nos
+  // pedidos, não numa tela em branco.
   const [params, setParams] = useSearchParams()
-  const ABAS_VALIDAS = ['cardapio', 'pedido', 'conta', 'indicar']
+  const ABAS_VALIDAS = ['pedido', 'conta', 'indicar']
   const abaUrl = params.get('aba')
-  const aba = ABAS_VALIDAS.includes(abaUrl) ? abaUrl : 'cardapio'
+  const aba = ABAS_VALIDAS.includes(abaUrl) ? abaUrl : 'pedido'
   function setAba(id) {
     const p = new URLSearchParams(params)
-    // O Cardápio é o padrão: sai da URL pra o link continuar limpo.
-    if (id === 'cardapio') p.delete('aba'); else p.set('aba', id)
+    // Pedidos é o padrão: sai da URL pra o link continuar limpo.
+    if (id === 'pedido') p.delete('aba'); else p.set('aba', id)
     setParams(p)
   }
-  const [busca, setBusca] = useState('')
-  const [cat, setCat] = useState('Todos')
-  const [carrinho, setCarrinho] = useState({})
-  const [montando, setMontando] = useState(null)
-  const [drawer, setDrawer] = useState(false)
-  const [enviando, setEnviando] = useState(false)
-  const [sucesso, setSucesso] = useState(false)
   const [conta, setConta] = useState(null)        // cliente_conta(): comanda + fiado
+  const [pedidos, setPedidos] = useState([])      // cliente_pedidos(): os pedidos de delivery dele
   const [histAberto, setHistAberto] = useState(null)  // qual compra do histórico está aberta
+  const [pedAberto, setPedAberto] = useState(null)    // qual pedido está aberto
   const [notif, setNotif] = useState(null)
-  const prevPronto = useRef(new Set())
-
-  // Senha de 6 números (mig 0175). `senhaModo` null = popup fechado.
-  const [senhaModo, setSenhaModo] = useState(null)   // null | 'criar' | 'digitar'
-  const [senhaErro, setSenhaErro] = useState(null)
+  const prevPronto = useRef(null)   // null = primeira carga (não avisa)
 
   // Indicação e cashback (mig 0176). `ativo:false` = a loja não ligou o
   // programa, e a aba nem aparece.
   const [indic, setIndic] = useState(null)
   const [linkCopiado, setLinkCopiado] = useState(false)
-
-  // Saldo pra caixinha do pedido (mig 0181). O desconto NAO sai agora: pelo
-  // link ele monta a comanda e paga com a loja depois, e ate la pode pedir mais
-  // coisa. Aqui vai só a intenção, que a loja confirma no fechamento.
-  const [saldoLink, setSaldoLink] = useState(0)
-  const [usarSaldoPedido, setUsarSaldoPedido] = useState(false)
 
   // PIX do fiado (mig 0149): ele escolhe o valor, o sistema gera o QR e fica
   // esperando o Mercado Pago confirmar. A baixa é automática, no webhook.
@@ -103,29 +103,51 @@ export default function ClienteLink() {
     } catch { /* áudio bloqueado */ }
   }
 
+  // Uma carga só pros dois: a conta (fiado + comanda, se ele ainda tiver alguma)
+  // e os pedidos de delivery. É o que o poll repete a cada 8s.
   async function fetchConta() {
-    const { data } = await supabase.rpc('cliente_conta', { p_token: token })
+    const [{ data }, { data: peds }] = await Promise.all([
+      supabase.rpc('cliente_conta', { p_token: token }),
+      supabase.rpc('cliente_pedidos', { p_token: token }),
+    ])
+    const lista = Array.isArray(peds) ? peds : []
     setConta(data || null)
-    const prontos = new Set((data?.comanda?.itens ?? []).filter(i => i.status === 'pronto').map(i => i.id))
-    let novo = false
-    prontos.forEach(id => { if (!prevPronto.current.has(id)) novo = true })
+    setPedidos(lista)
+
+    // Avisa quando algo fica pronto — item de comanda antiga ou pedido de
+    // delivery. A chave guarda o status junto, então o pedido que passa de
+    // "pronto" pra "saiu para entrega" avisa as duas vezes.
+    const prontos = new Set()
+    for (const i of (data?.comanda?.itens ?? [])) {
+      if (i.status === 'pronto') prontos.add('i' + i.id)
+    }
+    for (const p of lista) {
+      if (p.status === 'pronto' || p.status === 'saiu_entrega') prontos.add('p' + p.id + p.status)
+    }
+
+    // Primeira carga nunca avisa: senão quem abre a página leva um susto por um
+    // pedido que ficou pronto ontem.
+    const primeira = prevPronto.current === null
+    let aviso = null
+    if (!primeira) prontos.forEach(k => { if (!prevPronto.current.has(k)) aviso = k })
     prevPronto.current = prontos
-    if (novo) { setNotif('🔔 Seu pedido ficou pronto!'); avisar() }
+    if (aviso) {
+      setNotif(aviso.endsWith('saiu_entrega') ? '🛵 Seu pedido saiu para entrega!' : '🔔 Seu pedido ficou pronto!')
+      avisar()
+    }
   }
 
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase.rpc('cliente_info', { p_token: token })
       if (error || !data) { setErro('Link não encontrado. Peça um novo pra loja.'); setLoading(false); return }
-      if (!data.link_ativo) { setErro('A loja não está usando pedido por link agora.'); setLoading(false); return }
+      if (!data.link_ativo) { setErro('A loja não está usando o link do cliente agora.'); setLoading(false); return }
       setInfo(data)
-      const { produtos: ps, catOrdem: om, compMap: cm } = await carregarCardapio(supabase, data.empresa_id)
-      setProdutos(ps); setCatOrdem(om); setCompMap(cm)
       setLoading(false)
     })()
   }, [token])
 
-  // Acompanha a comanda ao vivo (e avisa quando a cozinha dá o pronto)
+  // Acompanha os pedidos ao vivo (e avisa quando a loja dá o pronto)
   useEffect(() => {
     if (!info) return
     fetchConta()
@@ -139,13 +161,10 @@ export default function ClienteLink() {
   }, [notif])
 
   // Painel de indicação: link, saldo, quem ele trouxe e o extrato, numa
-  // chamada só. Recarrega quando um pedido é enviado, porque o crédito pode
-  // ter caído nesse meio-tempo.
+  // chamada só.
   async function fetchIndic() {
     const { data } = await supabase.rpc('cliente_indicacao', { p_token: token })
     setIndic(data || null)
-    const { data: saldo } = await supabase.rpc('cliente_saldo_link', { p_token: token })
-    setSaldoLink(Number(saldo ?? 0))
   }
   useEffect(() => { if (info) fetchIndic() }, [info])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -162,125 +181,6 @@ export default function ClienteLink() {
     }
     setLinkCopiado(true)
     setTimeout(() => setLinkCopiado(false), 2200)
-  }
-
-  // Loja aberta? Quem manda é o banco (a RPC recusa fora do horário); aqui é só
-  // pra avisar antes, e pra tratar o feriado, que é calculado no app.
-  const situacao = useMemo(() => {
-    if (!info) return { aberto: false }
-    const hoje = new Date()
-    const ymd = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
-    const noApp = comoFicaNoDia(ymd, { grade: info.grade, excecoes: {}, fechaFeriado: info.fecha_feriado })
-    return { aberto: !!info.aberta_agora && noApp.aberto !== false, motivo: noApp.motivo }
-  }, [info])
-
-  const ordemCat = (nome) => catOrdem[nome] ?? 999
-  const categorias = useMemo(() => {
-    const nomes = [...new Set(produtos.map(p => p.categoria).filter(Boolean))]
-      .sort((a, b) => (ordemCat(a) - ordemCat(b)) || a.localeCompare(b))
-    return ['Todos', ...nomes]
-  }, [produtos, catOrdem]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const filtrados = produtos
-    .filter(p => {
-      const okCat = cat === 'Todos' || p.categoria === cat
-      const t = busca.trim().toLowerCase()
-      return okCat && (!t || p.nome?.toLowerCase().includes(t))
-    })
-    .sort((a, b) => {
-      const oa = ordemCat(a.categoria), ob = ordemCat(b.categoria)
-      if (oa !== ob) return oa - ob
-      const porCategoria = (a.categoria ?? '').localeCompare(b.categoria ?? '')
-      return porCategoria !== 0 ? porCategoria : (a.nome ?? '').localeCompare(b.nome ?? '')
-    })
-
-  // Link de indicação: a vitrine pública da loja com o token dele no fim.
-  //
-  // O domínio é SEMPRE o da loja online, nunca `window.location.origin`: esta
-  // página abre nos dois domínios, mas a rota `/{slug}` só existe no
-  // lojaonline. Gerado pelo portal, o link daria 404 na mão do amigo — e quem
-  // descobriria seria o cliente, não a gente.
-  const linkIndicacao = indic?.ativo
-    ? `${window.location.hostname === 'lojaonline.fwcinter.com'
-        ? window.location.origin
-        : 'https://lojaonline.fwcinter.com'}/${indic.slug}?ind=${indic.token}`
-    : ''
-
-  const itens = Object.entries(carrinho).map(([id, v]) => ({ id, ...v }))
-  const totalItens = itens.reduce((s, i) => s + i.qtd, 0)
-  const totalValor = itens.reduce((s, i) => s + i.qtd * i.preco, 0)
-
-  function add(p) {
-    if (compMap[p.produto_id]?.length) { setMontando(p); return }
-    setCarrinho(c => ({ ...c, [p.produto_id]: {
-      produto_id: p.produto_id, nome: p.nome, preco: Number(p.preco_venda),
-      qtd: (c[p.produto_id]?.qtd ?? 0) + 1, complementos: [],
-    } }))
-  }
-  function addComplemento(produto, complementos, precoUnit) {
-    const key = `${produto.produto_id}::${complementos.map(c => c.nome).join(',')}`
-    setCarrinho(c => ({ ...c, [key]: {
-      produto_id: produto.produto_id, nome: produto.nome, preco: precoUnit,
-      qtd: (c[key]?.qtd ?? 0) + 1, complementos,
-    } }))
-    setMontando(null)
-  }
-  function mudar(id, d) {
-    setCarrinho(c => {
-      const q = (c[id]?.qtd ?? 0) + d
-      if (q <= 0) { const n = { ...c }; delete n[id]; return n }
-      return { ...c, [id]: { ...c[id], qtd: q } }
-    })
-  }
-
-  // ── Envio do pedido, com a senha de 6 números (mig 0175) ─────────────────
-  //
-  // A senha é pedida AQUI, no fim, e não na abertura da página: com o carrinho
-  // montado quase ninguém desiste por seis números, então na prática todo mundo
-  // acaba criando uma. Pedir na entrada derrubaria o pedido por link.
-  //
-  // O servidor é quem manda: devolve SENHA_AUSENTE (nunca criou) ou SENHA_ERRADA
-  // (errou), e a tela só decide qual popup abrir. Assim a regra mora num lugar
-  // só e não dá pra pular a senha mexendo no navegador.
-  async function enviar(senha) {
-    setEnviando(true); setSenhaErro(null)
-    const { data, error } = await supabase.rpc('cliente_pedir', {
-      p_token: token, p_itens: itensParaPedido(itens), p_senha: senha ?? null,
-      p_usar_cashback: usarSaldoPedido && saldoLink > 0,
-    })
-    setEnviando(false)
-
-    if (error) {
-      const m = error.message || ''
-      if (m.includes('SENHA_AUSENTE')) { setSenhaModo('criar');   return }
-      if (m.includes('SENHA_ERRADA')) {
-        setSenhaModo('digitar')
-        // Primeira batida vai sem senha só pra descobrir se ele tem uma: aí não
-        // é erro dele, é a tela perguntando. Só acusa se ele tiver digitado.
-        if (senha) setSenhaErro('Senha errada. Tente de novo.')
-        return
-      }
-      // A trava por tentativa vem com a mensagem pronta do banco.
-      if (m.includes('tentativas erradas')) { setSenhaModo('digitar'); setSenhaErro(m); return }
-      if (senhaModo) { setSenhaErro(m) } else { window.alert('Não deu pra enviar: ' + m) }
-      return
-    }
-    if (!data?.ok) { window.alert('Não deu pra enviar. Tente de novo.'); return }
-
-    setSenhaModo(null); setSenhaErro(null)
-    setCarrinho({}); setDrawer(false); setSucesso(true)
-    setUsarSaldoPedido(false)
-    fetchConta(); fetchIndic()
-  }
-
-  // Criou a senha: já manda o pedido na sequência, sem obrigar a digitar de
-  // novo o que ele acabou de escolher duas vezes.
-  async function criarSenha(senha) {
-    setEnviando(true); setSenhaErro(null)
-    const { error } = await supabase.rpc('cliente_criar_senha', { p_token: token, p_senha: senha })
-    setEnviando(false)
-    if (error) { setSenhaErro(error.message); return }
-    enviar(senha)
   }
 
   // ── PIX do fiado ────────────────────────────────────────────────────────
@@ -315,10 +215,39 @@ export default function ClienteLink() {
     return () => clearInterval(t)
   }, [pix, pixPago]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Loja aberta? Quem manda é o catálogo (lá o pedido é recusado fora do
+  // horário); aqui é só pra avisar antes, e pra tratar o feriado, que é
+  // calculado no app.
+  const situacao = useMemo(() => {
+    if (!info) return { aberto: false }
+    const hoje = new Date()
+    const ymd = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`
+    const noApp = comoFicaNoDia(ymd, { grade: info.grade, excecoes: {}, fechaFeriado: info.fecha_feriado })
+    return { aberto: !!info.aberta_agora && noApp.aberto !== false, motivo: noApp.motivo }
+  }, [info])
+
+  // O domínio é SEMPRE o da loja online, nunca `window.location.origin`: esta
+  // página abre nos dois domínios, mas as rotas públicas da loja (`/{slug}`,
+  // `/pedido/{id}`) só existem no lojaonline. Gerado pelo portal, o link daria
+  // 404 na mão do cliente — e quem descobriria seria ele, não a gente.
+  const dominioLoja = window.location.hostname === 'lojaonline.fwcinter.com'
+    ? window.location.origin
+    : 'https://lojaonline.fwcinter.com'
+
+  // Link de indicação: a vitrine pública da loja com o token dele no fim.
+  const linkIndicacao = indic?.ativo ? `${dominioLoja}/${indic.slug}?ind=${indic.token}` : ''
+
+  // "Fazer pedido": o catálogo da loja com o TELEFONE dele (mig 0434). É o ?t=
+  // que faz o checkout abrir com nome, endereço e pino preenchidos e enxergar o
+  // crédito. Sem telefone no cadastro vai o catálogo puro — ele digita os dados
+  // como qualquer cliente novo.
+  const linkPedido = info?.slug
+    ? `${dominioLoja}/${info.slug}${info.telefone ? `?t=${info.telefone}` : ''}`
+    : null
+
   const C = {
-    page: { minHeight: '100dvh', background: '#0f0a1e', color: '#fff', paddingBottom: 90, fontFamily: 'system-ui, sans-serif' },
+    page: { minHeight: '100dvh', background: '#0f0a1e', color: '#fff', paddingBottom: 30, fontFamily: 'system-ui, sans-serif' },
     header: { padding: '18px 16px', background: 'linear-gradient(135deg,#5b21b6,#7c3aed)', position: 'sticky', top: 0, zIndex: 5 },
-    card: { background: '#1b1430', border: '1px solid #2c2350', borderRadius: 12, padding: 12, display: 'flex', alignItems: 'center', gap: 12 },
     bloco: { background: '#1b1430', border: '1px solid #2c2350', borderRadius: 12, padding: 14, marginBottom: 12 },
   }
 
@@ -333,6 +262,53 @@ export default function ClienteLink() {
   const devendo = Number(conta?.saldo_fiado ?? 0)
   const sLabel = s => s === 'pronto' ? '🔔 Pronto!' : s === 'entregue' ? '🍽️ Entregue' : '⏳ Preparando'
   const sCor = s => s === 'pronto' ? '#22c55e' : s === 'entregue' ? '#a78bfa' : '#f59e0b'
+  const andando = pedidos.filter(p => ANDANDO.includes(p.status))
+  const passados = pedidos.filter(p => !ANDANDO.includes(p.status))
+  const temComanda = !!comanda && (comanda.itens ?? []).length > 0
+
+  // Cartão de um pedido. Toque abre os itens; o que está andando ganha o botão
+  // de acompanhar, que é a tela que já existe (/pedido/:id).
+  const cardPedido = (p) => {
+    const st = stInfo(p.status)
+    const aberto = pedAberto === p.id
+    return (
+      <div key={p.id} style={{ ...C.bloco, marginBottom: 10, borderColor: ANDANDO.includes(p.status) ? '#4c3f7a' : '#2c2350' }}>
+        <div onClick={() => setPedAberto(aberto ? null : p.id)} style={{ cursor: 'pointer' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <strong style={{ fontSize: 15 }}>Pedido #{p.numero ?? String(p.id).slice(-4).toUpperCase()}</strong>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: st.cor, textAlign: 'right' }}>{st.label}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 6, fontSize: 13 }}>
+            <span style={{ opacity: .75 }}>
+              {dataHoraBR(p.quando)}
+              {p.tipo === 'retirada' ? ' · retirada' : ''}
+              {p.forma ? ` · ${formaBR(p.forma)}` : ''}
+            </span>
+            <strong style={{ whiteSpace: 'nowrap' }}>
+              {fmt(p.total)} <span style={{ opacity: .5, fontWeight: 600 }}>{aberto ? '▲' : '▼'}</span>
+            </strong>
+          </div>
+        </div>
+        {aberto && (
+          <div style={{ marginTop: 10, borderTop: '1px solid #2c2350', paddingTop: 10 }}>
+            {(p.itens ?? []).map((it, j) => (
+              <div key={j} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 13, opacity: .85, marginTop: 4 }}>
+                <span>{qtdBR(it.quantidade)}× {String(it.nome ?? '').trim()}</span>
+                <span style={{ whiteSpace: 'nowrap' }}>{fmt(it.valor)}</span>
+              </div>
+            ))}
+            {ANDANDO.includes(p.status) && (
+              <a href={`${dominioLoja}/pedido/${p.id}`} target="_blank" rel="noreferrer"
+                style={{ display: 'block', marginTop: 12, height: 44, lineHeight: '44px', borderRadius: 10, textAlign: 'center',
+                  textDecoration: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 14 }}>
+                Acompanhar este pedido
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={C.page}>
@@ -340,8 +316,23 @@ export default function ClienteLink() {
         <div style={{ fontSize: 13, opacity: .85 }}>{info.empresa_nome}</div>
         <div style={{ fontSize: 22, fontWeight: 800, textTransform: 'capitalize' }}>Olá, {info.cliente_nome} 👋</div>
         <div style={{ fontSize: 12, opacity: .85, marginTop: 2 }}>
-          {situacao.aberto ? 'Faça seu pedido — vai direto pra cozinha 👨‍🍳' : 'A loja está fechada agora'}
+          Aqui ficam seus pedidos, sua conta e seu crédito.
         </div>
+        {/* Fazer pedido é o botão principal da página, em cima e sempre visível:
+            o cliente abre o link dele pra pedir, não pra conferir conta. */}
+        {linkPedido && (
+          <a href={linkPedido}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14,
+              height: 50, borderRadius: 12, textDecoration: 'none', background: '#22c55e', color: '#fff',
+              fontWeight: 800, fontSize: 16, boxShadow: '0 4px 14px rgba(0,0,0,.25)' }}>
+            🍽️ Fazer pedido
+          </a>
+        )}
+        {linkPedido && !situacao.aberto && (
+          <div style={{ fontSize: 11.5, opacity: .9, marginTop: 6, textAlign: 'center' }}>
+            A loja está fechada agora{situacao.motivo ? ` (${situacao.motivo})` : ''} — dá pra olhar o cardápio.
+          </div>
+        )}
       </header>
 
       {notif && (
@@ -354,8 +345,7 @@ export default function ClienteLink() {
       {/* Abas */}
       <div style={{ display: 'flex', gap: 8, padding: '12px 14px 0' }}>
         {[
-          ['cardapio', '🍽️ Cardápio'],
-          ['pedido', `📋 Meu pedido${comanda?.itens?.length ? ` (${comanda.itens.length})` : ''}`],
+          ['pedido', `📋 Meus pedidos${andando.length ? ` (${andando.length})` : ''}`],
           ['conta', devendo > 0 ? `🧾 Devo ${fmt(devendo)}` : '🧾 Minha conta'],
           // Só existe se a loja ligou o programa (mig 0176 devolve ativo:false).
           ...(indic?.ativo ? [['indicar', Number(indic.saldo) > 0 ? `🎟️ ${fmt(indic.saldo)}` : '🎟️ Indicar']] : []),
@@ -369,91 +359,17 @@ export default function ClienteLink() {
         ))}
       </div>
 
-      {/* ── CARDÁPIO ── */}
-      {aba === 'cardapio' && (
-        <div style={{ padding: 14 }}>
-          {!situacao.aberto && (
-            <div style={{ ...C.bloco, borderColor: '#f59e0b', background: 'rgba(245,158,11,.12)' }}>
-              <div style={{ fontWeight: 800, marginBottom: 4 }}>🌙 A loja está fechada agora</div>
-              <div style={{ fontSize: 13, opacity: .85 }}>
-                {situacao.motivo ? `${situacao.motivo}. ` : ''}
-                Dá pra olhar o cardápio, mas o pedido só pode ser enviado no horário de funcionamento.
-                {Array.isArray(info.grade) && (
-                  <div style={{ marginTop: 8, fontSize: 12.5 }}>
-                    {info.grade.map((d, i) => d?.aberto && (d.periodos ?? []).length > 0 && (
-                      <div key={i} style={{ opacity: .9 }}>
-                        {DIAS[i]}: {d.periodos.map(p => `${p.i} às ${p.f}`).join(', ')}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar item…"
-            style={{ width: '100%', padding: '11px 14px', borderRadius: 10, border: '1px solid #2c2350', background: '#1b1430', color: '#fff', marginBottom: 12, boxSizing: 'border-box' }} />
-
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 8 }}>
-            {categorias.map(c => (
-              <button key={c} onClick={() => setCat(c)}
-                style={{ whiteSpace: 'nowrap', padding: '7px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700,
-                  border: '1px solid ' + (cat === c ? '#7c3aed' : '#2c2350'),
-                  background: cat === c ? '#7c3aed' : 'transparent', color: '#fff' }}>
-                {c}
-              </button>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {filtrados.map(p => {
-              const qtd = carrinho[p.produto_id]?.qtd ?? 0
-              return (
-                <div key={p.produto_id} style={C.card}>
-                  {p.foto_url
-                    ? <img src={p.foto_url} alt="" style={{ width: 54, height: 54, borderRadius: 10, objectFit: 'cover' }} />
-                    : <div style={{ width: 54, height: 54, borderRadius: 10, background: '#2c2350', display: 'grid', placeItems: 'center', fontSize: 22 }}>🍴</div>}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nome}</div>
-                    <div style={{ color: '#a78bfa', fontWeight: 800, fontSize: 14 }}>
-                      {fmt(p.preco_venda)}
-                      {compMap[p.produto_id]?.length ? <span style={{ color: '#f0abfc', fontWeight: 700 }}> · monte</span> : null}
-                    </div>
-                  </div>
-                  {compMap[p.produto_id]?.length ? (
-                    <button onClick={() => setMontando(p)} style={{ ...btnQ, width: 'auto', padding: '0 16px', background: '#7c3aed', borderColor: '#7c3aed' }}>Escolher</button>
-                  ) : qtd > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <button onClick={() => mudar(p.produto_id, -1)} style={btnQ}>−</button>
-                      <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{qtd}</span>
-                      <button onClick={() => mudar(p.produto_id, +1)} style={btnQ}>+</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => add(p)} style={{ ...btnQ, width: 'auto', padding: '0 16px', background: '#7c3aed', borderColor: '#7c3aed' }}>Adicionar</button>
-                  )}
-                </div>
-              )
-            })}
-            {filtrados.length === 0 && <p style={{ opacity: .7, textAlign: 'center', marginTop: 20 }}>Nenhum item encontrado.</p>}
-          </div>
-        </div>
-      )}
-
-      {/* ── MEU PEDIDO (o que está na cozinha agora) ── */}
+      {/* ── MEUS PEDIDOS ── */}
       {aba === 'pedido' && (
         <div style={{ padding: 14 }}>
-          {!comanda || (comanda.itens ?? []).length === 0 ? (
-            <div style={{ ...C.bloco, textAlign: 'center', opacity: .8 }}>
-              <div style={{ fontSize: 34 }}>🍽️</div>
-              <p style={{ marginTop: 8 }}>Você não tem nenhum pedido em andamento.</p>
-              <button onClick={() => setAba('cardapio')}
-                style={{ marginTop: 8, padding: '10px 18px', borderRadius: 10, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
-                Ver o cardápio
-              </button>
-            </div>
-          ) : (
-            <div style={C.bloco}>
-              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2 }}>Comanda {String(comanda.numero ?? '').padStart(2, '0')}</div>
+          {/* Comanda aberta na loja: só aparece pra quem ainda tem uma do tempo
+              em que o pedido pelo link virava comanda (mig 0147). Nova não nasce
+              mais — mas quem tem precisa ver o que está em aberto. */}
+          {temComanda && (
+            <div style={{ ...C.bloco, borderColor: '#4c3f7a' }}>
+              <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 2 }}>
+                Conta aberta na loja · comanda {String(comanda.numero ?? '').padStart(2, '0')}
+              </div>
               <div style={{ fontSize: 12, opacity: .7, marginBottom: 10 }}>
                 {comanda.status === 'aguardando_conferencia' ? 'Conta fechada — aguardando a loja liberar' : 'Em andamento'}
               </div>
@@ -471,6 +387,35 @@ export default function ClienteLink() {
                 <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(comanda.subtotal)}</span>
               </div>
               <p style={{ fontSize: 12, opacity: .7, marginTop: 10 }}>💳 O pagamento é feito com a equipe da loja.</p>
+            </div>
+          )}
+
+          {andando.length > 0 && (
+            <>
+              <div style={{ fontWeight: 800, fontSize: 13.5, opacity: .8, margin: '4px 0 8px' }}>EM ANDAMENTO</div>
+              {andando.map(cardPedido)}
+            </>
+          )}
+
+          {passados.length > 0 && (
+            <>
+              <div style={{ fontWeight: 800, fontSize: 13.5, opacity: .8, margin: '16px 0 8px' }}>PEDIDOS ANTERIORES</div>
+              {passados.map(cardPedido)}
+              <p style={{ fontSize: 11.5, opacity: .6, textAlign: 'center' }}>Toque num pedido pra ver o que veio nele.</p>
+            </>
+          )}
+
+          {pedidos.length === 0 && !temComanda && (
+            <div style={{ ...C.bloco, textAlign: 'center', opacity: .85 }}>
+              <div style={{ fontSize: 34 }}>🍽️</div>
+              <p style={{ marginTop: 8 }}>Você ainda não fez nenhum pedido.</p>
+              {linkPedido && (
+                <a href={linkPedido}
+                  style={{ display: 'inline-block', marginTop: 8, padding: '11px 20px', borderRadius: 10, textDecoration: 'none',
+                    background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
+                  Ver o cardápio
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -533,13 +478,14 @@ export default function ClienteLink() {
             ))}
           </div>
 
-          {/* Tudo que ele já comprou, pagando como for (mig 0171). O fiado acima
-              é só o que ficou anotado; aqui entra cartão, dinheiro e PIX também —
-              é o que responde o "que cobrança é essa na minha fatura?". */}
+          {/* Tudo que ele já comprou NA LOJA, pagando como for (mig 0171). O
+              fiado acima é só o que ficou anotado; aqui entra cartão, dinheiro e
+              PIX também — é o que responde o "que cobrança é essa na minha
+              fatura?". Pedido de delivery fica na aba Meus pedidos. */}
           <div style={C.bloco}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>🕘 Suas últimas compras</div>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>🕘 Suas últimas compras na loja</div>
             {(conta?.historico ?? []).length === 0 ? (
-              <p style={{ fontSize: 13, opacity: .7, margin: 0 }}>Você ainda não comprou com a gente.</p>
+              <p style={{ fontSize: 13, opacity: .7, margin: 0 }}>Nada por aqui ainda.</p>
             ) : (conta.historico).map((h, i) => {
               const aberto = histAberto === i
               return (
@@ -577,7 +523,7 @@ export default function ClienteLink() {
 
       {/* ── Indicar (mig 0176) ────────────────────────────────────────────── */}
       {aba === 'indicar' && indic?.ativo && (
-        <div style={{ padding: '14px 14px 90px', display: 'grid', gap: 14 }}>
+        <div style={{ padding: '14px 14px 30px', display: 'grid', gap: 14 }}>
 
           {/* Saldo primeiro: é o que ele abre a aba pra ver */}
           <div style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', borderRadius: 16, padding: '20px 18px', textAlign: 'center' }}>
@@ -585,7 +531,7 @@ export default function ClienteLink() {
             <div style={{ fontSize: 36, fontWeight: 800, margin: '4px 0 2px' }}>{fmt(indic.saldo)}</div>
             <div style={{ fontSize: 12, opacity: .85 }}>
               {Number(indic.saldo) > 0
-                ? 'É só avisar na hora de pagar que a loja desconta.'
+                ? 'Aparece pra você usar na hora de fechar o pedido.'
                 : 'Indique um amigo e seu crédito começa aqui.'}
             </div>
           </div>
@@ -686,82 +632,6 @@ export default function ClienteLink() {
         </div>
       )}
 
-      {/* Barra do carrinho */}
-      {aba === 'cardapio' && totalItens > 0 && (
-        <button onClick={() => setDrawer(true)}
-          style={{ position: 'fixed', left: 12, right: 12, bottom: 12, height: 56, borderRadius: 14, border: 'none', cursor: 'pointer',
-            background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', zIndex: 6 }}>
-          <span>{totalItens} {totalItens === 1 ? 'item' : 'itens'}</span>
-          <span>Ver pedido · {fmt(totalValor)}</span>
-        </button>
-      )}
-
-      {/* Drawer do pedido */}
-      {drawer && (
-        <div onClick={() => setDrawer(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 10, display: 'flex', alignItems: 'flex-end' }}>
-          <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#15102a', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 18, maxHeight: '80dvh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <strong style={{ fontSize: 17 }}>Seu pedido</strong>
-              <button onClick={() => setDrawer(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 24, cursor: 'pointer' }}>×</button>
-            </div>
-            {itens.map(i => (
-              <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #2c2350' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14 }}>{i.nome}</div>
-                  {(i.complementos ?? []).map((c, j) => (
-                    <div key={j} style={{ fontSize: 11.5, color: '#8b7bb8' }}>{Number(c.qtd ?? 1)}× {c.nome}</div>
-                  ))}
-                  <div style={{ fontSize: 12, color: '#a78bfa' }}>{fmt(i.preco)}</div>
-                </div>
-                <button onClick={() => mudar(i.id, -1)} style={btnQ}>−</button>
-                <span style={{ fontWeight: 800, minWidth: 18, textAlign: 'center' }}>{i.qtd}</span>
-                <button onClick={() => mudar(i.id, +1)} style={btnQ}>+</button>
-              </div>
-            ))}
-            <div style={{ display: 'flex', justifyContent: 'space-between', margin: '14px 0', fontSize: 16, fontWeight: 800 }}>
-              <span>Total</span><span style={{ color: '#a78bfa' }}>{fmt(totalValor)}</span>
-            </div>
-            {/* Crédito (mig 0181): pedido, não desconto. A conta ainda pode
-                crescer, então quem abate é a loja no fechamento. */}
-            {saldoLink > 0 && (
-              <button
-                type="button"
-                onClick={() => setUsarSaldoPedido(v => !v)}
-                style={{
-                  width: '100%', textAlign: 'left', cursor: 'pointer', marginBottom: 12,
-                  padding: '12px 14px', borderRadius: 12,
-                  border: `1.5px solid ${usarSaldoPedido ? '#22c55e' : '#2c2350'}`,
-                  background: usarSaldoPedido ? 'rgba(34,197,94,.12)' : 'transparent',
-                  color: '#fff', display: 'flex', alignItems: 'center', gap: 11,
-                }}
-              >
-                <span style={{
-                  width: 20, height: 20, borderRadius: 5, flexShrink: 0,
-                  border: `2px solid ${usarSaldoPedido ? '#22c55e' : '#4c3f7a'}`,
-                  background: usarSaldoPedido ? '#22c55e' : 'transparent',
-                  fontSize: 13, lineHeight: '17px', textAlign: 'center', fontWeight: 800,
-                }}>{usarSaldoPedido ? '✓' : ''}</span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontWeight: 800, fontSize: 14 }}>
-                    🎟️ Usar meu crédito · {fmt(saldoLink)}
-                  </span>
-                  <span style={{ display: 'block', fontSize: 11.5, color: '#8b7bb8', marginTop: 1 }}>
-                    A loja desconta na hora de fechar sua conta.
-                  </span>
-                </span>
-              </button>
-            )}
-            <p style={{ fontSize: 12, opacity: .7, marginBottom: 12 }}>💳 O pagamento é feito com a equipe da loja.</p>
-            <button onClick={() => enviar()} disabled={enviando || !situacao.aberto}
-              style={{ width: '100%', height: 52, borderRadius: 14, border: 'none',
-                cursor: (enviando || !situacao.aberto) ? 'not-allowed' : 'pointer',
-                background: situacao.aberto ? '#22c55e' : '#374151', color: '#fff', fontWeight: 800, fontSize: 16 }}>
-              {!situacao.aberto ? '🌙 A loja está fechada' : enviando ? 'Enviando…' : 'Enviar pedido'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── PIX DO FIADO: escolhe o valor → QR + copia e cola → confirma sozinho ── */}
       {showPix && (
         <div onClick={() => setShowPix(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 25, display: 'flex', alignItems: 'flex-end' }}>
@@ -832,42 +702,6 @@ export default function ClienteLink() {
                 </div>
               </>
             )}
-          </div>
-        </div>
-      )}
-
-      {montando && compMap[montando.produto_id] && (
-        <ModalComplementos
-          produto={montando}
-          grupos={compMap[montando.produto_id]}
-          semObrigatorios={!!info?.sem_obrigatorios}
-          onClose={() => setMontando(null)}
-          onConfirm={addComplemento}
-        />
-      )}
-
-      {/* Senha de 6 números — só aparece na hora de enviar o pedido (mig 0175) */}
-      {senhaModo && (
-        <SenhaCliente
-          modo={senhaModo}
-          erro={senhaErro}
-          ocupado={enviando}
-          onCriar={criarSenha}
-          onDigitar={enviar}
-          onFechar={() => { setSenhaModo(null); setSenhaErro(null) }}
-        />
-      )}
-
-      {sucesso && (
-        <div onClick={() => setSucesso(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', zIndex: 20, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center' }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#15102a', borderRadius: 18, padding: 28, maxWidth: 340, color: '#fff' }}>
-            <div style={{ fontSize: 48 }}>🎉</div>
-            <h2 style={{ margin: '10px 0 6px' }}>Pedido enviado!</h2>
-            <p style={{ opacity: .8, fontSize: 14 }}>Já foi pra cozinha, no seu nome. Acompanhe em "Meu pedido".</p>
-            <button onClick={() => { setSucesso(false); setAba('pedido') }}
-              style={{ marginTop: 18, width: '100%', height: 48, borderRadius: 12, border: 'none', cursor: 'pointer', background: '#7c3aed', color: '#fff', fontWeight: 800 }}>
-              Acompanhar
-            </button>
           </div>
         </div>
       )}

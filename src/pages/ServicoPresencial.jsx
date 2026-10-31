@@ -29,8 +29,9 @@ export default function ServicoPresencial() {
   // Comanda de balcão (mig 0143): libera o botão "+ Nova comanda" no Salão, pra loja
   // em que o cliente pede em pé no balcão. Convive com as mesas de verdade.
   const [comandaBalcao, setComandaBalcao] = useState(false)
-  // Link do cliente (mig 0147): cada cliente cadastrado ganha um link só dele pra
-  // fazer pedido — o pedido vira comanda no nome dele e cai direto na cozinha.
+  // Link do cliente (mig 0147, redesenhado na 0434): cada cliente cadastrado ganha
+  // um link só dele com a conta dele — fiado, pedidos e indicação. Pedir é pelo
+  // catálogo, com o telefone dele no link.
   const [linkCliente, setLinkCliente] = useState(false)
   const [taxa, setTaxa]         = useState(10)
   const [salvando, setSalvando] = useState(false)
@@ -130,12 +131,13 @@ export default function ServicoPresencial() {
         {/* Link do cliente: ele mesmo faz o pedido, do celular dele. */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
           <div style={{ maxWidth: 520 }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>Link de pedido do cliente</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>Link da conta do cliente</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
               Cada cliente cadastrado ganha um <b>link só dele</b> (o botão 🔗 aparece na tela de Clientes).
-              Por esse link ele monta o pedido — que <b>cai direto na cozinha</b> como comanda no nome dele —,
-              acompanha quando fica pronto e vê <b>quanto está devendo</b> de fiado e o que já pagou.
-              Fora do horário da loja ele não consegue enviar.
+              Por esse link ele vê <b>quanto está devendo</b> de fiado e o que já pagou, acompanha
+              <b> os pedidos que fez</b> e pega o <b>link de indicação</b> dele. O botão "Fazer pedido"
+              leva pro seu catálogo já com o nome e o endereço dele preenchidos, e o pedido cai
+              na tela de <b>Delivery</b>.
             </div>
           </div>
           <button
