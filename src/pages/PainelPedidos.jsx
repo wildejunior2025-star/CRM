@@ -2467,23 +2467,50 @@ ${url}
     // duas vezes: o Dashboard soma as duas tabelas, entao ele ignora a venda
     // que nasceu de um pedido. Quem soma DIVIDA continua contando, que e o
     // ponto desta linha existir.
-    if (!editando && pagamento === 'fiado' && novoPedido?.id) {
-      const { error: errFiado } = await supabase.from('vendas').insert({
-        empresa_id: empresa.id,
-        cliente_id: clienteId,
-        forma_pagamento: 'fiado',
-        status: 'entregue',
-        total,
-        pedido_id: novoPedido.id,
-        observacoes: 'Balcao - Pedido #' + (novoPedido.numero_pedido ?? ''),
-      })
-      // O pedido JA foi gravado e a mercadoria vai sair. Se a divida falhar,
-      // nao da pra deixar passar calado: quem esta no balcao precisa saber
-      // agora, com o cliente na frente.
-      if (errFiado) {
-        setErro('O pedido foi salvo, mas a DIVIDA do fiado nao foi registrada: '
-          + errFiado.message + '. Anote e avise o dono.')
-        return
+    // Vale pra pedido NOVO e pra pedido EDITADO. Antes era so `!editando`: quem
+    // trocava a forma de um pedido que ja existia pra fiado via a tela dizer que
+    // deu certo e a divida nao ia pra lugar nenhum — o mesmo buraco que o
+    // paragrafo acima descreve, so que pela porta da edicao. E o caminho que a
+    // loja usa quando o cliente pede pelo cardapio e combina a conta na entrega.
+    const idDoPedido = editando ? pedidoEdicao?.id : novoPedido?.id
+    const numDoPedido = editando ? pedidoEdicao?.numero_pedido : novoPedido?.numero_pedido
+    if (idDoPedido) {
+      // Ja existe divida amarrada neste pedido? Edicao salva duas vezes nao
+      // pode cobrar duas vezes do freguês.
+      const { data: dividaAtual } = await supabase.from('vendas')
+        .select('id').eq('pedido_id', idDoPedido).maybeSingle()
+
+      if (pagamento === 'fiado' && !dividaAtual) {
+        const { error: errFiado } = await supabase.from('vendas').insert({
+          empresa_id: empresa.id,
+          cliente_id: clienteId,
+          forma_pagamento: 'fiado',
+          status: 'entregue',
+          total,
+          pedido_id: idDoPedido,
+          observacoes: 'Balcao - Pedido #' + (numDoPedido ?? ''),
+        })
+        // O pedido JA foi gravado e a mercadoria vai sair. Se a divida falhar,
+        // nao da pra deixar passar calado: quem esta no balcao precisa saber
+        // agora, com o cliente na frente.
+        if (errFiado) {
+          setErro('O pedido foi salvo, mas a DIVIDA do fiado nao foi registrada: '
+            + errFiado.message + '. Anote e avise o dono.')
+          return
+        }
+      } else if (pagamento === 'fiado' && dividaAtual) {
+        // Continua fiado, mas o total pode ter mudado na edicao.
+        await supabase.from('vendas').update({ total, cliente_id: clienteId })
+          .eq('id', dividaAtual.id)
+      } else if (pagamento !== 'fiado' && dividaAtual) {
+        // Deixou de ser fiado: o freguês pagou de outro jeito, entao a divida
+        // sai. Sem isto ele continuaria devendo um pedido que ja foi quitado.
+        const { error: errTira } = await supabase.from('vendas').delete().eq('id', dividaAtual.id)
+        if (errTira) {
+          setErro('O pedido foi salvo, mas a divida ANTIGA do fiado continua lancada: '
+            + errTira.message + '. Avise o dono.')
+          return
+        }
       }
     }
     limparDraft()
