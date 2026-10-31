@@ -89,6 +89,7 @@ export default function PresencialHistorico() {
   const [dia, setDia] = useState('')
   const [carregandoDia, setCarregandoDia] = useState(false)
   const primeiraCargaDia = useRef(true)
+  const [formaFiltro, setFormaFiltro] = useState('')   // '' = todas as formas
   const [garcons, setGarcons]   = useState({})  // { profile_id: nome }
   // { profile_id: perfil } — quem é ADM não divide o bolo (ver ehDaEquipe).
   const [perfis, setPerfis]     = useState({})
@@ -657,15 +658,24 @@ export default function PresencialHistorico() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dia])
 
-  // Resumo do dia (hoje, ou o dia escolhido no filtro)
+  // Formas que existem na lista carregada (é o que o filtro oferece) e a lista já filtrada.
+  const formasNaLista = useMemo(() => {
+    const ids = [...new Set(comandas.map(c => c.forma_pagamento).filter(Boolean))]
+    return ids.map(id => [id, FORMA_LABEL[id] ?? id]).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'))
+  }, [comandas])
+  const comandasFiltradas = useMemo(
+    () => (formaFiltro ? comandas.filter(c => c.forma_pagamento === formaFiltro) : comandas),
+    [comandas, formaFiltro])
+
+  // Resumo do dia (hoje, ou o dia escolhido no filtro; respeita a forma escolhida)
   const resumoHoje = useMemo(() => {
     const alvo = (dia ? new Date(`${dia}T00:00:00`) : new Date()).toDateString()
-    const doDia = comandas.filter(c => c.fechada_at && new Date(c.fechada_at).toDateString() === alvo)
+    const doDia = comandasFiltradas.filter(c => c.fechada_at && new Date(c.fechada_at).toDateString() === alvo)
     return {
       qtd: doDia.length,
       total: doDia.reduce((s, c) => s + Number(c.total || 0), 0),
     }
-  }, [comandas, dia])
+  }, [comandasFiltradas, dia])
   const rotuloDia = dia ? new Date(`${dia}T00:00:00`).toLocaleDateString('pt-BR') : 'hoje'
 
   // Pontos que ELE fez nesta mesa. Não dá pra mostrar R$ por mesa: o bolo é
@@ -1189,18 +1199,26 @@ export default function PresencialHistorico() {
             Voltar às últimas
           </button>
         )}
+        <label style={{ fontSize: 13, fontWeight: 700, marginLeft: 6 }} htmlFor="hist-forma">💳 Pagamento</label>
+        <select id="hist-forma" value={formaFiltro} onChange={e => setFormaFiltro(e.target.value)}
+          style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--text)', fontSize: 14, fontWeight: 600 }}>
+          <option value="">Todas</option>
+          {formasNaLista.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+          {formaFiltro && !formasNaLista.some(([id]) => id === formaFiltro) && <option value={formaFiltro}>{FORMA_LABEL[formaFiltro] ?? formaFiltro}</option>}
+        </select>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           {carregandoDia ? 'buscando...' : dia ? `contas fechadas em ${rotuloDia}` : 'mostrando as últimas 100 contas'}
         </span>
       </div>
 
-      {comandas.length === 0 ? (
+      {comandasFiltradas.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
-          {dia ? 'Nenhuma conta fechada nesse dia.' : ehAdmin ? 'Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾' : 'Você ainda não teve mesa fechada. Assim que fechar, ela aparece aqui. 🧾'}
+          {formaFiltro ? 'Nenhuma conta com essa forma de pagamento.' : dia ? 'Nenhuma conta fechada nesse dia.' : ehAdmin ? 'Nenhuma conta fechada ainda. Feche uma conta no Salão que ela aparece aqui. 🧾' : 'Você ainda não teve mesa fechada. Assim que fechar, ela aparece aqui. 🧾'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {comandas.map(c => {
+          {comandasFiltradas.map(c => {
             const expandida = aberta === c.id
             return (
               <div key={c.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
