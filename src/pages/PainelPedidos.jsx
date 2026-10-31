@@ -10372,6 +10372,20 @@ export default function PainelPedidos() {
                   }
                   return [...prev, novo]
                 }
+                // O ACEITE É O QUE MANDA O PAPEL (31/10/2026, Marajó)
+                //
+                // Desde 26/10 o pedido 'aguardando' não imprime (se a loja pode
+                // recusar, a cozinha não começa). Só que quem imprimia NO ACEITE
+                // era o app Impressora FWC — o caminho do celular (Bluetooth) e do
+                // navegador só olhava o pedido nascendo, então o aceite, manual ou
+                // automático, nunca virava papel e o dono imprimia no botão. A vez é
+                // do pedido (reservar_impressao), então repetir aqui não duplica.
+                const antes = prev.find(p => p.id === novo.id)
+                if (antes?.status === 'aguardando' && novo.status === 'confirmado'
+                    && !ehAgendadoPendente(novo)
+                    && deveAutoImprimir() && !fwcImprimeRef.current) {
+                  autoImprimirPedido({ ...antes, ...novo })
+                }
                 // Atualiza card existente
                 return prev.map(p => p.id === novo.id ? { ...p, ...novo } : p)
               })
@@ -10510,6 +10524,13 @@ export default function PainelPedidos() {
       update.saiu_entrega_at = new Date().toISOString()
     }
 
+    // Aceitou aqui: é este o momento do papel (ver o comentário no realtime).
+    // A tela é atualizada antes do aviso do banco chegar, então o gancho do
+    // realtime não enxerga a mudança 'aguardando' → 'confirmado' feita por este
+    // aparelho; quem imprime neste caso é esta linha.
+    const aceitouAgora = novoStatus === 'confirmado'
+      ? pedidos.find(x => x.id === id && x.status === 'aguardando') : null
+
     // Atualização otimista — resposta imediata sem esperar Realtime
     if (STATUS_FINALIZADOS.has(novoStatus)) {
       setPedidos(prev => prev.filter(p => p.id !== id))
@@ -10517,10 +10538,15 @@ export default function PainelPedidos() {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, ...update } : p))
     }
 
-    await supabase
+    const { error: erroAvanco } = await supabase
       .from('pedidos_delivery')
       .update(update)
       .eq('id', id)
+
+    if (!erroAvanco && aceitouAgora && !ehAgendadoPendente(aceitouAgora)
+        && deveAutoImprimir() && !fwcImprimeRef.current) {
+      autoImprimirPedido({ ...aceitouAgora, ...update })
+    }
 
     // Pedido concluído → recarrega a coluna "Concluídos hoje"
     if (novoStatus === 'entregue') carregarConcluidosHoje()
