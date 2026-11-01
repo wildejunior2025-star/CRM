@@ -10304,6 +10304,9 @@ export default function PainelPedidos() {
       p_pagamentos: pags,
       p_aplicar_taxa: pend.aplicar_taxa ?? true,
       p_cliente_id: pend.cliente_id ?? null,
+      // A gorjeta que o garçom marcou ao receber. Sem mandar, o banco via
+      // "pagamento maior que a conta" e derrubava a liberação (o Salão já mandava).
+      p_gorjeta: Number(pend.gorjeta || 0),
     })
     if (error) { alert(recadoDeErro(error, 'liberar a mesa')); return }
     comandaEscritaRef.current = Date.now()
