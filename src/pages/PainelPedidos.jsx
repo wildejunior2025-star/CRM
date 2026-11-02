@@ -5493,6 +5493,12 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
     ? (entregadores.find(en => en.id === pedido.entregador_id)?.nome || 'Entregador')
     : null
   const aguardandoEntregador = pedido.status === 'pronto' && !pedido.entregador_id && !isRetirada
+  // Em que pé está o motoqueiro do iFood. Vale desde a cozinha: saber que já
+  // tem alguém designado muda a ordem do que se monta primeiro.
+  const etapaMoto = pedido.origem === 'ifood' ? ETAPA_MOTOBOY[pedido.ifood_entregador_etapa] : null
+  const etapaMotoHora = etapaMoto && pedido.ifood_entregador_em
+    ? new Date(pedido.ifood_entregador_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : null
   const acao = onAvancar ? acaoRapidaPedido(pedido) : null
   const voltar = onVoltar ? acaoVoltarPedido(pedido) : null
   return (
@@ -5526,7 +5532,13 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
         <span className="pp-mini-itens">{qtdItens} {qtdItens === 1 ? 'item' : 'itens'}</span>
         {isRetirada && <span className="pp-mini-itens">{pedido.origem === 'balcao' ? 'Balcão' : 'Retirada'}</span>}
         {entregadorNome && <span className="pp-mini-itens">🛵 {entregadorNome}</span>}
-        {aguardandoEntregador && (
+        {/* Sabendo a etapa do motoqueiro, ela vale mais que o "aguardando" genérico */}
+        {etapaMoto && pedido.status !== 'entregue' && (
+          <span className="pp-mini-itens" style={{ color: etapaMoto.cor, fontWeight: 700 }}>
+            🛵 {etapaMoto.txt}{etapaMotoHora ? ` · ${etapaMotoHora}` : ''}
+          </span>
+        )}
+        {aguardandoEntregador && !etapaMoto && (
           <span className="pp-mini-itens" style={{ color: '#a16207' }}>
             {pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD'
               ? 'aguardando o entregador do iFood'
