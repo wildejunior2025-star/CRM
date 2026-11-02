@@ -1186,7 +1186,9 @@ export default function WhatsAppConfig() {
                       Não vale em feriado
                     </label>
                     <p className="wa-hint" style={{ margin: '4px 0 0' }}>
-                      Usa os feriados que você marcou no horário da loja.
+                      Vale pros feriados nacionais (Finados, Natal, 7 de Setembro...) e também
+                      pros dias que você marcou na mão no horário da loja — feriado só da
+                      cidade, por exemplo. Mesmo com a loja aberta no feriado, a promoção não vale.
                     </p>
 
                     <div className="wa-primeira-fala-acoes">

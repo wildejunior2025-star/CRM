@@ -373,15 +373,19 @@ function listaDeDias(dias: number[]): string {
 
 const soHora = (v: unknown) => String(v ?? "").slice(0, 5)
 
-/** { vale, quando } — `quando` é a frase da janela, pra dizer o que HOJE não é. */
+/**
+ * { vale, quando, feriado } — `quando` é a frase da janela, pra dizer o que
+ * HOJE não é, e `feriado` diz que o que derrubou foi o feriado (a fala muda:
+ * "hoje é segunda" e "hoje não é dia" na mesma frase confunde quem leu).
+ */
 function janelaDoRecado(
   cfg: Record<string, unknown>, excecoes: Excecoes,
-): { vale: boolean; quando: string } {
+): { vale: boolean; quando: string; feriado: boolean } {
   const dias = Array.isArray(cfg.recado_dias) ? (cfg.recado_dias as number[]).map(Number) : null
   const ini = soHora(cfg.recado_hora_inicio)
   const fim = soHora(cfg.recado_hora_fim)
   // Sem janela cadastrada vale sempre — é como todas as lojas estavam antes.
-  if (!dias?.length && !ini && !fim) return { vale: true, quando: "" }
+  if (!dias?.length && !ini && !fim) return { vale: true, quando: "", feriado: false }
 
   const partes: string[] = []
   if (dias?.length) partes.push(listaDeDias(dias))
@@ -392,14 +396,30 @@ function janelaDoRecado(
   const [a, m, d] = hoje.split("-").map(Number)
   const dow = new Date(a, m - 1, d).getDay()
 
-  if (dias?.length && !dias.includes(dow)) return { vale: false, quando }
-  if (ini && agora < paraMin(ini)) return { vale: false, quando }
-  if (fim && agora >= paraMin(fim)) return { vale: false, quando }
-  // Feriado derruba mesmo caindo num dia bom — é o que a loja quis dizer com
-  // "não funciona em feriado". Usa o MESMO calendário da grade da loja.
-  if (cfg.recado_pula_feriado !== false && excecoes[hoje]) return { vale: false, quando }
+  if (dias?.length && !dias.includes(dow)) return { vale: false, quando, feriado: false }
+  if (ini && agora < paraMin(ini)) return { vale: false, quando, feriado: false }
+  if (fim && agora >= paraMin(fim)) return { vale: false, quando, feriado: false }
+  // Feriado derruba mesmo caindo num dia bom e dentro da hora — é o que a loja
+  // quis dizer com "não funciona em feriado".
+  //
+  // SÃO DUAS FONTES, porque são dois feriados diferentes: o dia que a LOJA
+  // marcou na mão (dias_excecao, inclusive feriado só da cidade) e o feriado
+  // NACIONAL do calendário. Só a primeira estava sendo olhada, e o Braseiro
+  // não marca nada na mão — em Finados (02/11/2026, uma segunda), às 18:16,
+  // dentro da janela, o robô respondeu "Sim, nosso Happy Hour está
+  // funcionando!" numa conversa real.
+  //
+  // O calendário vale aqui mesmo com feriados_fecha = false: abrir no feriado
+  // e dar a promoção no feriado são decisões separadas, e a loja já disse que
+  // a promoção não vale (recado_pula_feriado).
+  if (cfg.recado_pula_feriado !== false) {
+    const nacional = feriadosDoAno(a).has(hoje)
+    // `feriado` só com o calendário na mão: dia marcado na mão pode ser só um
+    // horário diferente, e aí dizer "hoje é feriado" seria o robô inventando.
+    if (nacional || excecoes[hoje]) return { vale: false, quando, feriado: nacional }
+  }
 
-  return { vale: true, quando }
+  return { vale: true, quando, feriado: false }
 }
 
 function recadoDoDia(
@@ -415,11 +435,18 @@ function recadoDoDia(
     new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t))
   if (!casa) return null
 
-  const { vale, quando } = janelaDoRecado(cfg, excecoes)
+  const { vale, quando, feriado } = janelaDoRecado(cfg, excecoes)
   if (vale) return recado
-  const feriado = cfg.recado_pula_feriado !== false ? ", e não vale em feriado" : ""
+  // Feriado tem fala própria: "Hoje não, é de segunda a sexta" num feriado que
+  // CAI na segunda é o robô se contradizendo pra quem está lendo.
+  if (feriado) {
+    return quando
+      ? `Hoje é feriado, então a promoção não vale, não. 😅${NL}Ela é ${quando}.`
+      : "Hoje é feriado, então a promoção não vale, não. 😅"
+  }
+  const emFeriado = cfg.recado_pula_feriado !== false ? ", e não vale em feriado" : ""
   return quando
-    ? `Hoje não, viu. 😅 É ${quando}${feriado}.`
+    ? `Hoje não, viu. 😅 É ${quando}${emFeriado}.`
     : null
 }
 
