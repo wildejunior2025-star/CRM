@@ -3527,6 +3527,37 @@ function AtualizarAppCard() {
 //
 // O motivo de não exigir: na correria a pessoa não pergunta o código, e um
 // pedido preso na tela esperando digitação atrapalha mais do que ajuda.
+// ONDE ESTÁ O MOTOQUEIRO DO IFOOD
+// Quando a entrega é do iFood, eles avisam cada etapa do entregador deles.
+// A cozinha quer saber uma coisa só: já tem alguém vindo buscar? E o balcão:
+// ele já está na porta? Uma linha resolve os dois.
+const ETAPA_MOTOBOY = {
+  designado:     { txt: 'Motoboy do iFood designado',        cor: '#a16207', fundo: 'rgba(245,158,11,.14)' },
+  indo_loja:     { txt: 'Motoboy do iFood a caminho da loja', cor: '#a16207', fundo: 'rgba(245,158,11,.14)' },
+  na_loja:       { txt: 'Motoboy chegou na loja',             cor: '#15803d', fundo: 'rgba(22,163,74,.16)' },
+  coletou:       { txt: 'Motoboy pegou o pedido',             cor: '#15803d', fundo: 'rgba(22,163,74,.16)' },
+  indo_cliente:  { txt: 'Motoboy a caminho do cliente',       cor: '#6d28d9', fundo: 'rgba(139,92,246,.14)' },
+  no_cliente:    { txt: 'Motoboy chegou no cliente',          cor: '#6d28d9', fundo: 'rgba(139,92,246,.14)' },
+  sem_motoqueiro:{ txt: 'Sem motoboy ainda (o iFood está procurando)', cor: '#b45309', fundo: 'rgba(245,158,11,.14)' },
+}
+
+function MotoboyIfood({ pedido }) {
+  const e = ETAPA_MOTOBOY[pedido.ifood_entregador_etapa]
+  if (!e) return null
+  const hora = pedido.ifood_entregador_em
+    ? new Date(pedido.ifood_entregador_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', margin: '6px 0 0',
+      padding: '6px 10px', borderRadius: 8, background: e.fundo, color: e.cor, fontSize: 12.5, fontWeight: 700 }}>
+      <span>🛵 {e.txt}</span>
+      {pedido.ifood_entregador_nome && <span style={{ fontWeight: 600 }}>· {pedido.ifood_entregador_nome}</span>}
+      {hora && <span style={{ fontWeight: 600, opacity: .85 }}>· {hora}</span>}
+      {pedido.ifood_codigo_coleta && <span style={{ fontWeight: 800 }}>· código {pedido.ifood_codigo_coleta}</span>}
+    </div>
+  )
+}
+
 function CodigoColetaIfood({ pedido, onLiberar }) {
   const [digitos, setDigitos] = useState(['', '', '', ''])
   const [estado, setEstado] = useState(null) // null | 'validando' | erro (texto)
@@ -4303,6 +4334,9 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         </div>
       )}
 
+      {/* Onde está o motoqueiro do iFood (só na entrega deles) */}
+      {entregaDoIfood && <MotoboyIfood pedido={pedido} />}
+
       {/* Acoes por status */}
       <div className="pp-acoes">
         {/* Passo 1: aceitar */}
@@ -4358,7 +4392,10 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           <div style={{ width: '100%' }}>
             <p style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, margin: '0 0 10px', color: pedido.entregador_id ? '#16a34a' : '#a16207' }}>
               {pedido.entregador_id ? '🛵 Entregador a caminho'
-                : entregaDoIfood ? '⏳ Pronto · aguardando o entregador do iFood buscar'
+                : entregaDoIfood
+                  ? (ETAPA_MOTOBOY[pedido.ifood_entregador_etapa]
+                      ? `⏳ Pronto · ${ETAPA_MOTOBOY[pedido.ifood_entregador_etapa].txt.toLowerCase()}`
+                      : '⏳ Pronto · aguardando o entregador do iFood buscar')
                 : '✅ Pronto · aguardando um entregador aceitar'}
             </p>
             {/* Entrega do iFood: a sacola sai no balcão, com o entregador deles.

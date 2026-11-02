@@ -284,6 +284,64 @@ async function guardarCodigoColeta(sb: any, token: string, orderId: string) {
   }
 }
 
+// ETAPA DO MOTOQUEIRO DO IFOOD — designado, vindo, na porta
+// ─────────────────────────────────────────────────────────────────────
+// O iFood avisa no mesmo canal dos pedidos em que pé está o entregador DELE.
+// A gente já lia esses eventos pra pegar o código de coleta e jogava a etapa
+// fora. Guardar muda a vida da cozinha: dá pra saber se já tem motoqueiro
+// vindo (vale começar a montar) e o balcão vê que ele chegou sem ninguém
+// gritar. Vale só pra entrega do iFood — com motoboy da loja isso não existe.
+//
+// Lê pelo ASSUNTO do evento, não por lista de código: a lista do iFood muda de
+// módulo pra módulo e de versão pra versão, o assunto não.
+const ETAPA_RANK: Record<string, number> = {
+  sem_motoqueiro: 0, designado: 1, indo_loja: 2, na_loja: 3,
+  coletou: 4, indo_cliente: 5, no_cliente: 6,
+}
+
+function etapaDoEntregador(code: string, full: string): string | null {
+  const t = `${code ?? ""} ${full ?? ""}`.toUpperCase()
+  if (t.includes("UNASSIGN") || t.includes("NO_DRIVER") || t.includes("DRIVER_CANCEL")) return "sem_motoqueiro"
+  if (t.includes("COLLECT")) return "coletou"
+  if (t.includes("ORIGIN")) return t.includes("ARRIV") ? "na_loja" : "indo_loja"
+  if (t.includes("DESTINATION")) return t.includes("ARRIV") ? "no_cliente" : "indo_cliente"
+  if (t.includes("ASSIGN") || t.includes("DRIVER")) return "designado"
+  return null
+}
+
+function nomeDoEntregador(ev: any): string | null {
+  const m = ev?.metadata ?? {}
+  const bruto = m.DRIVER_NAME ?? m.driverName ?? m.driver?.name ?? m.DRIVER ?? null
+  const s = bruto == null ? "" : String(bruto).trim()
+  return s && s.length <= 80 ? s : null
+}
+
+async function guardarEtapaDoEntregador(sb: any, orderId: string, ev: any, code: string, full: string) {
+  const etapa = etapaDoEntregador(code, full)
+  if (!etapa) return
+  try {
+    const { data: p } = await sb.from("pedidos_delivery")
+      .select("id, ifood_entregador_etapa")
+      .eq("ifood_order_id", orderId)
+      .maybeSingle()
+    if (!p) return
+    // Evento do iFood chega fora de ordem: a etapa não pode andar pra trás.
+    // "sem_motoqueiro" é a exceção — ali o iFood tirou o entregador de verdade.
+    const atual = ETAPA_RANK[p.ifood_entregador_etapa ?? ""] ?? -1
+    if (etapa !== "sem_motoqueiro" && (ETAPA_RANK[etapa] ?? 0) < atual) return
+    const nome = nomeDoEntregador(ev)
+    const quando = new Date(ev?.createdAt ?? Date.now())
+    await sb.from("pedidos_delivery").update({
+      ifood_entregador_etapa: etapa,
+      ifood_entregador_em: (isNaN(+quando) ? new Date() : quando).toISOString(),
+      ifood_entregador_evento: String(full || code || "").slice(0, 80) || null,
+      ...(nome ? { ifood_entregador_nome: nome } : {}),
+    }).eq("id", p.id)
+  } catch {
+    // Extra de tela: se falhar, o pedido segue igual. Não derruba o polling.
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // POLL — busca eventos de todas as empresas e grava os pedidos novos
 // ─────────────────────────────────────────────────────────────────────
@@ -368,8 +426,12 @@ async function runPoll(sb: any) {
           // nasce depois que o iFood designa o entregador. Na leitura do PLACED
           // ele vem vazio — por isso busca de novo agora.
           await guardarCodigoColeta(sb, token, orderId)
+          await guardarEtapaDoEntregador(sb, orderId, ev, code, full)
           await atualizarStatusLocal(sb, orderId, code)
         } else {
+          // Evento de etapa que não fala de coleta (a caminho do cliente, por
+          // exemplo). Sai na hora se não for do entregador.
+          await guardarEtapaDoEntregador(sb, orderId, ev, code, full)
           await atualizarStatusLocal(sb, orderId, code)
         }
       }
