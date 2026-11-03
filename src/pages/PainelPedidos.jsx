@@ -3852,7 +3852,75 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
   )
 }
 
-function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo, onTrocarPagamento }) {
+// Desconto no pedido de delivery. "Tirar a taxa" é o caso do cliente fixo; o
+// campo livre serve pra qualquer outro valor. Digitar 0 desfaz o desconto.
+function ModalDesconto({ pedido, onFechar, onSalvar }) {
+  const [valor, setValor] = useState(Number(pedido?.desconto) > 0 ? paraTxt(Number(pedido.desconto)) : '')
+  const [salvando, setSalvando] = useState(false)
+  if (!pedido) return null
+  const descAtual = Number(pedido.desconto || 0)
+  const base = Math.round((Number(pedido.total || 0) + descAtual) * 100) / 100   // total sem desconto
+  const taxa = Number(pedido.taxa_entrega || 0)
+  const v = valor === '' ? 0 : paraNum(valor)
+  const ok = Number.isFinite(v) && v >= 0 && v < base
+  const novoTotal = ok ? Math.round((base - v) * 100) / 100 : null
+  async function confirmar() {
+    if (!ok) return
+    setSalvando(true)
+    await onSalvar(pedido, v, novoTotal)
+    setSalvando(false)
+  }
+  return (
+    <div className="pp-modal-overlay" onClick={onFechar} style={{ zIndex: 220 }}>
+      <div className="pp-modal" onClick={e => e.stopPropagation()}>
+        <p className="pp-modal-titulo">Desconto no #{pedido.numero_pedido ?? String(pedido.id).slice(-4).toUpperCase()}</p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '2px 0 12px' }}>
+          Total sem desconto <strong>{fmt(base)}</strong>{taxa > 0 && <> &middot; taxa de entrega {fmt(taxa)}</>}
+        </p>
+        {taxa > 0 && (
+          <button type="button" onClick={() => setValor(paraTxt(taxa))}
+            style={{ width: '100%', padding: '11px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+              fontSize: 14, fontWeight: 700, marginBottom: 10,
+              border: `1.5px solid ${Math.abs(v - taxa) < 0.005 ? 'var(--primary)' : 'var(--border)'}`,
+              background: Math.abs(v - taxa) < 0.005 ? 'var(--primary-bg)' : 'var(--surface)',
+              color: Math.abs(v - taxa) < 0.005 ? 'var(--primary)' : 'var(--text)' }}>
+            🛵 Tirar a taxa de entrega ({fmt(taxa)})
+          </button>
+        )}
+        <label style={{ fontSize: 13, fontWeight: 700 }}>Valor do desconto (R$)</label>
+        <input value={valor} onChange={e => setValor(e.target.value)} placeholder="0,00" inputMode="decimal" autoFocus
+          style={{ width: '100%', marginTop: 4, padding: '9px 11px', borderRadius: 8,
+            border: `1.5px solid ${ok ? 'var(--border)' : 'var(--danger)'}`,
+            background: 'var(--surface)', color: 'var(--text)', fontSize: 15, fontWeight: 700 }} />
+        {!ok && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '4px 0 0' }}>O desconto tem que ser menor que o total.</p>}
+        {ok && (
+          <p style={{ fontSize: 14, margin: '10px 0 0', fontWeight: 800 }}>
+            Cliente paga: {fmt(novoTotal)}
+          </p>
+        )}
+        {pedido.forma_pagamento === 'dividido' && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+            Pagamento dividido: a diferença sai da parte em dinheiro (ou da última parte).
+          </p>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <button type="button" onClick={onFechar}
+            style={{ flex: 1, padding: 11, borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+              border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text)' }}>
+            Cancelar
+          </button>
+          <button type="button" onClick={confirmar} disabled={salvando || !ok}
+            style={{ flex: 1, padding: 11, borderRadius: 9, cursor: salvando ? 'wait' : 'pointer', fontWeight: 800,
+              border: 'none', background: 'var(--primary)', color: '#fff', opacity: salvando || !ok ? 0.6 : 1 }}>
+            {salvando ? 'Salvando...' : 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onEnviarMensagem, onImprimir, onImprimirCelular, onAtribuir, onEditar, entregadores = [], nfceHabilitada = false, onEmitirNfce, nfceEmitindo, onTrocarPagamento, onDesconto }) {
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const pagamento = pedido.forma_pagamento || ''
   const endereco = enderecoCompleto(pedido)
@@ -4208,6 +4276,12 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
                 <span>− {fmt(pedido.cashback_usado)}</span>
               </div>
             )}
+            {Number(pedido.desconto || 0) > 0 && (
+              <div className="pp-totais-row" style={{ color: '#16a34a' }}>
+                <span>🏷️ Desconto</span>
+                <span>− {fmt(pedido.desconto)}</span>
+              </div>
+            )}
             <div className="pp-totais-total">
               <span>Total</span>
               <span>{fmt(pedido.total)}</span>
@@ -4282,6 +4356,14 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             ✏️ trocar
           </button>
         )}
+        {onDesconto && pedido.status !== 'cancelado' && !isIfood && (
+          <button type="button" onClick={() => onDesconto(pedido)}
+            title="Dar desconto neste pedido (ex.: tirar a taxa de entrega)"
+            style={{ marginLeft: 2, padding: '1px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+              border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)' }}>
+            🏷️ desconto
+          </button>
+        )}
       </div>
       ) : (
       <div className="pp-pagamento-row">
@@ -4328,6 +4410,18 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             style={{ marginLeft: 2, padding: '1px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 800,
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)' }}>
             ✏️ trocar
+          </button>
+        )}
+        {/* Desconto no pedido (Agv, 03/11/2026): cliente fixo que pede pelo link
+            e não paga a taxa de entrega. Só muda o que o cliente paga; a taxa do
+            motoboy continua a mesma. Pré-pago fica de fora (o dinheiro já passou). */}
+        {onDesconto && pedido.status !== 'cancelado' && !isIfood
+          && !(pagamento === 'online' || (pagamento === 'pix' && (pedido.pix_status === 'pago' || pedido.mp_payment_status === 'approved'))) && (
+          <button type="button" onClick={() => onDesconto(pedido)}
+            title="Dar desconto neste pedido (ex.: tirar a taxa de entrega)"
+            style={{ marginLeft: 2, padding: '1px 8px', borderRadius: 20, cursor: 'pointer', fontSize: 11, fontWeight: 800,
+              border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)' }}>
+            🏷️ desconto
           </button>
         )}
       </div>
@@ -7643,6 +7737,7 @@ export default function PainelPedidos() {
   // NFC-e: a loja habilitou a emissão E registrou o certificado no emissor?
   const [nfceHabilitada, setNfceHabilitada] = useState(false)
   const [trocaPag, setTrocaPag] = useState(null)   // pedido com a forma de pagamento sendo corrigida
+  const [descontoPed, setDescontoPed] = useState(null) // pedido que está recebendo desconto
   const [nfceEmitindo, setNfceEmitindo] = useState(null) // id do pedido em emissão
   useEffect(() => {
     if (!empresa?.id) return
@@ -7708,6 +7803,20 @@ export default function PainelPedidos() {
     }).eq('id', pedido.id)
     if (error) { alert('N\u00e3o consegui salvar: ' + error.message); return }
     setTrocaPag(null)
+  }
+
+  // Desconto no pedido: muda `desconto` e `total` (o que o cliente paga). A taxa
+  // de entrega fica como está, então o ganho do motoboy não muda. No dividido, o
+  // gatilho validar_pagamentos_pedido ajusta a parte em dinheiro sozinho.
+  async function salvarDesconto(pedido, desconto, novoTotal) {
+    if (pedido.forma_pagamento === 'fiado') {
+      alert('Pedido no fiado: a dívida já foi lançada com o valor antigo. Troque a forma de pagamento antes de dar o desconto.')
+      return
+    }
+    const { error } = await supabase.from('pedidos_delivery')
+      .update({ desconto, total: novoTotal }).eq('id', pedido.id)
+    if (error) { alert('Não consegui salvar o desconto: ' + error.message); return }
+    setDescontoPed(null)
   }
 
   async function handleEmitirNfce(pedido) {
@@ -11393,6 +11502,7 @@ export default function PainelPedidos() {
                       onImprimir={handleImprimir} onImprimirCelular={handleImprimirCelular}
                       nfceHabilitada={nfceHabilitada}
                       onTrocarPagamento={setTrocaPag}
+                      onDesconto={setDescontoPed}
                       onEmitirNfce={handleEmitirNfce}
                       nfceEmitindo={nfceEmitindo}
                     />
@@ -11628,6 +11738,7 @@ export default function PainelPedidos() {
               entregadores={entregadores}
               nfceHabilitada={nfceHabilitada}
               onTrocarPagamento={setTrocaPag}
+                      onDesconto={setDescontoPed}
               onEmitirNfce={handleEmitirNfce}
               nfceEmitindo={nfceEmitindo}
             />
@@ -13115,6 +13226,11 @@ export default function PainelPedidos() {
         pedido={trocaPag}
         onFechar={() => setTrocaPag(null)}
         onSalvar={salvarTrocaPagamento}
+      />
+      <ModalDesconto
+        pedido={descontoPed}
+        onFechar={() => setDescontoPed(null)}
+        onSalvar={salvarDesconto}
       />
     </div>
   )
