@@ -486,6 +486,17 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   const tribEstadual = tribFederal === null ? null : Number(Math.max(0, tribTotal - tribFederal).toFixed(2))
 
   const total = Number(ped.total ?? ped.subtotal ?? 0) || items.reduce((s, i) => s + i.valor_bruto, 0)
+  // Taxa de entrega / acrescimo / desconto: o que o cliente pagou (total) difere da soma dos
+  // itens. Sem ajustar, a nota sai com pagamento maior (ou menor) que o total e a SEFAZ
+  // rejeita ("Ausencia de troco..."). Diferenca positiva vai em outras despesas (vOutro),
+  // negativa em desconto, ambos no primeiro item.
+  const somaItens = Number(items.reduce((s, i) => s + (i.valor_bruto as number), 0).toFixed(2))
+  const difTotal = Number((total - somaItens).toFixed(2))
+  if (items.length > 0 && Math.abs(difTotal) >= 0.01) {
+    Object.assign(items[0], difTotal > 0
+      ? { valor_outras_despesas: difTotal }
+      : { valor_desconto: Math.min(-difTotal, items[0].valor_bruto as number) })
+  }
   // Pagamento em duas formas (mig 0274): cada parte sai como uma forma na nota.
   const partesPag: { forma: string; valor: number }[] =
     Array.isArray(ped.pagamentos) && ped.pagamentos.length > 1
