@@ -206,6 +206,9 @@ export default function PresencialSalao() {
   // Loja desligou em Funcionários (mig 0412): garçom não tira o que já lançou.
   // A trava de verdade é no banco; aqui só some o botão que não vai funcionar.
   const [garcomApagaEnviado, setGarcomApagaEnviado] = useState(true)
+  // Loja liberou o vendedor pra digitar outro preço no item (mig 0434). Admin sempre pode.
+  const [vendedorEditaPreco, setVendedorEditaPreco] = useState(false)
+  const podeEditarPreco = ehAdmin || (profile?.perfil === 'vendedor' && vendedorEditaPreco)
   const garcomNaoTira = profile?.perfil === 'garcom' && !garcomApagaEnviado
   const [avisoImpressao, setAvisoImpressao] = useState(null) // remessa que nao saiu no papel
   const [reimprimindo, setReimprimindo] = useState(false)
@@ -503,7 +506,7 @@ export default function PresencialSalao() {
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
     const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
-      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento, garcom_apaga_enviado').eq('id', empresaId).single(),
+      supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento, garcom_apaga_enviado, vendedor_edita_preco').eq('id', empresaId).single(),
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
       supabase.rpc('mp_conectado_loja'),
@@ -531,6 +534,7 @@ export default function PresencialSalao() {
       setSemObrigatorios(!!emp.data.presencial_sem_obrigatorios)
       setSemCozinha(!!emp.data.presencial_sem_cozinha)
       setGarcomApagaEnviado(emp.data.garcom_apaga_enviado !== false)
+      setVendedorEditaPreco(!!emp.data.vendedor_edita_preco)
       setComandaBalcaoAtiva(!!emp.data.comanda_balcao_ativa)
       // Vales (Pluxee, Alelo, VR, Ticket): só os que a loja ligou em Minha Loja → Pagamento.
       const ligadas = Array.isArray(emp.data.formas_pagamento) ? emp.data.formas_pagamento : []
@@ -3415,7 +3419,7 @@ export default function PresencialSalao() {
                             style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
                               border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
                           />
-                        ) : ehAdmin ? (
+                        ) : podeEditarPreco ? (
                           <button type="button" title="Editar preço deste item"
                             onClick={() => setPrecoEdit(prev => ({ ...prev, [grupo.chave]: Number(grupo.preco_unitario) > 0 ? numeroParaMoeda(grupo.preco_unitario) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
@@ -3494,7 +3498,7 @@ export default function PresencialSalao() {
                             style={{ minWidth: 70, width: 70, padding: '4px 6px', fontSize: 13, borderRadius: 6, textAlign: 'right',
                               border: '1.5px solid var(--primary)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}
                           />
-                        ) : ehAdmin ? (
+                        ) : podeEditarPreco ? (
                           <button type="button" title="Digitar o preço deste item (ex: o valor que deu no peso)"
                             onClick={() => setPrecoRascEdit(prev => ({ ...prev, [r.linha ?? String(r.produto_id)]: Number(r.preco_venda) > 0 ? numeroParaMoeda(r.preco_venda) : '' }))}
                             style={{ minWidth: 70, textAlign: 'right', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
