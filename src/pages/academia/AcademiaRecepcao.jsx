@@ -20,6 +20,9 @@ import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '.
 const CONFIRMAR_LEITURAS = 3     // mesma pessoa em 3 leituras seguidas antes de liberar
 const CERTEZA_ALTA = 0.33        // abaixo disso uma leitura só basta (quase igual ao cadastro)
 const LEITURA_LENTA_MS = 330      // acima disso o detector baixa pra nao deixar o aluno esperando
+// De quanto em quanto tempo tenta religar a catraca sozinha. Eram 20 s, e
+// nesses 20 s o aluno ficava parado na porta sem ninguem entender por que.
+const RELIGAR_MS = 4000
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -61,6 +64,26 @@ export default function AcademiaRecepcao() {
   const abrindoRef = useRef(false)
   const canalPorta = useRef(null)
 
+  // Religa a porta serial. Usada pelo laço automático, pelo botão da tela e
+  // logo depois de uma falha — sem esperar a próxima rodada.
+  const religandoRef = useRef(false)
+  async function religarCatraca() {
+    if (religandoRef.current || !serialSuportado()) return
+    religandoRef.current = true
+    setCatraca('religando')
+    try {
+      await fecharPorta()
+      await conectarCatraca()
+      localRef.current = true
+      ehOComputadorDaCatraca.current = true
+      setCatraca('ok')
+    } catch (e) {
+      setCatraca(e.message)
+    } finally {
+      religandoRef.current = false
+    }
+  }
+
   async function abrirCatraca(aluno) {
     // Pulso dura 3 s. Dois pedidos em cima do outro atrapalhavam o sinal e
     // derrubavam a porta — o segundo espera a próxima vez.
@@ -84,6 +107,9 @@ export default function AcademiaRecepcao() {
         // enquanto a tela dizia "catraca pelo computador" como se tudo bem.
         localRef.current = false
         setCatraca(e.message || 'Não consegui abrir a catraca.')
+        // Religa JA, sem esperar a proxima rodada do laço: era isso que
+        // deixava o aluno parado na porta por 20 segundos.
+        if (ehOComputadorDaCatraca.current) setTimeout(religarCatraca, 300)
         if (canalPorta.current) {
           canalPorta.current.send({
             type: 'broadcast', event: 'liberar',
@@ -287,14 +313,12 @@ export default function AcademiaRecepcao() {
     // de "ok" vale uma tentativa — inclusive o "pc", que parecia saudável mas
     // era a conversa com um computador que não existe (é este aqui).
     const reconecta = serialSuportado() ? setInterval(() => {
-      if (abrindoRef.current) return
+      if (abrindoRef.current || religandoRef.current) return
       const atual = catracaRef.current
-      if (atual === 'ok' || atual === 'abrindo') return
+      if (atual === 'ok' || atual === 'abrindo' || atual === 'religando') return
       if (!ehOComputadorDaCatraca.current) return
-      fecharPorta()
-        .then(conectarCatraca)
-        .then(() => { localRef.current = true; setCatraca('ok') }, e => setCatraca(e.message))
-    }, 20000) : null
+      religarCatraca()
+    }, RELIGAR_MS) : null
     return () => {
       vivo = false
       clearInterval(recarga)
@@ -376,8 +400,26 @@ export default function AcademiaRecepcao() {
             <div className={['ok', 'pc', 'abrindo'].includes(catraca) ? 'ok' : 'erro'}>
               {catraca === 'ok' ? '● Catraca conectada'
                 : catraca === 'pc' ? '● Catraca pelo computador'
-                : catraca === 'abrindo' ? '● Abrindo a catraca...' : `● ${catraca}`}
+                : catraca === 'abrindo' ? '● Abrindo a catraca...'
+                : catraca === 'religando' ? '● Religando a catraca...' : `● ${catraca}`}
             </div>
+            {/* A catraca cai sozinha de vez em quando (a serial do PC solta).
+                Ela volta sozinha, mas antes isso levava até 20 segundos com o
+                aluno parado na porta e ninguem entendendo o que era. Agora o
+                conserto fica aqui na propria tela do reconhecimento. */}
+            {!['ok', 'pc', 'abrindo'].includes(catraca) && (
+              <>
+                <button type="button" className="ac-rec-religar"
+                  disabled={catraca === 'religando'}
+                  onClick={religarCatraca}>
+                  {catraca === 'religando' ? 'Religando...' : '🔌 Religar a catraca'}
+                </button>
+                <span className="ac-muted" style={{ fontSize: 12 }}>
+                  A catraca desligou. Aperte aqui pra religar — ou espere uns
+                  segundos, que ela religa sozinha. O rosto continua funcionando.
+                </span>
+              </>
+            )}
           </div>
         )}
         {/* Este aparelho não fala com a catraca e não tem ninguém do outro
