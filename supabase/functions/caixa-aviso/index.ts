@@ -91,14 +91,25 @@ serve(async (req) => {
     // o que o dono reconhece, mas se esse numero esta fora do ar o certo e
     // sair pelo numero da FWC, dizendo por que. Silencio e a unica resposta
     // que nao serve.
-    const estado = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${aviso.instancia}`, {
+    //
+    // LOJA NA API OFICIAL (`cloud_...`, 02/11/2026): o número dela não é uma
+    // instância da Evolution, então não há o que consultar nem como mandar por
+    // ele (e o dono nem receberia de si mesmo — Estação do Sabor, onde o número
+    // do robô é o do próprio dono). O aviso sai direto pela FWC, sem o recado de
+    // "WhatsApp desconectado", que ali seria mentira.
+    const ehCloud = String(aviso.instancia).startsWith("cloud_")
+    const estado = ehCloud ? {} : await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${aviso.instancia}`, {
       headers: { apikey: EVOLUTION_API_KEY },
     }).then((r) => r.json()).catch(() => ({}))
-    const ligada = (estado?.instance?.state ?? estado?.state) === "open"
+    const ligada = ehCloud ? false : (estado?.instance?.state ?? estado?.state) === "open"
 
     let instancia: string = String(aviso.instancia)
     let texto: string = String(aviso.texto)
-    if (!ligada) {
+    if (ehCloud) {
+      const { data: cfg } = await sb.from("config_global")
+        .select("valor").eq("chave", "admin_sender_instance").maybeSingle()
+      instancia = cfg?.valor ?? "crmadmin"
+    } else if (!ligada) {
       const { data: cfg } = await sb.from("config_global")
         .select("valor").eq("chave", "admin_sender_instance").maybeSingle()
       instancia = cfg?.valor ?? "crmadmin"
