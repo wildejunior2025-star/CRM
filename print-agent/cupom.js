@@ -170,7 +170,27 @@ function montarCupom(pedido, empresa) {
     const { nome, complementos: comps } = separarItem(it)
     // Sem "x" tambem na linha do item: "20 Picole". Fica igual a comanda da
     // cozinha (que sempre imprimiu assim) e igual ao card do gestor.
-    parts.push(BOLD(1), linha(qtd + ' ' + (nome || 'Item')), BOLD(0))
+    //
+    // O VALOR DE CADA ITEM SAI NO PAPEL (03/11/2026, Agv Grill)
+    // O cupom listava so os nomes. Quentinha pequena e grande tem montagem igual e
+    // muda so o tamanho, entao o preco na linha e o que deixa quem separa o pedido
+    // (e o cliente) perceber qual e qual. `subtotal` ja e o total da linha, com
+    // quantidade e adicionais; sem ele, preco unitario x quantidade.
+    const totalLinha = it.subtotal != null
+      ? Number(it.subtotal)
+      : Number(qtd) * Number(it.preco_unitario ?? it.preco ?? 0)
+    const rotuloItem = qtd + ' ' + (nome || 'Item')
+    if (Number.isFinite(totalLinha) && totalLinha > 0) {
+      const v = money(totalLinha)
+      if (rotuloItem.length + 1 + v.length <= LARGURA) {
+        parts.push(BOLD(1), kv(rotuloItem, v), BOLD(0))
+      } else {
+        // Nome comprido: ele quebra sozinho e o valor vai sozinho, na direita.
+        parts.push(BOLD(1), linha(rotuloItem), kv('', v), BOLD(0))
+      }
+    } else {
+      parts.push(BOLD(1), linha(rotuloItem), BOLD(0))
+    }
     for (const c of comps) {
       const cn = c.nome
       const cq = c.qtdTotal
