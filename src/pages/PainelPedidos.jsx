@@ -3879,6 +3879,13 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
   const digitRefs = useRef([])
   const [confirmandoEntrega, setConfirmandoEntrega] = useState(false)
   const [verificandoIfood, setVerificandoIfood] = useState(false)
+  // Janela "quem saiu com o pedido?" — a mesma do quadro. Entregador e status
+  // vão num UPDATE só, pra o aviso do WhatsApp sair com o pedido já tendo dono.
+  const [escolhendoMotoboy, setEscolhendoMotoboy] = useState(false)
+  async function despacharCom(entregadorId) {
+    setEscolhendoMotoboy(false)
+    await onAvancar(pedido.id, 'saiu_entrega', entregadorId ? { entregador_id: entregadorId } : {})
+  }
 
   function handleDigitChange(i, v) {
     const digit = v.replace(/\D/g, '').slice(-1)
@@ -4405,12 +4412,14 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
             {entregaDoIfood && (
               <CodigoColetaIfood pedido={pedido} onLiberar={() => onAvancar(pedido.id, 'saiu_entrega')} />
             )}
+            {/* Escolher o entregador no seletor NÃO despachava: gravava o
+                motoqueiro e o pedido continuava em "Pronto", calado. Agora o
+                botão é um só e pergunta quem levou — mesma janela do quadro. */}
             {!pedido.entregador_id && !entregaDoIfood && (
               <>
-                <SeletorEntregador entregadores={entregadores} onAtribuir={onAtribuir} pedidoId={pedido.id} />
                 <button type="button" className="pp-btn pp-btn-avancar"
-                  onClick={() => onAvancar(pedido.id, 'saiu_entrega')} style={{ width: '100%' }}>
-                  Despachar mesmo assim
+                  onClick={() => setEscolhendoMotoboy(true)} style={{ width: '100%' }}>
+                  🛵 Despachar
                 </button>
               </>
             )}
@@ -4540,6 +4549,10 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
           </button>
         )}
       </div>
+      {escolhendoMotoboy && (
+        <ModalEscolherMotoboy pedido={pedido} entregadores={entregadores}
+          onEscolher={despacharCom} onCancelar={() => setEscolhendoMotoboy(false)} />
+      )}
     </div>
   )
 }
@@ -5483,7 +5496,73 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
   )
 }
 
-function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregadores = [] }) {
+// Quem saiu com a sacola. Abre no clique do "Despachar" — antes o botão
+// despachava direto e o pedido ia pra rota com o motoqueiro VAZIO.
+//
+// POR QUÊ: na CDBom o aviso de "saiu para entrega" vinha sempre do app do
+// Jonathan (162 pedidos em 30 dias). No dia 03/11 ninguém atribuiu ele ao
+// #1617: o pedido ficou parado em "Pronto", a cliente recebeu só o
+// "confirmado" e, 6 horas depois, a rotina `auto-concluir-pedidos-6h` fechou
+// o pedido com os gatilhos desligados — ou seja, calada. Pra loja o pedido
+// aparecia "entregue" e ninguém sabia que a cliente nunca foi avisada.
+//
+// Escolher aqui resolve as duas coisas de uma vez: o pedido nunca vai pra rota
+// sem dono, e o despacho (status `saiu_entrega`) é o que dispara o WhatsApp
+// "seu pedido saiu para entrega". Um UPDATE só, com o entregador junto.
+function ModalEscolherMotoboy({ pedido, entregadores = [], onEscolher, onCancelar }) {
+  const [salvando, setSalvando] = useState(null)
+  async function escolher(entregadorId) {
+    if (salvando) return
+    setSalvando(entregadorId ?? 'sem')
+    await onEscolher(entregadorId)
+  }
+  return (
+    <div className="pp-modal-overlay" onClick={onCancelar} style={{ zIndex: 130 }}>
+      <div onClick={e => e.stopPropagation()} className="pp-modal" style={{ width: 'min(380px, 94vw)', padding: 22 }}>
+        <h3 style={{ margin: '0 0 4px' }}>Quem saiu com o pedido?</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
+          Pedido #{pedido.numero_pedido} · {pedido.cliente_nome || '—'}
+          <br />Ao escolher, o cliente recebe no WhatsApp que o pedido saiu. 🛵
+        </p>
+
+        {entregadores.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {entregadores.map(en => (
+              <button key={en.id} type="button" className="pp-btn pp-btn-avancar"
+                disabled={!!salvando}
+                onClick={() => escolher(en.id)}
+                style={{ width: '100%', justifyContent: 'flex-start', fontSize: 15, fontWeight: 700 }}>
+                {salvando === en.id ? 'Despachando...' : `🛵 ${en.nome}`}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p style={{ fontSize: 13, color: '#f59e0b', margin: '0 0 12px', lineHeight: 1.5 }}>
+            Nenhum entregador cadastrado ainda. Cadastre a equipe em
+            <strong> Entregadores</strong> pra saber quem levou cada pedido.
+          </p>
+        )}
+
+        {/* A saída de emergência existe de propósito: loja sem entregador
+            cadastrado, ou a dona que leva ela mesma, não pode ficar sem
+            despachar — e o cliente precisa do aviso de qualquer jeito. */}
+        <button type="button" disabled={!!salvando} onClick={() => escolher(null)}
+          style={{ marginTop: 14, width: '100%', padding: '8px', borderRadius: 8, cursor: 'pointer',
+            fontWeight: 600, fontSize: 13, border: '1px solid var(--border, #2a2a3a)',
+            background: 'none', color: 'var(--text-muted)' }}>
+          {salvando === 'sem' ? 'Despachando...' : 'Despachar sem informar o motoqueiro'}
+        </button>
+        <button type="button" disabled={!!salvando} onClick={onCancelar}
+          style={{ marginTop: 6, width: '100%', padding: '8px', borderRadius: 8, cursor: 'pointer',
+            fontWeight: 600, fontSize: 13, border: 'none', background: 'none', color: 'var(--text-muted)' }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, onAtribuir, entregadores = [] }) {
   const oc = ORIGEM_CONFIG[pedido.origem] ?? ORIGEM_CONFIG.cardapio
   const itens = Array.isArray(pedido.itens) ? pedido.itens : []
   const qtdItens = itens.reduce((s, i) => s + Number(i.qtd ?? i.quantidade ?? 1), 0)
@@ -5501,6 +5580,20 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
     : null
   const acao = onAvancar ? acaoRapidaPedido(pedido) : null
   const voltar = onVoltar ? acaoVoltarPedido(pedido) : null
+  // Despacho de entrega NOSSA: pergunta quem levou antes de mandar pra rota.
+  // O entregador do iFood não entra aqui — a sacola sai com o motoqueiro deles,
+  // que não está no nosso cadastro.
+  const entregaDoIfood = pedido.origem === 'ifood' && pedido.ifood_valores?.entregue_por === 'IFOOD'
+  const perguntaMotoboy = !!acao && acao.status === 'saiu_entrega'
+    && !isRetirada && !entregaDoIfood && !pedido.entregador_id && !!onAtribuir
+  const [escolhendoMotoboy, setEscolhendoMotoboy] = useState(false)
+  // Entregador e status num UPDATE só: o gatilho do aviso roda uma vez, com o
+  // pedido já tendo dono. Em duas gravações o WhatsApp saía antes do motoqueiro
+  // entrar, e o histórico do entregador nascia furado.
+  async function despacharCom(entregadorId) {
+    setEscolhendoMotoboy(false)
+    await onAvancar(pedido.id, 'saiu_entrega', entregadorId ? { entregador_id: entregadorId } : {})
+  }
   return (
     <div role="button" tabIndex={0} onClick={onClick}
       onKeyDown={e => { if (e.key === 'Enter') onClick?.() }}
@@ -5561,11 +5654,21 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, entregador
       </div>
       {acao && (
         <button type="button"
-          onClick={e => { e.stopPropagation(); onAvancar(pedido.id, acao.status) }}
+          onClick={e => {
+            e.stopPropagation()
+            if (perguntaMotoboy) { setEscolhendoMotoboy(true); return }
+            onAvancar(pedido.id, acao.status)
+          }}
           style={{ marginTop: 8, width: '100%', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
             fontWeight: 800, fontSize: 15, border: `1.5px solid ${acao.cor}`, background: `${acao.cor}1e`, color: acao.cor }}>
           {acao.label}
         </button>
+      )}
+      {escolhendoMotoboy && (
+        <div onClick={e => e.stopPropagation()}>
+          <ModalEscolherMotoboy pedido={pedido} entregadores={entregadores}
+            onEscolher={despacharCom} onCancelar={() => setEscolhendoMotoboy(false)} />
+        </div>
       )}
       {voltar && (
         <button type="button"
@@ -11243,7 +11346,7 @@ export default function PainelPedidos() {
               <div className="pp-board" style={{ gridTemplateColumns: 'minmax(0, 460px)' }}>
                 <Coluna titulo={`Busca: "${buscaPedido.trim()}"`} cor="#7c3aed" count={resultadosBusca.length} vazio="Nenhum pedido encontrado com esse termo">
                   {resultadosBusca.map(p => (
-                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onAtribuir={handleAtribuirEntregador} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               </div>
@@ -11303,7 +11406,7 @@ export default function PainelPedidos() {
                   count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status)).length}
                   vazio="Nada em preparo">
                   {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && ['confirmado', 'em_preparo', 'pronto'].includes(p.status)).map(p => (
-                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onAtribuir={handleAtribuirEntregador} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
@@ -11314,7 +11417,7 @@ export default function PainelPedidos() {
                   count={pedidosView.filter(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega').length}
                   vazio="Ninguém na rua">
                   {pedidosView.filter(p => p.tipo_entrega !== 'retirada' && p.status === 'saiu_entrega').map(p => (
-                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onClick={() => setPedidoDetalhe(p)} />
+                    <CardMini key={p.id} pedido={p} entregadores={entregadores} onAvancar={handleAvancar} onVoltar={handleVoltar} onAtribuir={handleAtribuirEntregador} onClick={() => setPedidoDetalhe(p)} />
                   ))}
                 </Coluna>
               )}
