@@ -492,20 +492,33 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
   // negativa em desconto, ambos no primeiro item.
   const somaItens = Number(items.reduce((s, i) => s + (i.valor_bruto as number), 0).toFixed(2))
   const difTotal = Number((total - somaItens).toFixed(2))
+  let totalNota = somaItens
   if (items.length > 0 && Math.abs(difTotal) >= 0.01) {
-    Object.assign(items[0], difTotal > 0
-      ? { valor_outras_despesas: difTotal }
-      : { valor_desconto: Math.min(-difTotal, items[0].valor_bruto as number) })
+    const aplicado = difTotal > 0 ? difTotal : -Math.min(-difTotal, items[0].valor_bruto as number)
+    Object.assign(items[0], aplicado > 0
+      ? { valor_outras_despesas: aplicado }
+      : { valor_desconto: -aplicado })
+    totalNota = Number((somaItens + aplicado).toFixed(2))
   }
   // Pagamento em duas formas (mig 0274): cada parte sai como uma forma na nota.
   const partesPag: { forma: string; valor: number }[] =
     Array.isArray(ped.pagamentos) && ped.pagamentos.length > 1
       ? ped.pagamentos.map((x: { forma: string; valor: number }) => ({ forma: String(x.forma ?? "outro").toLowerCase(), valor: Number(x.valor) || 0 }))
-      : [{ forma: String(ped.forma_pagamento ?? "outro").toLowerCase(), valor: total }]
+      : [{ forma: String(ped.forma_pagamento ?? "outro").toLowerCase(), valor: totalNota }]
   const formasNota = partesPag.map(x => ({
     forma_pagamento: PAGAMENTO_FOCUS[x.forma] ?? "99",
     valor_pagamento: Number(x.valor.toFixed(2)),
   }))
+  // Pagamento tem que fechar com o total da nota ao centavo: sobra de arredondamento
+  // (total quebrado tipo 110,70308) vai na ultima parte.
+  if (formasNota.length > 0) {
+    const somaPag = Number(formasNota.reduce((s, f) => s + f.valor_pagamento, 0).toFixed(2))
+    const resto = Number((totalNota - somaPag).toFixed(2))
+    if (Math.abs(resto) > 0 && Math.abs(resto) <= 0.05) {
+      const ult = formasNota[formasNota.length - 1]
+      ult.valor_pagamento = Number((ult.valor_pagamento + resto).toFixed(2))
+    }
+  }
 
   const ref = `nfce-${comandaId ?? pedidoId}`
   const nfce: Record<string, unknown> = {
