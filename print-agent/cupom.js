@@ -117,6 +117,8 @@ function formaPagamento(p) {
   // divida. No papel vai so um "F" — a pedido do dono, nada de escrever "fiado"
   // num cupom que o cliente le.
   if (f === 'fiado') return { cobrar: false, fiado: true, label: 'F' }
+  // Saldo pre-pago do cliente (mig 0436): ja foi pago adiantado, nada a cobrar.
+  if (f === 'saldo') return { cobrar: false, label: 'PAGO c/ SALDO' }
   let nome = 'Dinheiro'
   if (['cartao', 'cartao', 'credito', 'debito'].includes(f)) nome = f === 'debito' ? 'Debito' : f === 'credito' ? 'Credito' : 'Cartao'
   else if (f === 'pix') nome = 'PIX (nao confirmado)'
@@ -230,7 +232,7 @@ function montarCupom(pedido, empresa) {
     const pixPago = p.pix_status === 'pago' || p.mp_payment_status === 'approved'
     // "paga" aqui quer dizer: nao entra na conta que o motoqueiro cobra. Fiado
     // tambem nao entra — ficou pendurado na loja.
-    const paga = x => (x.forma === 'pix' && pixPago) || x.forma === 'fiado'
+    const paga = x => (x.forma === 'pix' && pixPago) || x.forma === 'fiado' || x.forma === 'saldo'
     const falta = partes.filter(x => !paga(x)).reduce((s2, x) => s2 + x.valor, 0)
     parts.push(linha(falta > 0 ? '*** COBRAR ' + money(falta) + ' NA ENTREGA ***' : '*** JA PAGO ***'))
     parts.push(SIZE(0), BOLD(1), linha('Pagamento em duas formas:'), BOLD(0), ALIGN(0))

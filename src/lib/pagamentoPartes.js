@@ -19,6 +19,7 @@ export const NOME_FORMA = {
   outro: 'Outro',
   dividido: 'Dividido',
   fiado: 'Fiado',
+  saldo: 'Saldo do cliente',
 }
 
 export const nomeForma = f => NOME_FORMA[f] ?? (f || '—')
@@ -52,6 +53,7 @@ export const temPixOnline = p => partesPagamento(p).some(x => x.forma === 'pix')
 /** Esta parte já está paga antes da entrega? (iFood online ou PIX confirmado) */
 export function partePaga(p, parte) {
   if (parte.forma === 'online') return true
+  if (parte.forma === 'saldo') return true   // já pago adiantado (mig 0436)
   if (parte.forma === 'pix') return pixConfirmado(p)
   return false
 }

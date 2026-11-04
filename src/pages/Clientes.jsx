@@ -3,6 +3,7 @@ import { supabase, fetchAll } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { CONDICOES_PAGAMENTO } from '../lib/constants'
 import ClienteHistorico from './ClienteHistorico'
+import SaldoCliente from '../components/SaldoCliente'
 import '../components/Page.css'
 
 const TIPOS_PADRAO = ['mercadinho', 'bar', 'restaurante', 'distribuidor', 'outro']
@@ -54,7 +55,7 @@ function temAlgoDigitado(form) {
 }
 
 export default function Clientes() {
-  const { profile } = useAuth()
+  const { profile, empresa } = useAuth()
   const empresaId = profile?.empresa_id ?? null
   // Preços especiais de parceria (cliente + produto → preço), usados pelo robô
   const [produtosLista, setProdutosLista] = useState([]) // [{id, nome, preco_venda}]
@@ -73,6 +74,7 @@ export default function Clientes() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [historicoCliente, setHistoricoCliente] = useState(null)
+  const [saldoCliente, setSaldoCliente] = useState(null)
   // Link do cliente (mig 0147): cada cliente tem um endereço só dele pra fazer
   // pedido e ver o que está devendo. Só aparece se a loja ligou a função.
   const [linkAtivo, setLinkAtivo] = useState(false)
@@ -412,6 +414,17 @@ export default function Clientes() {
                         </button>{' '}
                       </>
                     )}
+                    {empresa?.saldo_cliente_ativo && (
+                      <>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          title="Saldo pré-pago: receber adiantado e ver o extrato"
+                          onClick={() => setSaldoCliente(c)}
+                        >
+                          💰 Saldo
+                        </button>{' '}
+                      </>
+                    )}
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={() => setHistoricoCliente(c)}
@@ -437,6 +450,10 @@ export default function Clientes() {
           </table>
         )}
       </div>
+
+      {saldoCliente && (
+        <SaldoCliente cliente={saldoCliente} onClose={() => setSaldoCliente(null)} />
+      )}
 
       {historicoCliente && (
         <ClienteHistorico

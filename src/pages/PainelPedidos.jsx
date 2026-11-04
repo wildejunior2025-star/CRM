@@ -1654,6 +1654,7 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
   const [pagamento, setPagamento] = useState(
     pagInicial === 'dividido' && ehDividido(pedidoEdicao) ? 'dividido'
       : pagInicial === 'fiado' ? 'fiado'
+      : pagInicial === 'saldo' ? 'saldo'
       : formasLoja.includes(pagInicial) ? pagInicial : formasLoja[0]
   )
   const [troco, setTroco]       = useState(draft?.troco ?? (pedidoEdicao?.troco_para ? String(pedidoEdicao.troco_para) : ''))
@@ -1663,6 +1664,15 @@ function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido
   // Busca de clientes já cadastrados na loja
   const [sugestoes, setSugestoes]       = useState([])
   const [clienteSelId, setClienteSelId] = useState(draft?.clienteSelId ?? pedidoEdicao?.cliente_id ?? null)
+  // Saldo pre-pago do cliente (mig 0436): so nas lojas que usam.
+  const [saldoSel, setSaldoSel] = useState(null)
+  useEffect(() => {
+    if (!empresa?.saldo_cliente_ativo || !clienteSelId) { setSaldoSel(null); return }
+    let vivo = true
+    supabase.rpc('cliente_saldo', { p_cliente_id: clienteSelId })
+      .then(({ data }) => { if (vivo) setSaldoSel(data == null ? null : Number(data)) })
+    return () => { vivo = false }
+  }, [empresa?.saldo_cliente_ativo, clienteSelId])
   const [precoEspMap, setPrecoEspMap] = useState({}) // produto_id → preço especial (parceria) do cliente selecionado
   const [msgCli, setMsgCli]             = useState(null)
   const buscaCliTimer = useRef(null)
@@ -3202,7 +3212,23 @@ ${url}
           <button type="button" style={pagBtn('fiado')} onClick={() => setPagamento('fiado')}>
             Fiado
           </button>
+          {empresa?.saldo_cliente_ativo && (
+            <button type="button" style={pagBtn('saldo')} onClick={() => setPagamento('saldo')}
+              title="Abate do saldo que o cliente pagou adiantado">
+              {`\ud83d\udcb0 Saldo${saldoSel != null ? ` (${fmt(saldoSel)})` : ''}`}
+            </button>
+          )}
         </div>
+        {pagamento === 'saldo' && (
+          <div style={{
+            marginBottom: 10, padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
+            border: '1px solid #16a34a', background: 'rgba(34,197,94,.10)', color: '#16a34a', fontWeight: 600,
+          }}>
+            {clienteSelId
+              ? 'O valor do pedido sai do saldo pr\u00e9-pago do cliente. Nada a cobrar na entrega.'
+              : 'Escolha o cliente cadastrado ali em cima \u2014 sem ele n\u00e3o d\u00e1 pra abater o saldo.'}
+          </div>
+        )}
         {pagamento === 'fiado' && (
           <div style={{
             marginBottom: 10, padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
@@ -3684,14 +3710,15 @@ const FORMAS_TROCA = [
   { id: 'credito', label: '\ud83d\udcb3 Cr\u00e9dito' },
   { id: 'vale', label: '\ud83c\udf7d\ufe0f Vale-refei\u00e7\u00e3o' },
   { id: 'fiado', label: '\ud83d\udcd2 Fiado', soBalcao: true },
+  { id: 'saldo', label: '\ud83d\udcb0 Saldo do cliente', soSaldo: true },
 ]
 
 // Formas que podem entrar numa divisao (fiado fica de fora: divida e do pedido inteiro).
-const FORMAS_DIVIDIR = FORMAS_TROCA.filter(f => f.id !== 'fiado')
+const FORMAS_DIVIDIR = FORMAS_TROCA.filter(f => f.id !== 'fiado' && !f.soSaldo)
 const paraNum = (v) => Math.round(parseFloat(String(v ?? '').replace(',', '.')) * 100) / 100
 const paraTxt = (n) => (Number.isFinite(n) ? n.toFixed(2).replace('.', ',') : '')
 
-function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
+function ModalTrocaPagamento({ pedido, onFechar, onSalvar, saldoAtivo }) {
   const [forma, setForma] = useState(pedido?.forma_pagamento && pedido.forma_pagamento !== 'dividido' ? pedido.forma_pagamento : 'dinheiro')
   const [troco, setTroco] = useState(pedido?.troco_para ? String(pedido.troco_para).replace('.', ',') : '')
   const [salvando, setSalvando] = useState(false)
@@ -3760,7 +3787,7 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar }) {
 
         {!dividir && (
         <div style={{ display: 'grid', gap: 8 }}>
-          {FORMAS_TROCA.filter(f => !f.soBalcao || pedido.origem !== 'ifood').map(f => (
+          {FORMAS_TROCA.filter(f => (!f.soBalcao || pedido.origem !== 'ifood') && (!f.soSaldo || (saldoAtivo && pedido.cliente_id))).map(f => (
             <button key={f.id} type="button" onClick={() => setForma(f.id)}
               style={{ padding: '11px 14px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                 fontSize: 14, fontWeight: 700,
@@ -13226,6 +13253,7 @@ export default function PainelPedidos() {
         pedido={trocaPag}
         onFechar={() => setTrocaPag(null)}
         onSalvar={salvarTrocaPagamento}
+        saldoAtivo={!!empresa?.saldo_cliente_ativo}
       />
       <ModalDesconto
         pedido={descontoPed}

@@ -48,6 +48,7 @@ function labelPagamento(pedido) {
   // Fiado: no papel vai só o "F" (pedido do dono) — e, acima de tudo, a ordem
   // de não cobrar, senão o motoqueiro cobra o total de novo.
   if (p === 'fiado') return 'NÃO COBRAR (F)'
+  if (p === 'saldo') return 'PAGO COM SALDO'
   return p || '—'
 }
 
