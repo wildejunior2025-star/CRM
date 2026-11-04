@@ -5734,8 +5734,11 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, onAtribuir
     await onAvancar(pedido.id, 'saiu_entrega', entregadorId ? { entregador_id: entregadorId } : {})
   }
   return (
-    <div role="button" tabIndex={0} onClick={onClick}
-      onKeyDown={e => { if (e.key === 'Enter') onClick?.() }}
+    <div role="button" tabIndex={0}
+      // Com a janela do motoqueiro aberta, o cartão não abre o pedido: o
+      // Despachar do quadro tem que ir direto pra escolha do entregador.
+      onClick={() => { if (!escolhendoMotoboy) onClick?.() }}
+      onKeyDown={e => { if (e.key === 'Enter' && !escolhendoMotoboy) onClick?.() }}
       className="pp-mini" style={{ borderLeft: `3px solid ${oc.borda}`, cursor: 'pointer' }}>
       <div className="pp-mini-top">
         <span className="pp-mini-num">

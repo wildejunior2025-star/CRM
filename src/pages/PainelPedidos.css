@@ -1125,7 +1125,10 @@
   transition: border-color .12s, transform .08s, box-shadow .12s;
 }
 .pp-mini:hover { border-color: #7c3aed; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.13); }
-.pp-mini:active { transform: scale(0.99); }
+/* SEM transform no :active (04/11/2026). O cartão encolhia ao ser apertado e o
+   clique nos botões de dentro (Despachar, nome do motoqueiro) terminava fora
+   deles: o navegador entregava o clique ao cartão, que abria o pedido em vez
+   de despachar. */
 .pp-mini-top {
   display: flex;
   align-items: center;
