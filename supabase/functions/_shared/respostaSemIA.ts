@@ -1095,27 +1095,27 @@ async function respostaDoPedido(
 // Serve pra uma coisa só: calar a saudação com o cardápio em cima de quem já
 // pediu e está esperando. Quem está no meio do pedido não precisa do link da
 // loja — receber o cardápio ali é o robô dizendo que não acompanhou nada.
-async function temPedidoEmAndamento(
+async function pedidoEmAndamento(
   supabase: Sb, empresaId: string, phone: string,
-): Promise<boolean> {
+): Promise<Record<string, unknown> | null> {
   try {
     const { data, error } = await supabase.rpc("pedido_do_cliente", {
       p_empresa: empresaId, p_phone: phone, p_numero: null,
     })
-    if (error) return false
+    if (error) return null
     const p = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
-    if (!p) return false
+    if (!p) return null
     const status = String(p.status ?? "")
     const minutos = Number(p.minutos ?? 99999)
-    if (status === "cancelado") return false
+    if (status === "cancelado") return null
     // Entregue ainda conta por uma hora: "obrigado, chegou certinho" não é
     // cliente novo batendo na porta. Passou disso, ele pode muito bem estar
     // voltando pra pedir de novo — e aí o link é bem-vindo.
-    if (status === "entregue") return minutos <= 60
+    if (status === "entregue") return minutos <= 60 ? p : null
     // Pedido que ficou aberto de ontem não cala o robô pra sempre. O varredor
     // das 6h fecha sozinho; isto aqui é a mesma régua, por segurança.
-    return minutos <= 360
-  } catch { return false }
+    return minutos <= 360 ? p : null
+  } catch { return null }
 }
 
 // ── Primeira fala: o texto é da loja ─────────────────────────────────────────
@@ -1535,18 +1535,36 @@ export async function responderSemIA({
     // 5b) PEDIDO EM ANDAMENTO: a saudação com o cardápio não vai, ponto. Quem
     //     já pediu e está esperando (ou acabou de receber) não é cliente
     //     chegando — é cliente no meio do pedido, e o link da loja ali é o
-    //     robô atropelando o que está acontecendo. O que cabe é oferecer
-    //     gente, que é exatamente o passo 7 logo abaixo.
+    //     robô atropelando o que está acontecendo. O que cabe é dizer em que
+    //     pé o pedido está, que é o que ele ia perguntar.
     //
     //     A consulta só acontece quando o robô ia mesmo mandar a primeira
     //     fala: na conversa que já tem link recente ninguém paga por ela.
-    const pedidoEmAndamento = !linkRecente
-      && await temPedidoEmAndamento(supabase, empresaId, phone)
+    const emAndamento = linkRecente ? null
+      : await pedidoEmAndamento(supabase, empresaId, phone)
+
+    if (emAndamento) {
+      // Em vez da saudação, o que ele realmente ia querer saber: em que pé
+      // está o pedido. Uma vez por hora — passando disso cai no passo 7 e o
+      // robô oferece gente, nunca a saudação.
+      if (await reservarAviso(supabase, empresaId, phone, "andamento", 60)) {
+        const num = emAndamento.numero_pedido ? ` #${emAndamento.numero_pedido}` : ""
+        const fase = faseDoPedido(
+          String(emAndamento.status ?? ""),
+          String(emAndamento.tipo_entrega ?? "") === "retirada",
+          String(emAndamento.entregador ?? "").split(/\s+/)[0] ?? "",
+        )
+        return await responder(
+          `Oi! 😊 Seu pedido${num} ${fase}.${NL}` +
+          "Qualquer coisa é só falar que eu chamo alguém da loja. 🙌",
+        )
+      }
+    }
 
     // 6) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
-    if (!linkRecente && !pedidoEmAndamento) {
+    if (!linkRecente && !emAndamento) {
       // Cliente que dispara "oi", "boa tarde", "tem gelo?" em sequência acorda
       // um webhook por mensagem, e todos leem o histórico ANTES de qualquer um
       // gravar a resposta: sem esta trava, cada um manda o seu link. Quem não
