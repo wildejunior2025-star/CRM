@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
@@ -5637,8 +5638,22 @@ function ModalEscolherMotoboy({ pedido, entregadores = [], onEscolher, onCancela
     setSalvando(entregadorId ?? 'sem')
     await onEscolher(entregadorId)
   }
-  return (
-    <div className="pp-modal-overlay" onClick={onCancelar} style={{ zIndex: 130 }}>
+  // PORTAL no <body>, de propósito. A janela nascia DENTRO do cartão do quadro
+  // (.pp-mini), que tem `:active { transform: scale(.99) }`. Apertar o nome do
+  // motoqueiro deixava o cartão "active", o transform virava o novo referencial
+  // do position:fixed e a janela pulava pra dentro do cartão no meio do clique:
+  // o dedo soltava no fundo escuro = "Cancelar". Fechava e não despachava nada
+  // (CDBom, 04/11/2026). Fora do cartão, nenhum estilo dele alcança a janela.
+  // O fundo só fecha se o clique COMEÇOU e TERMINOU nele (e.target === fundo).
+  const fecharPeloFundo = useRef(false)
+  return createPortal(
+    <div className="pp-modal-overlay" style={{ zIndex: 130 }}
+      onMouseDown={e => { fecharPeloFundo.current = e.target === e.currentTarget }}
+      onClick={e => {
+        e.stopPropagation()
+        if (e.target === e.currentTarget && fecharPeloFundo.current && !salvando) onCancelar()
+        fecharPeloFundo.current = false
+      }}>
       <div onClick={e => e.stopPropagation()} className="pp-modal" style={{ width: 'min(380px, 94vw)', padding: 22 }}>
         <h3 style={{ margin: '0 0 4px' }}>Quem saiu com o pedido?</h3>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 16px' }}>
@@ -5679,7 +5694,8 @@ function ModalEscolherMotoboy({ pedido, entregadores = [], onEscolher, onCancela
           Cancelar
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
