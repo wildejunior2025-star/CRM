@@ -81,6 +81,51 @@ serve(async (req) => {
       return json({ state, phone })
     }
 
+    // MANDA uma mensagem do número da FWC pra um número qualquer. Existe pra
+    // UMA coisa: testar se a instância de uma loja está recebendo. Esperar
+    // mensagem de cliente aparecer não prova nada quando a loja está parada;
+    // esta aqui chega na hora e dá a resposta.
+    if (action === "ping_loja") {
+      const { phone, text } = body
+      if (!phone) return json({ ok: false, erro: "phone é obrigatório" }, 400)
+      const numero = String(phone).replace(/\D/g, "")
+      const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${ADMIN_INSTANCE}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+        body: JSON.stringify({ number: numero, text: String(text ?? "Teste do suporte FWC — pode ignorar.") }),
+      }).catch(() => null)
+      const corpo = res ? await res.text() : "(sem resposta)"
+      return json({ ok: !!res?.ok, http: res?.status ?? 0, corpo: corpo.slice(0, 300) })
+    }
+
+    // REINICIA a instância: derruba e levanta o socket mantendo a sessão. É o
+    // conserto de socket travado — Evolution dizendo "open" e não entregando
+    // evento nenhum (Zebu, 04/11/2026: 3 horas sem receber mensagem).
+    //
+    // O verbo muda de versão pra versão do Evolution, então tenta os três e
+    // conta qual pegou. Depois devolve o estado, que é o que diz se voltou
+    // sozinho ou se a loja vai ter que ler o QR.
+    if (action === "restart_instance") {
+      if (!reqInstance) return json({ ok: false, erro: "instanceName é obrigatório" }, 400)
+      const tentativas = []
+      let venceu = null
+      for (const verbo of ["PUT", "POST", "GET"]) {
+        const res = await fetch(`${EVOLUTION_API_URL}/instance/restart/${reqInstance}`, {
+          method: verbo, headers: { apikey: EVOLUTION_API_KEY },
+        }).catch(() => null)
+        const corpo = res ? await res.text() : "(sem resposta)"
+        tentativas.push({ verbo, http: res?.status ?? 0, corpo: corpo.slice(0, 160) })
+        if (res?.ok) { venceu = verbo; break }
+      }
+      // Dá um respiro pro socket subir antes de perguntar o estado.
+      await new Promise((r) => setTimeout(r, 6000))
+      const est = await fetch(`${EVOLUTION_API_URL}/instance/connectionState/${reqInstance}`, {
+        headers: { apikey: EVOLUTION_API_KEY },
+      }).then((r) => r.json()).catch(() => ({}))
+      const estado = est?.instance?.state ?? est?.state ?? "?"
+      return json({ ok: !!venceu, venceu, tentativas, estado })
+    }
+
     // LISTA tudo o que existe no servidor Evolution, sem mexer: nome da
     // instância, número pareado, estado e quanto tempo faz que o servidor viu
     // mensagem. Serve pra descobrir instância órfã (loja repareada com outro
