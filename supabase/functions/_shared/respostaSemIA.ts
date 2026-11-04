@@ -1091,6 +1091,33 @@ async function respostaDoPedido(
   return `Seu pedido${num} ${fase}. ✅` + NL + fim
 }
 
+// Tem pedido vivo no número de quem está falando? (ou entregue agora há pouco)
+// Serve pra uma coisa só: calar a saudação com o cardápio em cima de quem já
+// pediu e está esperando. Quem está no meio do pedido não precisa do link da
+// loja — receber o cardápio ali é o robô dizendo que não acompanhou nada.
+async function temPedidoEmAndamento(
+  supabase: Sb, empresaId: string, phone: string,
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("pedido_do_cliente", {
+      p_empresa: empresaId, p_phone: phone, p_numero: null,
+    })
+    if (error) return false
+    const p = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
+    if (!p) return false
+    const status = String(p.status ?? "")
+    const minutos = Number(p.minutos ?? 99999)
+    if (status === "cancelado") return false
+    // Entregue ainda conta por uma hora: "obrigado, chegou certinho" não é
+    // cliente novo batendo na porta. Passou disso, ele pode muito bem estar
+    // voltando pra pedir de novo — e aí o link é bem-vindo.
+    if (status === "entregue") return minutos <= 60
+    // Pedido que ficou aberto de ontem não cala o robô pra sempre. O varredor
+    // das 6h fecha sozinho; isto aqui é a mesma régua, por segurança.
+    return minutos <= 360
+  } catch { return false }
+}
+
 // ── Primeira fala: o texto é da loja ─────────────────────────────────────────
 // Cada loja fala do seu jeito. O padrão da casa é este; quem quiser muda no
 // Portal (WhatsApp → Conexão / Config) sem mexer em código.
@@ -1349,6 +1376,26 @@ export async function responderSemIA({
       return await responder(`Beleza! 👍 Qualquer coisa é só chamar.${linkRecente ? "" : `${NL}${link}`}`)
     }
 
+    // 1b) "Certo", "ok", "obrigado", "👍": o cliente está FECHANDO o assunto,
+    //     não perguntando nada. Sem isto a mensagem escorregava até a primeira
+    //     fala e o robô mandava a saudação com o cardápio por cima de quem
+    //     acabou de receber o pedido. Agv Grill, 04/11/2026: "🛵 Pedido #1 saiu
+    //     para entrega" às 11:21, o cliente respondeu "Certo" às 11:33 e levou
+    //     o link da loja de volta.
+    //
+    //     Só vale quando o robô já falou nesta hora: quem ABRE a conversa com
+    //     um "ok" continua recebendo a primeira fala, que é o que põe o pedido
+    //     dentro do sistema. E fica de fora quando a última coisa que o robô
+    //     disse foi a pergunta do atendente — ali "ok" é resposta, e quem
+    //     cuida dela é o passo 5.
+    const soLetras = t.replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim()
+    const soConfirmou = /^(ok|okey|okay|ta|ta bom|ta certo|ta otimo|tudo bem|tudo certo|certo|certinho|blz|beleza|show|perfeito|otimo|isso|isso mesmo|isso ai|aham|uhum|obrigado|obrigada|obgd|obg|brigado|brigada|vlw|valeu|de nada|combinado|entendi|entendido|ciente|amem|boa|legal|massa|top)$/.test(soLetras)
+      || (soLetras === "" && marca.length <= 6)   // só emoji: 👍 🙏 ❤️
+    if (soConfirmou && !perguntouDoAtendente && recentes.length > 0) {
+      console.log("[link] cliente só confirmou, robô calado:", phone, marca)
+      return false
+    }
+
     // 2) Ele acabou de pedir a rua e o bairro: o que veio agora é o endereço.
     //    Aqui é o único lugar onde o robô calcula alguma coisa — e só entrega
     //    número quando a conta fecha.
@@ -1485,10 +1532,21 @@ export async function responderSemIA({
       return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
     }
 
+    // 5b) PEDIDO EM ANDAMENTO: a saudação com o cardápio não vai, ponto. Quem
+    //     já pediu e está esperando (ou acabou de receber) não é cliente
+    //     chegando — é cliente no meio do pedido, e o link da loja ali é o
+    //     robô atropelando o que está acontecendo. O que cabe é oferecer
+    //     gente, que é exatamente o passo 7 logo abaixo.
+    //
+    //     A consulta só acontece quando o robô ia mesmo mandar a primeira
+    //     fala: na conversa que já tem link recente ninguém paga por ela.
+    const pedidoEmAndamento = !linkRecente
+      && await temPedidoEmAndamento(supabase, empresaId, phone)
+
     // 6) Primeira fala da conversa: o link vai SEMPRE, seja um "oi" ou uma
     //    pergunta que a gente não entendeu. É a mensagem que faz o pedido sair
     //    do WhatsApp e cair no sistema.
-    if (!linkRecente) {
+    if (!linkRecente && !pedidoEmAndamento) {
       // Cliente que dispara "oi", "boa tarde", "tem gelo?" em sequência acorda
       // um webhook por mensagem, e todos leem o histórico ANTES de qualquer um
       // gravar a resposta: sem esta trava, cada um manda o seu link. Quem não
