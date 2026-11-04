@@ -81,6 +81,82 @@ serve(async (req) => {
       return json({ state, phone })
     }
 
+    // LISTA tudo o que existe no servidor Evolution, sem mexer: nome da
+    // instância, número pareado, estado e quanto tempo faz que o servidor viu
+    // mensagem. Serve pra descobrir instância órfã (loja repareada com outro
+    // nome) e socket parado — connectionState sozinho não conta essa história.
+    if (action === "debug_instances") {
+      const res = await fetch(`${EVOLUTION_API_URL}/instance/fetchInstances`, {
+        headers: { apikey: EVOLUTION_API_KEY },
+      }).catch(() => null)
+      const corpo = res ? await res.json().catch(() => ({})) : {}
+      const lista = Array.isArray(corpo) ? corpo : (corpo?.instances ?? [])
+      const enxuto = lista.map((it: Record<string, unknown>) => {
+        const i = (it.instance ?? it) as Record<string, unknown>
+        return {
+          nome: i.instanceName ?? i.name ?? "",
+          estado: i.connectionStatus ?? i.state ?? i.status ?? "",
+          numero: String(i.ownerJid ?? i.owner ?? "").replace("@s.whatsapp.net", ""),
+          perfil: i.profileName ?? "",
+          atualizado: i.updatedAt ?? i.updated_at ?? "",
+          contagem: i._count ?? null,
+        }
+      })
+      return json({ ok: true, total: enxuto.length, instancias: enxuto })
+    }
+
+    // OLHA o webhook de uma instância (ou de todas as lojas ativas), sem mexer.
+    //
+    // POR QUE EXISTE: em 04/11/2026 o Zebu ficou das 08:45 às 11:50 sem receber
+    // mensagem nenhuma de cliente. O vigia (monitor-whatsapp) dizia "aberto",
+    // porque o celular ESTAVA conectado e os avisos de pedido saíam normais — o
+    // que tinha caído era só a entrega dos eventos pra cá. Connection state não
+    // enxerga isso; o webhook da instância, sim.
+    if (action === "check_webhook") {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? ""
+      const projectRef = supabaseUrl.match(/https:\/\/([^.]+)/)?.[1] ?? ""
+      const esperado = `https://${projectRef}.supabase.co/functions/v1/whatsapp-webhook`
+
+      let alvos: { instance: string; loja: string }[] = []
+      if (reqInstance) {
+        alvos = [{ instance: reqInstance, loja: "" }]
+      } else {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_config")
+          .select("instance_name, empresas(nome)")
+          .eq("ativo", true).not("instance_name", "is", null)
+        alvos = (data ?? [])
+          .filter((r: Record<string, unknown>) => String(r.instance_name ?? "").trim())
+          .map((r: Record<string, unknown>) => ({
+            instance: String(r.instance_name),
+            loja: String((r.empresas as Record<string, unknown>)?.nome ?? ""),
+          }))
+      }
+
+      const linhas = []
+      for (const alvo of alvos) {
+        const res = await fetch(`${EVOLUTION_API_URL}/webhook/find/${alvo.instance}`, {
+          headers: { apikey: EVOLUTION_API_KEY },
+        }).catch(() => null)
+        const corpo = res ? await res.json().catch(() => ({})) : {}
+        const w = (corpo?.webhook ?? corpo ?? {}) as Record<string, unknown>
+        const url = String(w.url ?? "")
+        const eventos = Array.isArray(w.events) ? w.events : []
+        linhas.push({
+          loja: alvo.loja,
+          instancia: alvo.instance,
+          http: res?.status ?? 0,
+          ligado: w.enabled === true,
+          url,
+          url_ok: url.startsWith(esperado),
+          eventos,
+          pega_mensagem: eventos.includes("MESSAGES_UPSERT"),
+          cru: res && !res.ok ? JSON.stringify(corpo).slice(0, 200) : undefined,
+        })
+      }
+      return json({ ok: true, esperado, webhooks: linhas })
+    }
+
     // Reconfigura o webhook de uma instância específica
     if (action === "fix_webhook") {
       const targetInstance = reqInstance ?? "crma95b716bd97342abace9dae0fd1acd62"
