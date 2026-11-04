@@ -5695,7 +5695,9 @@ function ModalEscolherMotoboy({ pedido, entregadores = [], onEscolher, onCancela
         </button>
       </div>
     </div>,
-    document.body,
+    // Na .pp-root, não no <body>: as cores do painel (--pp-card, tema claro/
+    // escuro) moram nela. No <body> a janela saiu transparente.
+    document.querySelector('.pp-root') ?? document.body,
   )
 }
 
