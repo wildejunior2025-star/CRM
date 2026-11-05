@@ -237,8 +237,8 @@ function respostaDeHorario(
       ? `${NL}${NL}Nosso cardápio tá aqui, com tudo e o preço certinho:${NL}${link}`
       : ""
     return dia.periodos.length
-      ? `Tô aqui sim! 🙌 Hoje a gente atende ${textoDosPeriodos(dia.periodos)}.${convite}`
-      : `Tô aqui sim! 🙌 Pode mandar seu pedido.${convite}`
+      ? `${MARCA_HORARIO} 🙌 Hoje a gente atende ${textoDosPeriodos(dia.periodos)}.${convite}`
+      : `${MARCA_HORARIO} 🙌 Pode mandar seu pedido.${convite}`
   }
 
   // Fechada agora: o que ele quer saber é QUANDO volta — e é isso que o aviso
@@ -276,6 +276,9 @@ function proximoDiaQueAbre(
 // fecha num feriado ela costuma usar o botão "Loja fechada", que este código
 // respeita.
 const MARCA_FECHADA = "a gente tá fechado"
+// O começo da resposta de horário com a loja aberta. Serve pra reconhecer que o
+// robô acabou de dizer isso — ver o passo 3a.
+const MARCA_HORARIO = "Tô aqui sim!"
 
 export function lojaAbertaAgora(
   empresa: Record<string, unknown>, excecoes: Excecoes = {},
@@ -1482,14 +1485,17 @@ export async function responderSemIA({
 
     // 3a) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
     const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial, linkRecente)
-    // A MESMA resposta, palavra por palavra, duas vezes seguidas: ela já não
-    // resolveu da primeira vez. Agv Grill, 05/11/2026 — "vocês estão
-    // funcionando?" levou o horário; o cliente respondeu "é que no site está
-    // fechado desde segunda" e levou o MESMO horário de volta. Repetir ali é o
-    // robô provando que não entendeu. Deixa a escada seguir: quem termina a
-    // conversa é o passo 7, oferecendo gente.
-    const jaDisseIsso = !!daInfo && String(recentes[0]?.content ?? "").trim() === daInfo.trim()
-    if (daInfo && !jaDisseIsso) return await responder(daInfo)
+    // O HORÁRIO NÃO VAI DUAS VEZES SEGUIDAS. Agv Grill, 05/11/2026: "vocês
+    // estão funcionando?" levou o horário; o cliente respondeu "é que no site
+    // está fechado desde segunda" e levou o MESMO horário de volta, palavra por
+    // palavra. Quem já ouviu o horário e continua falando do assunto não quer
+    // ouvi-lo de novo — quer gente. Deixa a escada seguir até o passo 7.
+    //
+    // Só o horário entra nesta regra, de propósito: "cardápio" pedido duas
+    // vezes é cliente que não achou o link, e aí o link VAI de novo.
+    const repetiuHorario = !!daInfo && daInfo.startsWith(MARCA_HORARIO)
+      && String(recentes[0]?.content ?? "").startsWith(MARCA_HORARIO)
+    if (daInfo && !repetiuHorario) return await responder(daInfo)
 
     // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).
     //     Opcional: a loja liga em WhatsApp → Resposta automática. Vem depois
