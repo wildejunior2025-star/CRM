@@ -2120,6 +2120,11 @@ export default function PresencialSalao() {
       setTimeout(() => setPreContaMsg(''), 6000)
       return
     }
+    // Marca a mesa como "pediu a conta" (fica roxa no quadro). Coluna própria: o
+    // carimbo preconta_pedida_em manda a estação imprimir, e a pré-conta pode já
+    // ter saído aqui mesmo — gravar nele faria o papel sair duas vezes.
+    supabase.from('comandas').update({ conta_pedida_em: new Date().toISOString() })
+      .eq('id', comandaSel.id).then(() => loadMesas())
     const dados = {
       numeroMesa: mesaSel?.numero,
       rotulo: mesaSel?.is_comanda
@@ -2806,6 +2811,7 @@ export default function PresencialSalao() {
   //   vermelho         → tem item pra sair da cozinha / servir
   //   cinza apagado    → tudo entregue, só falta fechar
   //   azul             → JÁ PAGA, esperando o ADM liberar a mesa
+  //   roxo             → PEDIU A CONTA (tocou na pré-conta), ainda não pagou
   //   verde claro      → livre
   const corStatus = (mesa) => {
     const c = comandaPorMesa[mesa.id]
@@ -2814,6 +2820,9 @@ export default function PresencialSalao() {
     // alguém liberar a mesa. Quem passava pelo quadro lia como conta em aberto e
     // ia conferir se o cliente tinha pagado (Saidera, 11/10/2026).
     if (c.status === 'aguardando_conferencia') return { bg: 'rgba(59,130,246,.16)', border: '#3b82f6', label: '✓ Paga · liberar' }
+    // ROXO: já pediu a conta (tocou na pré-conta) — a mesa pede atenção pra fechar.
+    // Fica abaixo do azul (já paga) e acima de servida/ocupada.
+    if (c.conta_pedida_em) return { bg: 'rgba(168,85,247,.20)', border: '#a855f7', label: '🧾 Pediu a conta' }
     if (tudoEntregue(c)) return { bg: 'rgba(100,116,139,.10)', border: '#64748b', label: 'Servida' }
     const faltam = faltamDe(c)
     return { bg: 'rgba(239,68,68,.12)', border: '#ef4444', label: faltam > 0 ? `Faltam ${faltam}` : 'Ocupada' }
@@ -3097,15 +3106,18 @@ export default function PresencialSalao() {
             const cor = corStatus(mesa)
             const sub = subtotalDe(c)
             const prontos = c ? prontosDe(c) : 0
+            // Mesa roxa (pediu a conta) não vira verde por ter prato pronto: o 🔔 do
+            // canto já avisa do prato, e a cor continua dizendo que quer fechar.
+            const verde = prontos > 0 && !(c?.conta_pedida_em && c.status !== 'aguardando_conferencia')
             return (
               <div key={mesa.id} role="button" tabIndex={0} onClick={() => abrirMesa(mesa)}
                 onKeyDown={ev => { if (ev.key === 'Enter') abrirMesa(mesa) }}
                 style={{
                   borderRadius: 9, padding: '7px 8px', cursor: 'pointer', textAlign: 'left', position: 'relative',
-                  border: `1.5px solid ${prontos > 0 ? '#22c55e' : cor.border}`,
-                  background: prontos > 0 ? 'rgba(34,197,94,.14)' : cor.bg,
+                  border: `1.5px solid ${verde ? '#22c55e' : cor.border}`,
+                  background: verde ? 'rgba(34,197,94,.14)' : cor.bg,
                   color: 'var(--text)',
-                  boxShadow: prontos > 0 ? '0 0 0 2px rgba(34,197,94,.25)' : 'none',
+                  boxShadow: verde ? '0 0 0 2px rgba(34,197,94,.25)' : 'none',
                 }}>
                 {prontos > 0 && (
                   <span style={{
