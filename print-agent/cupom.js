@@ -357,14 +357,17 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
       // O espaco entre as linhas e o que da respiro.
       parts.push(BOLD(1), linha('   ' + (c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), FEED(1))
     }
-    // Observação também GRANDE (fonte alta + negrito), pra cozinha ler fácil.
-    if (it.observacao) parts.push(SIZE(0x01), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
+    // Observação no MESMO tamanho do nome do item (largura E altura dobradas +
+    // negrito). Saía só com a altura dobrada e ficava menor que o nome — o dono
+    // do Restaurante do Irmão pediu tudo igual (05/11/2026). Texto longo quebra
+    // sozinho na térmica.
+    if (it.observacao) parts.push(SIZE(0x11), BOLD(1), linha('obs: ' + it.observacao), BOLD(0), SIZE(0))
     // Espaço + tracejado + espaço: separa BEM cada pedido (comanda maior por item).
     parts.push(FEED(1), divisor(), FEED(2))
   })
   if (!lista.length) parts.push(linha('(sem itens)'))
   // Recado do pedido inteiro (delivery): tambem grande, a cozinha le de longe.
-  if (obsGeral) parts.push(SIZE(0x01), BOLD(1), linha('OBS: ' + obsGeral), BOLD(0), SIZE(0), FEED(1))
+  if (obsGeral) parts.push(SIZE(0x11), BOLD(1), linha('OBS: ' + obsGeral), BOLD(0), SIZE(0), FEED(1))
   // Rodape da loja (ex.: versiculo) — centralizado; senao, nada.
   if (rodape) parts.push(ALIGN(1), linha(String(rodape)), ALIGN(0))
   // O cliente prefere SOBRAR papel a sair "miudo": com poucos itens, empurra papel
