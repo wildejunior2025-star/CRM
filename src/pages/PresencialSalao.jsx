@@ -1190,7 +1190,7 @@ export default function PresencialSalao() {
 
   // Produto sem complemento caindo no rascunho, com recado opcional. Recado diferente
   // vira linha própria (senão o 2º café empilhava no 1º e herdava o recado dele).
-  function adicionarSimples(produto, recado) {
+  function adicionarSimples(produto, recado, qtd = 1) {
     const obs = (recado ?? '').trim()
     empilhar({
       produto_id: produto.produto_id,
@@ -1202,7 +1202,7 @@ export default function PresencialSalao() {
       faixas_preco: produto.faixas_preco ?? null,
       preco_promocional: produto.preco_promocional ?? null,
       categoria: produto.categoria ?? null,
-      complementos: [], quantidade: 1,
+      complementos: [], quantidade: Math.max(1, Math.floor(Number(qtd)) || 1),
     })
   }
 
@@ -4243,7 +4243,7 @@ export default function PresencialSalao() {
         <ModalRecadoItem
           produto={obsProduto}
           onCancelar={() => setObsProduto(null)}
-          onConfirmar={(recado) => { adicionarSimples(obsProduto, recado); setObsProduto(null) }}
+          onConfirmar={(recado, qtd) => { adicionarSimples(obsProduto, recado, qtd); setObsProduto(null) }}
         />
       )}
 
@@ -5160,6 +5160,8 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
 // é só adicionar. O recado já vai junto na comanda.
 function ModalRecadoItem({ produto, onCancelar, onConfirmar }) {
   const [recado, setRecado] = useState('')
+  // Quantidade aqui mesmo: "2 peixes" não obriga a voltar pra comanda e apertar +.
+  const [qtd, setQtd] = useState(1)
   return (
     <div onClick={onCancelar} className="sal-modal-overlay"
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -5171,6 +5173,17 @@ function ModalRecadoItem({ produto, onCancelar, onConfirmar }) {
             style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
         </div>
         <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{fmt(produto.preco_venda)}</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, marginBottom: 14 }}>
+          <button type="button" onClick={() => setQtd(q => Math.max(1, q - 1))} disabled={qtd <= 1} aria-label="Menos um"
+            style={{ ...qtdBtn, width: 46, height: 46, fontSize: 24, opacity: qtd <= 1 ? .35 : 1 }}>−</button>
+          <input type="number" min="1" inputMode="numeric" aria-label="Quantidade" value={qtd}
+            onChange={e => setQtd(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+            onFocus={e => e.target.select()}
+            style={{ width: 70, textAlign: 'center', fontWeight: 800, fontSize: 20, padding: '8px 2px', borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--surface, transparent)', color: 'var(--text)' }} />
+          <button type="button" onClick={() => setQtd(q => q + 1)} aria-label="Mais um"
+            style={{ ...qtdBtn, width: 46, height: 46, fontSize: 24 }}>+</button>
+        </div>
         <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 6 }}>
           📝 Recado <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 12.5 }}>(opcional)</span>
         </div>
@@ -5178,10 +5191,10 @@ function ModalRecadoItem({ produto, onCancelar, onConfirmar }) {
           placeholder="Ex.: sem cebola, bem passado…"
           style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 10, fontSize: 15,
             border: '1px solid var(--border)', background: 'var(--surface, transparent)', color: 'var(--text)', resize: 'none', fontFamily: 'inherit' }} />
-        <button type="button" onClick={() => onConfirmar(recado)}
+        <button type="button" onClick={() => onConfirmar(recado, qtd)}
           style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none',
             background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>
-          Adicionar · {fmt(produto.preco_venda)}
+          Adicionar {qtd > 1 ? `${qtd}× ` : ''}· {fmt(Number(produto.preco_venda) * qtd)}
         </button>
       </div>
     </div>
