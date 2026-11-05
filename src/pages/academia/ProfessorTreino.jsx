@@ -29,6 +29,8 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   const [semanas, setSemanas] = useState([])   // microciclo (o quadro do cartão)
   const [cargas, setCargas] = useState({})     // item_id → { carga, data } da última vez
   const [verSemanas, setVerSemanas] = useState(false)
+  const [modelos, setModelos] = useState(null)   // null = nao abriu a tela
+  const [salvandoModelo, setSalvandoModelo] = useState(false)
   const [inicioCiclo, setInicioCiclo] = useState(aluno.microciclo_inicio || null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
@@ -242,6 +244,69 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
     setSalvando(false)
   }
 
+  // ── Modelos de treino ─────────────────────────────────────────────────
+  //
+  // Um professor e 460 alunos: montar exercicio por exercicio pra cada um nao
+  // acontece. Ele monta tres ou quatro treinos bons e aplica em um toque.
+  //
+  // O modelo guarda o plano no MESMO formato do rascunho da IA, entao cai na
+  // mesma tela de conferir e no mesmo "Usar este treino" — sem caminho novo.
+  async function abrirModelos() {
+    setErro(null)
+    const { data, error } = await supabase
+      .from('academia_modelos')
+      .select('id, nome, observacao, plano')
+      .eq('empresa_id', profile.empresa_id)
+      .order('nome')
+    if (error) return setErro(error.message)
+    setModelos(data || [])
+  }
+
+  // Transforma o que esta montado agora no formato do plano.
+  function planoDeAgora() {
+    return {
+      resumo: null,
+      treinos: treinos.map(t => ({
+        letra: t.letra,
+        dia_semana: t.dia_semana || null,
+        foco: t.nome || null,
+        itens: (itens[t.id] || []).map(i => ({
+          id: i.exercicio_id, nome: i.nome, maquina: i.maquina,
+          variacao: i.variacao || null, obs: i.observacao || null,
+        })),
+      })),
+      semanas: semanas.map(w => ({
+        numero: w.numero, series: w.series, rep_min: w.rep_min,
+        rep_max: w.rep_max, sistema: w.sistema, aumentar_peso: !!w.aumentar_peso,
+      })),
+    }
+  }
+
+  async function salvarComoModelo() {
+    const quantos = Object.values(itens).reduce((n, l) => n + l.length, 0)
+    if (!quantos) return setErro('Monte o treino primeiro — não dá pra guardar um modelo vazio.')
+    const nome = window.prompt('Nome do modelo (ex.: Iniciante 3x, Emagrecimento 5x):')
+    if (!nome?.trim()) return
+    setSalvandoModelo(true)
+    const { error } = await supabase.from('academia_modelos').insert({
+      empresa_id: profile.empresa_id,
+      nome: nome.trim(),
+      observacao: `${treinos.length} treinos · ${quantos} exercícios`,
+      plano: planoDeAgora(),
+      criado_por: profile.id,
+    })
+    setSalvandoModelo(false)
+    if (error) return setErro(error.message)
+    setErro(null)
+    window.alert(`Modelo "${nome.trim()}" guardado. Agora é só aplicar nos outros alunos.`)
+  }
+
+  async function apagarModelo(m) {
+    if (!window.confirm(`Apagar o modelo "${m.nome}"? Os alunos que já receberam continuam com o treino.`)) return
+    await supabase.from('academia_modelos').delete().eq('id', m.id)
+    abrirModelos()
+  }
+
   // Microciclo: as 8 semanas do verso do cartão. Sem a IA, o professor
   // preenche aqui na mão.
   // Recomecar o ciclo: volta pra semana 1 a partir de hoje.
@@ -330,11 +395,12 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   }
 
   if (plano) {
+    const temTreinoMontado = Object.values(itens).reduce((n, l) => n + l.length, 0)
     return (
       <div className="al-tela">
         <header className="al-topo">
           <div className="al-titulo">
-            <span className="al-ola">Rascunho da IA</span>
+            <span className="al-ola">{plano.deModelo ? `Modelo: ${plano.deModelo}` : 'Rascunho da IA'}</span>
             <h1>{aluno.nome.split(' ')[0]}</h1>
           </div>
         </header>
@@ -378,7 +444,63 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           <button className="al-botao" disabled={salvando} onClick={usarPlano}>
             {salvando ? 'Salvando...' : 'Usar este treino'}
           </button>
+          {temTreinoMontado > 0 && (
+            <p className="al-aviso-apaga">
+              ⚠ {aluno.nome.split(' ')[0]} já tem {temTreinoMontado} exercício
+              {temTreinoMontado === 1 ? '' : 's'} montado{temTreinoMontado === 1 ? '' : 's'}.
+              Usar este apaga o que está lá.
+            </p>
+          )}
           <button className="al-botao texto" onClick={() => setPlano(null)}>Descartar</button>
+        </footer>
+      </div>
+    )
+  }
+
+  if (modelos) {
+    return (
+      <div className="al-tela">
+        <header className="al-topo">
+          <button className="al-menu-botao" onClick={() => setModelos(null)}>←</button>
+          <div className="al-titulo">
+            <span className="al-ola">{aluno.nome.split(' ')[0]}</span>
+            <h1>Modelos de treino</h1>
+          </div>
+        </header>
+
+        <p className="al-vazio">
+          Monte um treino bom uma vez, guarde como modelo e aplique nos outros
+          alunos em um toque. Depois de aplicar, dá pra ajustar o que for
+          diferente pra cada um.
+        </p>
+
+        {erro && <div className="al-erro">{erro}</div>}
+
+        {modelos.length === 0 && (
+          <section className="al-bloco">
+            <p className="al-texto">Nenhum modelo guardado ainda.</p>
+          </section>
+        )}
+
+        {modelos.map(m => (
+          <section key={m.id} className="al-bloco">
+            <div className="al-modelo">
+              <span>
+                <strong>{m.nome}</strong>
+                <small>{m.observacao || `${m.plano?.treinos?.length || 0} treinos`}</small>
+              </span>
+              <button className="al-botao" onClick={() => { setPlano({ ...m.plano, deModelo: m.nome }); setModelos(null) }}>
+                Usar
+              </button>
+            </div>
+            <button className="al-botao texto" onClick={() => apagarModelo(m)}>Apagar modelo</button>
+          </section>
+        ))}
+
+        <footer className="al-rodape">
+          <button className="al-botao secundario" disabled={salvandoModelo} onClick={salvarComoModelo}>
+            {salvandoModelo ? 'Guardando...' : `💾 Guardar o treino de ${aluno.nome.split(' ')[0]} como modelo`}
+          </button>
         </footer>
       </div>
     )
@@ -611,6 +733,9 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           onClick={() => setIa({ objetivo: aluno.objetivo || 'Condicionamento geral', nivel: 'Iniciante', dias: 3, restricoes: '' })}
         >
           ✨ Montar tudo com IA
+        </button>
+        <button className="al-botao secundario" onClick={abrirModelos}>
+          📋 Usar um modelo
         </button>
         {treino && <button className="al-botao texto" onClick={apagarTreino}>Apagar treino {letra}</button>}
       </footer>

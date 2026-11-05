@@ -20,6 +20,13 @@ function buscaNoYoutube(nome) {
   return `https://www.youtube.com/results?search_query=${busca}`
 }
 
+// Subiu de verdade? Só quando há duas anotações diferentes e a de agora é
+// maior — repetir a mesma carga não é evolução, e não vale inventar aplauso.
+function subiu(primeira, ultima) {
+  return primeira?.carga != null && ultima?.carga != null
+    && ultima.carga > primeira.carga && primeira.data !== ultima.data
+}
+
 export default function AlunoTreinos({ aluno }) {
   const [treinos, setTreinos] = useState(null)
   const [itens, setItens] = useState({})
@@ -28,6 +35,7 @@ export default function AlunoTreinos({ aluno }) {
   const [aberto, setAberto] = useState(null)
   // Carga e "feito": é o que os apps concorrentes têm e o nosso não tinha.
   const [ultimas, setUltimas] = useState({})   // item_id → { carga, data }
+  const [primeiras, setPrimeiras] = useState({}) // item_id → a carga mais antiga
   const [feitosHoje, setFeitosHoje] = useState({}) // item_id → carga de hoje
   const [editando, setEditando] = useState(null)   // item_id com o campo aberto
   const [carga, setCarga] = useState('')
@@ -65,12 +73,18 @@ export default function AlunoTreinos({ aluno }) {
         .limit(400)
       const ult = {}
       const hojeFeitos = {}
+      // A PRIMEIRA carga também: é o que transforma "última vez: 25 kg" em
+      // "você saiu de 20 pra 25". Sem a comparação o aluno não vê que evoluiu
+      // — e evoluir é o motivo de ele anotar.
+      const primeiras = {}
       ;(execs || []).forEach(e => {
         if (!e.item_id) return
         if (!ult[e.item_id]) ult[e.item_id] = e
+        if (e.carga != null) primeiras[e.item_id] = e  // vem do mais novo pro mais velho
         if (e.data === hojeIso) hojeFeitos[e.item_id] = e.carga
       })
       setUltimas(ult)
+      setPrimeiras(primeiras)
       setFeitosHoje(hojeFeitos)
 
       // Vídeos de execução cadastrados pelo professor.
@@ -136,6 +150,7 @@ export default function AlunoTreinos({ aluno }) {
 
   const hoje = diaDeHoje()
   const doDia = treinos.find(t => ehHoje(t.dia_semana))
+  const quantosSubiram = Object.keys(primeiras).filter(id => subiu(primeiras[id], ultimas[id])).length
 
   return (
     <>
@@ -153,6 +168,13 @@ export default function AlunoTreinos({ aluno }) {
       ) : (
         <section className="al-bloco">
           <p className="al-texto">Hoje você não tem treino marcado. Escolha um abaixo.</p>
+        </section>
+      )}
+
+      {quantosSubiram > 0 && (
+        <section className="al-evolucao">
+          <strong>Você subiu a carga em {quantosSubiram} {quantosSubiram === 1 ? 'exercício' : 'exercícios'}</strong>
+          <span>Desde que começou a anotar. Continue marcando o peso de cada série.</span>
         </section>
       )}
 
@@ -219,6 +241,11 @@ export default function AlunoTreinos({ aluno }) {
                       : ultima?.carga
                         ? <small className="al-carga">última vez: {ultima.carga} kg</small>
                         : null}
+                    {subiu(primeiras[i.id], ultima) && (
+                      <small className="al-evoluiu">
+                        ↑ saiu de {primeiras[i.id].carga} pra {ultima.carga} kg
+                      </small>
+                    )}
                     {editando === i.id && (
                       <span className="al-carga-campo">
                         <input

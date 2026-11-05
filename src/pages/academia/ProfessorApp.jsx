@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno } from '../../lib/reconhecimentoFacial'
+import { semanaAtual } from '../../lib/microciclo'
 import './aluno.css'
 
 // Área do PROFESSOR — mesmo endereço, no celular, com a mesma cara da área do
@@ -11,12 +12,20 @@ import './aluno.css'
 
 const ProfessorTreino = lazy(() => import('./ProfessorTreino'))
 
+// O ciclo de 8 semanas acabou? Só conta pra quem tem treino montado e semanas
+// preenchidas — aluno sem treino não "terminou" nada.
+function acabou(c) {
+  if (!c?.semanas || !c.exercicios || !c.inicio) return false
+  return semanaAtual(c.inicio, c.semanas).terminou
+}
+
 export default function ProfessorApp() {
   const { profile, logout } = useAuth()
   const [alunos, setAlunos] = useState([])
   const [busca, setBusca] = useState('')
   const [carregando, setCarregando] = useState(true)
   const [aluno, setAluno] = useState(null)
+  const [ciclos, setCiclos] = useState({})  // aluno_id → { semanas, inicio, exercicios }
   const [gaveta, setGaveta] = useState(false)
 
   const carregar = useCallback(async () => {
@@ -26,6 +35,11 @@ export default function ProfessorApp() {
       .eq('empresa_id', profile.empresa_id)
       .order('nome')
     setAlunos(data || [])
+    // Em que pé está o ciclo de cada um. Vem de uma função (uma linha por
+    // aluno) porque ler academia_semanas direto seriam 8 linhas por aluno —
+    // o PostgREST corta em 1000 e a conta sairia errada a partir do 125º.
+    const { data: cs } = await supabase.rpc('academia_ciclos')
+    setCiclos(Object.fromEntries((cs || []).map(c => [c.aluno_id, c])))
     setCarregando(false)
   }, [profile.empresa_id])
 
@@ -91,8 +105,11 @@ export default function ProfessorApp() {
                     <strong>{a.nome}</strong>
                     <small>{a.matricula ? `nº ${a.matricula}` : ''}{a.objetivo ? ` · ${a.objetivo}` : ''}</small>
                   </span>
-                  <span className={`al-tag ${s.status === 'liberado' ? 'ok' : 'devendo'}`}>
-                    {s.status === 'liberado' ? 'Em dia' : 'Vencida'}
+                  <span className="al-marcas">
+                    <span className={`al-tag ${s.status === 'liberado' ? 'ok' : 'devendo'}`}>
+                      {s.status === 'liberado' ? 'Em dia' : 'Vencida'}
+                    </span>
+                    {acabou(ciclos[a.id]) && <span className="al-tag ciclo">ciclo terminado</span>}
                   </span>
                 </button>
               </li>

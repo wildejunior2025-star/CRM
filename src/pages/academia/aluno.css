@@ -404,3 +404,20 @@
 .al-ciclo-cartao small { color: var(--al-apagado); font-size: 13px; }
 .al-ciclo-cartao .al-botao { padding: 9px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
 
+
+/* Modelos de treino */
+.al-modelo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.al-modelo strong { display: block; font-size: 18px; }
+.al-modelo small { color: var(--al-apagado); font-size: 14px; }
+.al-modelo .al-botao { padding: 10px 18px; flex-shrink: 0; }
+.al-aviso-apaga { margin: 0; color: var(--al-vermelho); font-size: 14px; line-height: 1.45; text-align: center; }
+
+/* Marcas na lista do professor */
+.al-marcas { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.al-tag.ciclo { background: var(--al-vermelho-fundo); color: var(--al-vermelho); white-space: nowrap; }
+
+/* Evolução de carga */
+.al-evolucao { background: var(--al-verde-fundo); color: var(--al-verde); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.al-evolucao strong { font-size: 17px; }
+.al-evolucao span { color: var(--al-apagado); font-size: 14px; }
+.al-evoluiu { color: var(--al-verde); font-weight: 700; }
