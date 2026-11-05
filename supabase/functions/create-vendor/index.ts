@@ -64,7 +64,9 @@ serve(async (req) => {
     const { nome, email, password, telefone, perfil } = body
 
     // Perfil escolhido no formulário (motoqueiro/cozinheiro/etc.). Default: vendedor.
-    const PERFIS_OK = ["admin", "vendedor", "garcom", "cozinheiro", "entregador"]
+    // "professor" é da academia: ele vê todos os alunos e monta o treino, mas
+    // não entra em pagamentos nem na catraca.
+    const PERFIS_OK = ["admin", "vendedor", "garcom", "cozinheiro", "entregador", "professor"]
     const perfilFinal = PERFIS_OK.includes(perfil) ? perfil : "vendedor"
 
     if (!nome || !email || !password) {

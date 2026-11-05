@@ -16,7 +16,7 @@ import { useAuth } from '../../hooks/useAuth'
 
 const URL_CRIAR = 'https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/create-vendor'
 
-const VAZIO = { nome: '', email: '', senha: '', telefone: '' }
+const VAZIO = { nome: '', email: '', senha: '', telefone: '', perfil: 'admin' }
 
 // Códigos do caixa: a academia usa UM login no balcão (eles não se dão bem
 // com computador), então quem diz QUEM está recebendo é o código. Cada um
@@ -138,12 +138,14 @@ export default function AcademiaEquipe() {
           email: form.email.trim().toLowerCase(),
           password: form.senha,
           telefone: form.telefone.trim() || undefined,
-          perfil: 'admin',
+          perfil: form.perfil,
         }),
       })
       const json = await res.json()
       if (!json.ok) throw new Error(json.error || 'Não deu pra criar.')
-      setAviso(`Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()} e a senha que você escolheu.`)
+      setAviso(form.perfil === 'professor'
+        ? `Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()} no mesmo endereço, pelo celular, e cai direto na lista de alunos pra montar treino.`
+        : `Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()} e a senha que você escolheu.`)
       setForm(VAZIO)
       carregar()
     } catch (err) {
@@ -206,13 +208,25 @@ export default function AcademiaEquipe() {
                 onChange={e => set('telefone', e.target.value)} placeholder="(84) 99999-9999" />
             </label>
           </div>
-          <label>Senha
-            <input type="text" autoComplete="off" value={form.senha}
-              onChange={e => set('senha', e.target.value)} placeholder="mínimo 6 caracteres" />
-          </label>
+          <div className="ac-dupla">
+            <label>Senha
+              <input type="text" autoComplete="off" value={form.senha}
+                onChange={e => set('senha', e.target.value)} placeholder="mínimo 6 caracteres" />
+            </label>
+            {/* Professor/personal: ele anda pela academia com o celular na mao e
+                so monta treino. Dar o login de Academia pra ele seria entregar
+                pagamentos e catraca de brinde. */}
+            <label>O que essa pessoa faz
+              <select value={form.perfil} onChange={e => set('perfil', e.target.value)}>
+                <option value="admin">Academia — alunos, pagamentos, recepção, catraca</option>
+                <option value="professor">Professor / personal — só monta os treinos</option>
+              </select>
+            </label>
+          </div>
           <p className="ac-muted">
             Escolha uma senha e passe pra pessoa. Ela pode ser qualquer e-mail que a
             pessoa tenha — serve só pra identificar quem é.
+            {form.perfil === 'professor' && ' O professor entra no MESMO endereço e cai na lista de alunos, pelo celular: não vê pagamento, não abre catraca.'}
           </p>
         </div>
 
