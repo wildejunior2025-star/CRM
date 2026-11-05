@@ -291,12 +291,33 @@ export default function WhatsAppConversas() {
   async function togglePausa(item) {
     const pausar = !item.pausado
     setBusy(item.chave)
-    setConversas(prev => prev.map(c => c.chave === item.chave ? { ...c, pausado: pausar } : c))
+    let erro
     if (pausar) {
       const linhas = item.phones.map(p => ({ empresa_id: empresaId, phone: p }))
-      await supabase.from('whatsapp_bot_pausado').upsert(linhas, { onConflict: 'empresa_id,phone', ignoreDuplicates: true })
+      const r = await supabase.from('whatsapp_bot_pausado')
+        .upsert(linhas, { onConflict: 'empresa_id,phone', ignoreDuplicates: true })
+      erro = r.error
     } else {
-      await supabase.from('whatsapp_bot_pausado').delete().eq('empresa_id', empresaId).in('phone', item.phones)
+      // APAGA PELOS 8 ÚLTIMOS DÍGITOS, não pela lista de formas da conversa.
+      //
+      // O mesmo celular aparece como 5584 98180774 e 5584 998180774, e a pausa
+      // pode ter sido gravada numa forma que não aparece em NENHUMA mensagem
+      // daquela conversa — aí o delete por lista não achava nada. O robô
+      // (roboPausado) casa pelos 8 últimos, então ele continuava vendo a pausa
+      // e ficava calado, enquanto esta tela já tinha escrito "Robô ativo".
+      // Foi o que aconteceu com o número do Wilde no Zebu, 05/11/2026: pausa de
+      // ontem 09:57 viva, tela dizendo que estava liberado.
+      const r = await supabase.from('whatsapp_bot_pausado')
+        .delete().eq('empresa_id', empresaId).like('phone', `%${item.chave}`)
+      erro = r.error
+    }
+    // O selo só muda depois que o banco confirma. Virar na hora e dar errado é
+    // pior que não virar: a loja sai achando que o robô voltou.
+    if (!erro) {
+      setConversas(prev => prev.map(c => c.chave === item.chave ? { ...c, pausado: pausar } : c))
+    } else {
+      console.error('[pausa] não consegui gravar:', erro.message)
+      alert(`Não consegui ${pausar ? 'pausar' : 'reativar'} o robô nesse número: ${erro.message}`)
     }
     setBusy(null)
   }
