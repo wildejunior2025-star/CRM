@@ -8428,7 +8428,16 @@ export default function PainelPedidos() {
     // Vale na hora: desligar cala a campainha que já está tocando, e religar
     // com pedido esperando volta a tocar (senão o pedido fica mudo até o próximo).
     if (!novo) pararLoopSom()
-    else if (pedidos.some(p => p.status === 'aguardando')) iniciarLoopSom()
+    else {
+      // Ligar o som é um toque do usuário: aproveita pra destravar o áudio do
+      // aparelho e pedir a autorização de notificação (a janelinha "Permitir")
+      // onde o navegador oferece.
+      prepararSom()
+      try {
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission()
+      } catch { /* sem suporte (iPhone no app não tem) */ }
+      if (pedidos.some(p => p.status === 'aguardando')) iniciarLoopSom()
+    }
   }
   function setCupom(patch) {
     setCupomCfg(prev => {
