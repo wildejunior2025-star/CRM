@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno } from '../../lib/reconhecimentoFacial'
 import { dinheiro, dataBr } from '../../lib/academiaPagamento'
+import { ehHoje } from '../../lib/diaSemana'
 import './aluno.css'
 
 // Área do ALUNO — mesmo endereço da academia, só que quem entra com perfil
@@ -17,8 +18,6 @@ const AlunoPerfil = lazy(() => import('./AlunoPerfil'))
 const AlunoTermos = lazy(() => import('./AlunoTermos'))
 const AlunoFicha = lazy(() => import('./AlunoFicha'))
 const AlunoTreinos = lazy(() => import('./AlunoTreinos'))
-
-const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
 // As abas de baixo: é onde o polegar já está num celular. A gaveta continua
 // existindo pro que é raro (ficha, falar com a academia, sair) — o que o aluno
@@ -74,7 +73,7 @@ export default function AlunoApp() {
         .select('id, letra, dia_semana')
         .eq('aluno_id', data.id)
         .eq('ativo', true)
-      const doDia = (trs || []).find(t => t.dia_semana === DIAS[new Date().getDay()])
+      const doDia = (trs || []).find(t => ehHoje(t.dia_semana))
       if (doDia) {
         const { count } = await supabase
           .from('academia_treino_itens')

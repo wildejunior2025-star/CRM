@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual, hojeIso } from '../../lib/microciclo'
+import { curto } from '../../lib/diaSemana'
 import { useAuth } from '../../hooks/useAuth'
 
 // O professor monta o treino do aluno pelo celular, do mesmo jeito que fazia
@@ -203,7 +204,8 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           .from('academia_treinos')
           .insert({
             empresa_id: profile.empresa_id, aluno_id: aluno.id,
-            letra: t.letra, dia_semana: t.dia_semana || null, nome: t.foco || null,
+            // A IA responde "Quinta"; o resto do sistema fala "Qui".
+            letra: t.letra, dia_semana: curto(t.dia_semana), nome: t.foco || null,
             criado_por: profile.id,
           })
           .select().single()

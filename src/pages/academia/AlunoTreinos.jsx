@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual } from '../../lib/microciclo'
+import { ehHoje, diaDeHoje } from '../../lib/diaSemana'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
 // de cada exercício — é por ele que o aluno acha o aparelho na academia.
 //
 // Série e repetição vêm do microciclo (a tabela de semanas do cartão): se o
 // professor tiver montado, cada exercício mostra "3 séries de 8 a 12".
-
-const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
 // Vídeo de execução: o professor pode prender um vídeo certo no exercício
 // (botão 🎥 na área dele). Quando não prendeu — que é o caso de quase todos
@@ -54,8 +53,7 @@ export default function AlunoTreinos({ aluno }) {
         const porTreino = {}
         ;(its || []).forEach(i => { (porTreino[i.treino_id] ||= []).push(i) })
         setItens(porTreino)
-        const hoje = DIAS[new Date().getDay()]
-        setAberto(trs.find(t => t.dia_semana === hoje)?.id || trs[0].id)
+        setAberto(trs.find(t => ehHoje(t.dia_semana))?.id || trs[0].id)
       }
       // Última carga de cada exercício e o que já foi feito hoje.
       const hojeIso = new Date().toISOString().slice(0, 10)
@@ -136,8 +134,8 @@ export default function AlunoTreinos({ aluno }) {
     )
   }
 
-  const hoje = DIAS[new Date().getDay()]
-  const doDia = treinos.find(t => t.dia_semana === hoje)
+  const hoje = diaDeHoje()
+  const doDia = treinos.find(t => ehHoje(t.dia_semana))
 
   return (
     <>
