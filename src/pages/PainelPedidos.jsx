@@ -5,7 +5,7 @@ import { useTheme } from '../hooks/useTheme'
 import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
-import { tocarPedidoNovo } from '../lib/somChamado'
+import { tocarPedidoNovo, prepararSom, somBloqueado } from '../lib/somChamado'
 import BaixaInsumos from '../components/BaixaInsumos'
 import PrecoEditavel from '../components/PrecoEditavel'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
@@ -8197,6 +8197,15 @@ export default function PainelPedidos() {
     catch { return '80mm' }
   })
   const [somAtivo, setSomAtivo] = useState(somAtivoConfig)
+  // iPhone: o som só liga depois de um toque. Enquanto o aparelho não liberou,
+  // aparece o aviso "toque pra ligar o som" — antes o pedido chegava mudo e
+  // ninguém sabia por quê (relato do Wilde, 05/11).
+  const [somTravado, setSomTravado] = useState(false)
+  useEffect(() => {
+    prepararSom()
+    const t = setInterval(() => setSomTravado(somBloqueado()), 1500)
+    return () => clearInterval(t)
+  }, [])
   const [cupomCfg, setCupomCfg] = useState(() => {
     try { return JSON.parse(localStorage.getItem('painelConfig') || '{}').cupom || {} }
     catch { return {} }
@@ -13191,6 +13200,14 @@ export default function PainelPedidos() {
           </svg>
           <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.02em' }}>{somAtivo ? 'Som' : 'Mudo'}</span>
         </button>
+        {somTravado && somAtivo && (
+          <button type="button" onClick={() => { prepararSom(); setSomTravado(somBloqueado()) }}
+            style={{ position: 'fixed', top: 8, left: 8, right: 70, zIndex: 9999, padding: '12px 14px', borderRadius: 12,
+              border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer',
+              boxShadow: '0 6px 20px rgba(0,0,0,.35)' }}>
+            🔔 Toque aqui para LIGAR O SOM dos pedidos
+          </button>
+        )}
       </nav>
 
       {/* ── MESAS / SALÃO em painel. Cobre da esquerda até ANTES da barra de menu

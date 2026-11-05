@@ -10,17 +10,42 @@
 // Até 14/09/2026 era o contrário; a troca foi pedido da loja.
 let _ctx = null
 
+// iPhone (Safari e o app): três travas que deixavam o "triririn" mudo.
+//  1) O contexto de áudio nasce SUSPENSO e só destrava com um gesto de toque que
+//     termine (touchend/pointerup/click). `touchstart` NÃO conta no iOS.
+//  2) O botão lateral de silencioso do iPhone cala o Web Audio — a menos que a
+//     sessão de áudio seja "playback" (navigator.audioSession, iOS 16.4+).
+//  3) O destrave era instalado só na primeira vez que o som tocava, tarde demais.
+// Por isso o contexto agora nasce já no carregamento, com o destrave pendurado
+// em qualquer toque, pra valer pelo resto da sessão.
 function ctxAudio() {
   if (!_ctx) {
     _ctx = new (window.AudioContext || window.webkitAudioContext)()
-    // O navegador só deixa tocar depois de um gesto do usuário. Como o aviso
-    // chega sozinho, o desbloqueio fica pendurado em qualquer clique.
-    const soltar = () => { if (_ctx.state === 'suspended') _ctx.resume() }
-    document.addEventListener('click', soltar)
-    document.addEventListener('keydown', soltar)
-    document.addEventListener('touchstart', soltar)
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback' } catch { /* sem suporte */ }
+    const soltar = () => {
+      try { if (_ctx.state !== 'running') _ctx.resume() } catch { /* ignora */ }
+      // Um sopro mudo de 1 amostra: é o que o iOS exige pra considerar liberado.
+      try {
+        const b = _ctx.createBuffer(1, 1, 22050)
+        const src = _ctx.createBufferSource()
+        src.buffer = b; src.connect(_ctx.destination); src.start(0)
+      } catch { /* ignora */ }
+    }
+    ;['touchend', 'pointerup', 'click', 'keydown'].forEach(ev =>
+      document.addEventListener(ev, soltar, { passive: true }))
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') { try { _ctx.resume() } catch { /* ignora */ } }
+    })
   }
   return _ctx
+}
+
+// O painel chama isto na abertura: cria o contexto e deixa o destrave pronto.
+export function prepararSom() { try { ctxAudio() } catch { /* sem Web Audio */ } }
+
+// true = o aparelho ainda não liberou o som (precisa de um toque na tela).
+export function somBloqueado() {
+  try { return !!_ctx && _ctx.state !== 'running' } catch { return false }
 }
 
 const TOQUE_S = 0.85   // duração de cada "trinnn"
