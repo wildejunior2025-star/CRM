@@ -19,7 +19,7 @@
   background: var(--al-fundo);
   color: var(--al-texto);
   font-size: 17px;
-  padding: 20px 18px max(28px, env(safe-area-inset-bottom));
+  padding: 20px 18px calc(84px + env(safe-area-inset-bottom));
   box-sizing: border-box;
   max-width: 560px;
   margin: 0 auto;
@@ -324,3 +324,68 @@
 .al-grafico-topo strong { font-variant-numeric: tabular-nums; }
 .al-grafico-topo strong.subiu { color: var(--al-verde); }
 .al-grafico-topo strong.desceu { color: var(--al-vermelho); }
+
+/* ── Abas de baixo ────────────────────────────────────────────────────── */
+/* Onde o polegar já está. A gaveta continua, mas só pro que é raro. */
+.al-abas {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  display: flex; background: rgba(255,255,255,.94); backdrop-filter: blur(12px);
+  border-top: 1px solid var(--al-linha);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+  max-width: 560px; margin: 0 auto;
+}
+.al-abas button {
+  flex: 1; background: none; border: 0; cursor: pointer; font: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 2px; color: var(--al-apagado); border-radius: 12px;
+}
+.al-abas small { font-size: 11px; font-weight: 600; }
+.al-aba-icone { font-size: 21px; line-height: 1; filter: grayscale(1); opacity: .55; }
+.al-abas .ativa { color: var(--al-roxo); }
+.al-abas .ativa .al-aba-icone { filter: none; opacity: 1; }
+.al-abas button:active { background: var(--al-roxo-claro); }
+
+/* ── Treino de hoje na tela inicial ───────────────────────────────────── */
+.al-hoje-cartao {
+  background: linear-gradient(135deg, #7c3aed, #5b21b6); color: #fff;
+  border: 0; border-radius: 18px; padding: 20px; font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  box-shadow: 0 10px 24px -14px #5b21b6;
+}
+.al-hoje-cartao .al-rotulo { color: #e4d6ff; text-transform: none; letter-spacing: 0; font-weight: 600; }
+.al-hoje-cartao strong { font-size: 32px; line-height: 1.1; }
+.al-hoje-cartao .al-sub { color: #e4d6ff; }
+.al-hoje-cartao:active { filter: brightness(.93); }
+.al-hoje-cartao.folga { background: var(--al-carta); color: var(--al-texto); border: 1px solid var(--al-linha); box-shadow: none; }
+.al-hoje-cartao.folga .al-rotulo, .al-hoje-cartao.folga .al-sub { color: var(--al-apagado); }
+
+/* Atalho de uma linha (dias treinados no mês) */
+.al-atalho {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--al-carta); border: 1px solid var(--al-linha); border-radius: 16px;
+  padding: 16px 18px; font: inherit; color: var(--al-texto); cursor: pointer; text-align: left;
+}
+.al-atalho strong { color: var(--al-roxo); font-size: 19px; }
+.al-seta { color: var(--al-apagado); font-size: 22px; line-height: 1; }
+
+/* ── Convite pra instalar ─────────────────────────────────────────────── */
+.al-instalar {
+  background: var(--al-roxo-claro); border-radius: 16px; padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.al-instalar strong { display: block; }
+.al-instalar small { color: var(--al-apagado); font-size: 14px; line-height: 1.45; display: block; margin-top: 2px; }
+.al-instalar-botoes { display: flex; gap: 8px; }
+.al-instalar-botoes .al-botao { flex: 1; padding: 11px 14px; font-size: 15px; }
+
+/* ── Esqueleto de carregamento ────────────────────────────────────────── */
+.al-osso {
+  display: block; border-radius: 10px;
+  background: linear-gradient(90deg, #e9e7f3 25%, #f3f2fa 50%, #e9e7f3 75%);
+  background-size: 300% 100%; animation: al-brilho 1.3s ease-in-out infinite;
+}
+.al-osso-botao { width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0; }
+.al-osso-foto { width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0; }
+@keyframes al-brilho { from { background-position: 100% 0 } to { background-position: -100% 0 } }
+@media (prefers-reduced-motion: reduce) { .al-osso { animation: none } }
+

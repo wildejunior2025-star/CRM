@@ -29,6 +29,18 @@
         };
         _trocaManifesto();
         document.addEventListener('DOMContentLoaded', _trocaManifesto);
+      } else if (location.hostname === 'academia.fwcinter.com') {
+        // Academia: quem instala é o ALUNO. Instalado, o app se chama
+        // "Academia" e abre com a cor clara da área dele — não "FWC Inter",
+        // que não quer dizer nada pra quem só vem treinar.
+        var _trocaManifestoAcademia = function () {
+          var _mfa = document.querySelector('link[rel="manifest"]');
+          if (_mfa) _mfa.href = '/manifest-academia.webmanifest';
+        };
+        _trocaManifestoAcademia();
+        document.addEventListener('DOMContentLoaded', _trocaManifestoAcademia);
+        var _tc = document.querySelector('meta[name="theme-color"]');
+        if (_tc) _tc.setAttribute('content', '#f4f3fb');
       } else if (location.hostname === 'gestor.fwcinter.com') {
         // Gestor: mesmo app, mas o PWA instalado se chama "FWC Gestor" (ícone
         // roxo) pra diferenciar do "FWC Portal" na lista de apps do PC.

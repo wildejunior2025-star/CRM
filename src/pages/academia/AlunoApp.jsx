@@ -18,18 +18,34 @@ const AlunoTermos = lazy(() => import('./AlunoTermos'))
 const AlunoFicha = lazy(() => import('./AlunoFicha'))
 const AlunoTreinos = lazy(() => import('./AlunoTreinos'))
 
+const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
+// As abas de baixo: é onde o polegar já está num celular. A gaveta continua
+// existindo pro que é raro (ficha, falar com a academia, sair) — o que o aluno
+// usa todo dia não pode depender de abrir menu.
+const ABAS = [
+  { id: 'inicio', nome: 'Início', icone: '🏠' },
+  { id: 'treinos', nome: 'Treino', icone: '🏋️' },
+  { id: 'entradas', nome: 'Entradas', icone: '📅' },
+  { id: 'perfil', nome: 'Perfil', icone: '👤' },
+]
+
+// A gaveta ficou com o que NÃO é do dia a dia; o resto virou aba de baixo.
 const MENU = [
-  { id: 'perfil', nome: 'Perfil', icone: '👤', detalhe: 'Foto, dados e senha' },
-  { id: 'entradas', nome: 'Minhas entradas', icone: '🚪', detalhe: 'Quando você treinou' },
   { id: 'ficha', nome: 'Minha ficha', icone: '📏', detalhe: 'Medidas e evolução' },
-  { id: 'treinos', nome: 'Meus treinos', icone: '🏋️', detalhe: 'O treino do dia' },
   { id: 'falar', nome: 'Falar com a academia', icone: '💬', detalhe: 'Pelo WhatsApp' },
 ]
+
+const TITULOS = {
+  perfil: 'Perfil', entradas: 'Minhas entradas', ficha: 'Minha ficha',
+  treinos: 'Meus treinos', semWhats: 'Falar com a academia',
+}
 
 export default function AlunoApp() {
   const { profile, empresa, logout } = useAuth()
   const [aluno, setAluno] = useState(null)
   const [entradas, setEntradas] = useState([])
+  const [treinoHoje, setTreinoHoje] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [tela, setTela] = useState('inicio') // inicio | perfil | entradas | treinos | rosto
   const [gaveta, setGaveta] = useState(false)
@@ -49,6 +65,25 @@ export default function AlunoApp() {
         .order('criado_em', { ascending: false })
         .limit(60)
       setEntradas(acessos || [])
+
+      // O treino de HOJE na tela inicial: é a primeira coisa que o aluno quer
+      // ao chegar na academia. Sem isso ele tinha que abrir o menu, entrar em
+      // "Meus treinos" e descobrir sozinho que terça é o B.
+      const { data: trs } = await supabase
+        .from('academia_treinos')
+        .select('id, letra, dia_semana')
+        .eq('aluno_id', data.id)
+        .eq('ativo', true)
+      const doDia = (trs || []).find(t => t.dia_semana === DIAS[new Date().getDay()])
+      if (doDia) {
+        const { count } = await supabase
+          .from('academia_treino_itens')
+          .select('id', { count: 'exact', head: true })
+          .eq('treino_id', doDia.id)
+        setTreinoHoje({ ...doDia, exercicios: count || 0 })
+      } else {
+        setTreinoHoje(trs?.length ? { vazio: true } : null)
+      }
     }
     setCarregando(false)
   }
@@ -75,7 +110,7 @@ export default function AlunoApp() {
     setTela(id)
   }
 
-  if (carregando) return <div className="al-centro">Carregando...</div>
+  if (carregando) return <Esqueleto />
 
   if (!aluno) {
     return (
@@ -108,7 +143,7 @@ export default function AlunoApp() {
 
   const s = situacaoAluno(aluno)
   const emDia = s.status === 'liberado'
-  const titulo = MENU.find(m => m.id === tela)?.nome
+  const titulo = TITULOS[tela]
 
   return (
     <div className="al-tela">
@@ -176,11 +211,29 @@ export default function AlunoApp() {
 
       {tela === 'inicio' && (
         <>
+          {/* O treino do dia vem PRIMEIRO: é o que ele abre o app pra ver. */}
+          {treinoHoje && !treinoHoje.vazio && (
+            <button className="al-hoje-cartao" onClick={() => setTela('treinos')}>
+              <span className="al-rotulo">{diaPorExtenso()}</span>
+              <strong>Treino {treinoHoje.letra}</strong>
+              <span className="al-sub">
+                {treinoHoje.exercicios} {treinoHoje.exercicios === 1 ? 'exercício' : 'exercícios'} · toque pra começar
+              </span>
+            </button>
+          )}
+          {treinoHoje?.vazio && (
+            <button className="al-hoje-cartao folga" onClick={() => setTela('treinos')}>
+              <span className="al-rotulo">{diaPorExtenso()}</span>
+              <strong>Dia de descanso</strong>
+              <span className="al-sub">Sem treino marcado · ver os outros dias</span>
+            </button>
+          )}
+
           <section className={`al-situacao ${emDia ? 'ok' : 'devendo'}`}>
             <span className="al-rotulo">{emDia ? 'Mensalidade em dia' : 'Mensalidade vencida'}</span>
             <strong>{aluno.vencimento ? dataBr(aluno.vencimento) : '—'}</strong>
             <span className="al-sub">
-              {emDia ? 'Pode treinar' : 'Procure a recepção'}
+              {prazoEmPalavras(aluno.vencimento, emDia)}
               {aluno.valor ? ` · ${dinheiro(aluno.valor)}` : ''}
             </span>
           </section>
@@ -191,11 +244,23 @@ export default function AlunoApp() {
               <span>É assim que a catraca abre pra você.</span>
             </button>
           )}
+
+          {entradas.length > 0 && (
+            <button className="al-atalho" onClick={() => setTela('entradas')}>
+              <span>
+                <strong>{diasNoMes(entradas)}</strong>
+                {diasNoMes(entradas) === 1 ? ' dia treinado este mês' : ' dias treinados este mês'}
+              </span>
+              <span className="al-seta">›</span>
+            </button>
+          )}
+
+          <Instalar />
         </>
       )}
 
       {tela === 'perfil' && (
-        <Suspense fallback={<p className="al-vazio">Carregando...</p>}>
+        <Suspense fallback={<EsqueletoBloco />}>
           <AlunoPerfil
             aluno={aluno}
             onSalvou={carregar}
@@ -213,16 +278,29 @@ export default function AlunoApp() {
       )}
 
       {tela === 'ficha' && (
-        <Suspense fallback={<p className="al-vazio">Carregando...</p>}>
+        <Suspense fallback={<EsqueletoBloco />}>
           <AlunoFicha aluno={aluno} />
         </Suspense>
       )}
 
       {tela === 'treinos' && (
-        <Suspense fallback={<p className="al-vazio">Carregando...</p>}>
+        <Suspense fallback={<EsqueletoBloco />}>
           <AlunoTreinos aluno={aluno} />
         </Suspense>
       )}
+
+      <nav className="al-abas">
+        {ABAS.map(ab => (
+          <button
+            key={ab.id}
+            className={tela === ab.id ? 'ativa' : ''}
+            onClick={() => { setGaveta(false); setTela(ab.id) }}
+          >
+            <span className="al-aba-icone">{ab.icone}</span>
+            <small>{ab.nome}</small>
+          </button>
+        ))}
+      </nav>
     </div>
   )
 }
@@ -325,5 +403,120 @@ function Entradas({ entradas }) {
         })}
       </ul>
     </section>
+  )
+}
+
+// ── Pedacinhos da tela inicial ──────────────────────────────────────────
+
+function diaPorExtenso() {
+  const d = new Date().toLocaleDateString('pt-BR', { weekday: 'long' }).replace('-feira', '')
+  return d.charAt(0).toUpperCase() + d.slice(1)
+}
+
+// "Vence em 12 dias" diz mais que a data sozinha: o aluno não fica contando no
+// calendário pra saber se dá tempo.
+function prazoEmPalavras(vencimento, emDia) {
+  if (!vencimento) return emDia ? 'Pode treinar' : 'Procure a recepção'
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+  const [ano, mes, dia] = vencimento.slice(0, 10).split('-').map(Number)
+  const vence = new Date(ano, mes - 1, dia)
+  const dias = Math.round((vence - hoje) / 86400000)
+  if (dias > 1) return `Faltam ${dias} dias`
+  if (dias === 1) return 'Vence amanhã'
+  if (dias === 0) return 'Vence hoje'
+  if (dias === -1) return 'Venceu ontem'
+  return `Venceu há ${Math.abs(dias)} dias`
+}
+
+function diasNoMes(entradas) {
+  const agora = new Date()
+  const dias = new Set()
+  for (const e of entradas) {
+    const d = new Date(e.criado_em)
+    if (d.getMonth() === agora.getMonth() && d.getFullYear() === agora.getFullYear()) {
+      dias.add(d.toDateString())
+    }
+  }
+  return dias.size
+}
+
+// Esqueleto cinza no lugar da palavra "Carregando...": é o que todo aplicativo
+// faz, e a tela já nasce com o formato do que vai aparecer.
+function Esqueleto() {
+  return (
+    <div className="al-tela">
+      <div className="al-topo">
+        <span className="al-osso al-osso-botao" />
+        <div className="al-titulo">
+          <span className="al-osso" style={{ width: 70, height: 14 }} />
+          <span className="al-osso" style={{ width: 150, height: 26, marginTop: 8 }} />
+        </div>
+        <span className="al-osso al-osso-foto" />
+      </div>
+      <span className="al-osso" style={{ height: 104, borderRadius: 18 }} />
+      <span className="al-osso" style={{ height: 118, borderRadius: 18 }} />
+      <span className="al-osso" style={{ height: 56, borderRadius: 16 }} />
+    </div>
+  )
+}
+
+function EsqueletoBloco() {
+  return (
+    <section className="al-bloco">
+      <span className="al-osso" style={{ height: 18, width: '45%' }} />
+      <span className="al-osso" style={{ height: 14, marginTop: 14 }} />
+      <span className="al-osso" style={{ height: 14, marginTop: 8, width: '70%' }} />
+    </section>
+  )
+}
+
+// Instalar na tela de início. No Android o Chrome avisa que dá (evento
+// beforeinstallprompt) e abre a caixa dele; no iPhone não existe esse evento,
+// então só resta explicar o caminho do Compartilhar. Quem dispensa não vê de
+// novo.
+function Instalar() {
+  const [podeInstalar, setPodeInstalar] = useState(null)
+  const [iphone, setIphone] = useState(false)
+  const [fora, setFora] = useState(() => {
+    try { return localStorage.getItem('al_instalar_nao') === '1' } catch { return true }
+  })
+
+  useEffect(() => {
+    const jaInstalado = window.matchMedia?.('(display-mode: standalone)').matches
+      || window.navigator.standalone
+    if (jaInstalado) { setFora(true); return }
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent)
+    setIphone(ios)
+    const pega = e => { e.preventDefault(); setPodeInstalar(e) }
+    window.addEventListener('beforeinstallprompt', pega)
+    return () => window.removeEventListener('beforeinstallprompt', pega)
+  }, [])
+
+  function dispensar() {
+    setFora(true)
+    try { localStorage.setItem('al_instalar_nao', '1') } catch { /* modo anônimo */ }
+  }
+
+  if (fora || (!podeInstalar && !iphone)) return null
+
+  return (
+    <div className="al-instalar">
+      <div>
+        <strong>Deixe na tela do celular</strong>
+        <small>
+          {iphone
+            ? 'Toque em Compartilhar e depois em "Adicionar à Tela de Início".'
+            : 'Fica com ícone igual aos outros aplicativos, sem digitar o endereço.'}
+        </small>
+      </div>
+      <div className="al-instalar-botoes">
+        {podeInstalar && (
+          <button className="al-botao" onClick={() => { podeInstalar.prompt(); dispensar() }}>
+            Instalar
+          </button>
+        )}
+        <button className="al-botao texto" onClick={dispensar}>Agora não</button>
+      </div>
+    </div>
   )
 }
