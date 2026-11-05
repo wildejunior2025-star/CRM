@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno } from '../../lib/reconhecimentoFacial'
@@ -227,6 +227,54 @@ export default function AlunoApp() {
   )
 }
 
+// Uma linha por DIA, não por leitura da catraca.
+//
+// A catraca grava toda leitura: quem passa e volta, ou a recepção que lê duas
+// vezes, virava três "entradas" às 17:00, 17:01 e 17:02 — a lista parecia
+// bagunça e não respondia o que o aluno quer saber ("quantas vezes eu fui?").
+// Aqui as leituras coladas (menos de 2 h de diferença) viram UMA ida; o dia
+// com manhã e tarde continua mostrando as duas.
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+
+const JUNTAR_MS = 2 * 60 * 60 * 1000
+
+function porDia(entradas) {
+  const dias = []
+  // Vem do banco do mais novo pro mais velho. Percorre ao CONTRÁRIO pra que a
+  // primeira leitura de cada ida seja a da chegada: quem passou 08:31 e 08:45
+  // chegou 08:31, e é essa hora que o aluno reconhece.
+  for (const e of [...entradas].reverse()) {
+    const d = new Date(e.criado_em)
+    const chave = d.toDateString()
+    let dia = dias.find(x => x.chave === chave)
+    if (!dia) { dia = { chave, data: d, idas: [] }; dias.push(dia) }
+    const ultima = dia.idas[dia.idas.length - 1]
+    if (!ultima || Math.abs(ultima - d) > JUNTAR_MS) dia.idas.push(d)
+  }
+  dias.reverse() // de volta pro mais novo em cima
+  // O cabeçalho do mês já sai daqui pronto: só o primeiro dia de cada mês
+  // carrega o título.
+  let mesAnterior = null
+  for (const dia of dias) {
+    const mes = `${MESES[dia.data.getMonth()]} ${dia.data.getFullYear()}`
+    dia.cabecalho = mes === mesAnterior ? null : mes
+    mesAnterior = mes
+  }
+  return dias
+}
+
+function quandoFoi(d) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+  const dia = new Date(d); dia.setHours(0, 0, 0, 0)
+  const faltam = Math.round((hoje - dia) / 86400000)
+  if (faltam === 0) return 'hoje'
+  if (faltam === 1) return 'ontem'
+  if (faltam < 7) return `há ${faltam} dias`
+  if (faltam < 14) return 'semana passada'
+  return `há ${Math.floor(faltam / 7)} semanas`
+}
+
 function Entradas({ entradas }) {
   if (entradas.length === 0) {
     return (
@@ -235,16 +283,44 @@ function Entradas({ entradas }) {
       </section>
     )
   }
+
+  const dias = porDia(entradas)
+  const agora = new Date()
+  const noMes = dias.filter(d => d.data.getMonth() === agora.getMonth()
+    && d.data.getFullYear() === agora.getFullYear()).length
+  // Semana começando no domingo, igual ao calendário do celular.
+  const domingo = new Date(agora)
+  domingo.setDate(agora.getDate() - agora.getDay())
+  domingo.setHours(0, 0, 0, 0)
+  const naSemana = dias.filter(d => d.data >= domingo).length
+
   return (
     <section className="al-bloco">
+      <div className="al-resumo">
+        <div><strong>{noMes}</strong><small>{noMes === 1 ? 'dia este mês' : 'dias este mês'}</small></div>
+        <div><strong>{naSemana}</strong><small>{naSemana === 1 ? 'dia esta semana' : 'dias esta semana'}</small></div>
+      </div>
+      <p className="al-ultima-vez">
+        Última vez: <b>{quandoFoi(dias[0].data)}</b>, às{' '}
+        {dias[0].idas[0].toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+      </p>
+
       <ul className="al-entradas">
-        {entradas.map((e, i) => {
-          const d = new Date(e.criado_em)
+        {dias.map(dia => {
+          const semana = dia.data.toLocaleDateString('pt-BR', { weekday: 'long' }).replace('-feira', '')
           return (
-            <li key={i}>
-              <span>{d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</span>
-              <strong>{d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong>
-            </li>
+            <Fragment key={dia.chave}>
+              {dia.cabecalho && <li className="al-mes">{dia.cabecalho}</li>}
+              <li>
+                <span className="al-dia">
+                  <strong>{String(dia.data.getDate()).padStart(2, '0')}</strong>
+                  <small>{semana}</small>
+                </span>
+                <span className="al-horas">
+                  {dia.idas.map(h => h.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })).join('  ·  ')}
+                </span>
+              </li>
+            </Fragment>
           )
         })}
       </ul>
