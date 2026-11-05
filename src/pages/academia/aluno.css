@@ -389,3 +389,18 @@
 @keyframes al-brilho { from { background-position: 100% 0 } to { background-position: -100% 0 } }
 @media (prefers-reduced-motion: reduce) { .al-osso { animation: none } }
 
+/* ── Microciclo: em que semana o aluno está ───────────────────────────── */
+.al-ciclo { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; font-size: 14px; font-weight: 700; color: var(--al-roxo); }
+.al-ciclo-barra { display: block; height: 6px; border-radius: 99px; background: var(--al-roxo-claro); overflow: hidden; }
+.al-ciclo-barra i { display: block; height: 100%; background: var(--al-roxo); border-radius: 99px; }
+
+.al-ciclo-cartao {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--al-roxo-claro); border-radius: 16px; padding: 14px 16px;
+}
+.al-ciclo-cartao > div { flex: 1; min-width: 0; }
+.al-ciclo-cartao.acabou { background: var(--al-vermelho-fundo); }
+.al-ciclo-cartao strong { display: block; font-size: 17px; white-space: nowrap; }
+.al-ciclo-cartao small { color: var(--al-apagado); font-size: 13px; }
+.al-ciclo-cartao .al-botao { padding: 9px 10px; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
+

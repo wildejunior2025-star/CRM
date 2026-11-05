@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import { semanaAtual, hojeIso } from '../../lib/microciclo'
 import { useAuth } from '../../hooks/useAuth'
 
 // O professor monta o treino do aluno pelo celular, do mesmo jeito que fazia
@@ -27,6 +28,7 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   const [semanas, setSemanas] = useState([])   // microciclo (o quadro do cartão)
   const [cargas, setCargas] = useState({})     // item_id → { carga, data } da última vez
   const [verSemanas, setVerSemanas] = useState(false)
+  const [inicioCiclo, setInicioCiclo] = useState(aluno.microciclo_inicio || null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -179,6 +181,17 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
 
   // Grava o rascunho da IA: apaga os treinos de antes e poe os novos.
   async function usarPlano() {
+    // Isto APAGA o que o aluno ja tinha. Se tem exercicio montado la, pergunta
+    // antes: o professor pode ter passado meia hora montando na mao, e depois
+    // de salvo nao da pra voltar.
+    const quantos = Object.values(itens).reduce((n, l) => n + l.length, 0)
+    if (quantos > 0) {
+      const ok = window.confirm(
+        `${aluno.nome.split(' ')[0]} já tem ${treinos.length} treino${treinos.length === 1 ? '' : 's'} `
+        + `com ${quantos} exercício${quantos === 1 ? '' : 's'}. Usar este rascunho APAGA tudo isso `
+        + 'e põe o da IA no lugar. Não dá pra voltar atrás.\n\nPode apagar?')
+      if (!ok) return
+    }
     setSalvando(true)
     setErro(null)
     try {
@@ -215,6 +228,10 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
         )
         if (e3) throw e3
       }
+      // Treino novo, ciclo novo: a contagem das 8 semanas recomeca hoje.
+      await supabase.from('academia_alunos')
+        .update({ microciclo_inicio: hojeIso() }).eq('id', aluno.id)
+      setInicioCiclo(hojeIso())
       setPlano(null)
       await carregar()
     } catch (err) {
@@ -225,7 +242,16 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
 
   // Microciclo: as 8 semanas do verso do cartão. Sem a IA, o professor
   // preenche aqui na mão.
+  // Recomecar o ciclo: volta pra semana 1 a partir de hoje.
+  async function recomecarCiclo() {
+    const hoje = hojeIso()
+    await supabase.from('academia_alunos').update({ microciclo_inicio: hoje }).eq('id', aluno.id)
+    setInicioCiclo(hoje)
+  }
+
   async function salvarSemana(numero, campo, valor) {
+    // Primeira semana preenchida na mao: o ciclo passa a contar de hoje.
+    if (!inicioCiclo) recomecarCiclo()
     const atual = semanas.find(w => w.numero === numero) || { aluno_id: aluno.id, numero }
     const linha = { ...atual, [campo]: valor === '' ? null : valor }
     setSemanas(l => {
@@ -357,6 +383,8 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   }
 
   if (verSemanas) {
+    const montadas = semanas.filter(w => w.series || w.rep_min).length
+    const ondeEstou = semanaAtual(inicioCiclo, montadas)
     return (
       <div className="al-tela">
         <header className="al-topo">
@@ -371,11 +399,37 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           É o quadro do cartão: o que muda a cada semana. O aluno vê isso no treino dele.
         </p>
 
+        {/* Onde o aluno está AGORA. Sem isto o professor montava as 8 semanas
+            sem nunca saber se elas estavam andando — e elas não estavam. */}
+        {montadas > 0 && (
+          <div className={`al-ciclo-cartao${ondeEstou.terminou ? ' acabou' : ''}`}>
+            <div>
+              <strong>
+                {ondeEstou.terminou
+                  ? `Ciclo terminado (${montadas} semanas)`
+                  : `Semana ${ondeEstou.numero} de ${montadas}`}
+              </strong>
+              <small>
+                {inicioCiclo
+                  ? `Começou em ${String(inicioCiclo).slice(0, 10).split('-').reverse().join('/')}`
+                  : 'Ainda não começou a contar'}
+                {ondeEstou.terminou ? ' · hora de remontar o treino' : ''}
+              </small>
+            </div>
+            <button className="al-botao texto" onClick={recomecarCiclo}>Recomeçar hoje</button>
+          </div>
+        )}
+
         {[1, 2, 3, 4, 5, 6, 7, 8].map(n => {
           const w = semanas.find(x => x.numero === n) || {}
           return (
             <section key={n} className="al-bloco">
-              <h2>Semana {n}</h2>
+              <h2>
+                Semana {n}
+                {montadas > 0 && !ondeEstou.terminou && n === ondeEstou.numero && (
+                  <span className="al-tag ok" style={{ marginLeft: 8 }}>é esta</span>
+                )}
+              </h2>
               <div className="al-semana-grade">
                 <label className="al-campo">Séries
                   <input inputMode="numeric" value={w.series ?? ''}

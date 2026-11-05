@@ -22,7 +22,7 @@ export default function ProfessorApp() {
   const carregar = useCallback(async () => {
     const { data } = await supabase
       .from('academia_alunos')
-      .select('id, nome, matricula, foto, plano, vencimento, ativo, objetivo, diabetes, hipertensao, cardiopata, saude_outra')
+      .select('id, nome, matricula, foto, plano, vencimento, ativo, objetivo, diabetes, hipertensao, cardiopata, saude_outra, microciclo_inicio')
       .eq('empresa_id', profile.empresa_id)
       .order('nome')
     setAlunos(data || [])

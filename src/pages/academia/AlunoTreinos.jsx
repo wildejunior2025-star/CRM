@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import { semanaAtual } from '../../lib/microciclo'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
 // de cada exercício — é por ele que o aluno acha o aparelho na academia.
@@ -24,6 +25,7 @@ export default function AlunoTreinos({ aluno }) {
   const [treinos, setTreinos] = useState(null)
   const [itens, setItens] = useState({})
   const [semana, setSemana] = useState(null)
+  const [ciclo, setCiclo] = useState(null)
   const [aberto, setAberto] = useState(null)
   // Carga e "feito": é o que os apps concorrentes têm e o nosso não tinha.
   const [ultimas, setUltimas] = useState({})   // item_id → { carga, data }
@@ -86,11 +88,15 @@ export default function AlunoTreinos({ aluno }) {
         .select('*')
         .eq('aluno_id', aluno.id)
         .order('numero')
-      // Semana "de agora": a primeira que o professor montou é a 1; sem
-      // controle de data ainda, mostramos a primeira preenchida.
-      setSemana((semanas || [])[0] || null)
+      // A semana "de agora" sai da data em que o ciclo começou. Antes era
+      // sempre a primeira: o aluno ficava em 3x12-15 pra sempre e as outras
+      // sete que o professor montou não serviam pra nada.
+      const montadas = (semanas || []).filter(w => w.series || w.rep_min)
+      const onde = semanaAtual(aluno.microciclo_inicio, montadas.length)
+      setCiclo(onde)
+      setSemana(montadas.find(w => w.numero === onde.numero) || montadas[0] || null)
     })()
-  }, [aluno.id, aluno.empresa_id])
+  }, [aluno.id, aluno.empresa_id, aluno.microciclo_inicio])
 
   // Cronômetro de descanso entre as séries.
   function comecarDescanso(segundos) {
@@ -169,11 +175,22 @@ export default function AlunoTreinos({ aluno }) {
         <section key={t.id} className="al-bloco">
           <h2>Treino {t.letra}{t.dia_semana ? ` · ${t.dia_semana}` : ''}</h2>
           {semana && (
-            <p className="al-semana">
-              {semana.series ? `${semana.series} séries` : ''}
-              {semana.rep_min ? ` de ${semana.rep_min}${semana.rep_max ? ` a ${semana.rep_max}` : ''} repetições` : ''}
-              {semana.sistema ? ` · ${semana.sistema}` : ''}
-            </p>
+            <>
+              {ciclo?.total > 1 && (
+                <p className="al-ciclo">
+                  <span>Semana {ciclo.numero} de {ciclo.total}</span>
+                  <span className="al-ciclo-barra">
+                    <i style={{ width: `${(ciclo.numero / ciclo.total) * 100}%` }} />
+                  </span>
+                </p>
+              )}
+              <p className="al-semana">
+                {semana.series ? `${semana.series} séries` : ''}
+                {semana.rep_min ? ` de ${semana.rep_min}${semana.rep_max ? ` a ${semana.rep_max}` : ''} repetições` : ''}
+                {semana.sistema ? ` · ${semana.sistema}` : ''}
+                {semana.aumentar_peso ? ' · suba o peso esta semana' : ''}
+              </p>
+            </>
           )}
           <ul className="al-itens-aluno">
             {(itens[t.id] || []).map((i, n) => {
