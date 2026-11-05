@@ -65,6 +65,11 @@
   flex-direction: column;
   gap: 6px;
 }
+/* Na busca do celular a lista rola dentro de uma coluna flex: sem isto os botões
+   ENCOLHEM até a altura mínima e o nome comprido (que quebra em 3 linhas, ex.:
+   "Peixe à Moda da Casa com Pirão (p/ 2 pessoas)") vaza e uma linha monta em
+   cima da outra. Cada botão mantém a altura do próprio texto. */
+.sal-produtos > button { flex-shrink: 0; }
 
 @media (min-width: 1100px) {
   .sal-drawer { width: min(1080px, 92vw); }
