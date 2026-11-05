@@ -403,6 +403,9 @@ export default function PresencialSalao() {
   // Mesma fonte do cardápio do QR (MesaCardapio) — produto com grupo abre o modal de montagem.
   const [compMap, setCompMap] = useState({})
   const [montando, setMontando] = useState(null) // produto que está sendo montado no modal
+  // Celular: ao escolher um produto SEM complemento abre uma folha pra escrever o
+  // recado (opcional) já na hora de adicionar, em vez de ter que achar o item depois.
+  const [obsProduto, setObsProduto] = useState(null)
   const [pickerCliente, setPickerCliente] = useState(false)
   const [verMovimentos, setVerMovimentos] = useState(false)  // trilha da mesa aberta (ADM) // modal "ligar cliente à mesa"
   const [ligandoCliente, setLigandoCliente] = useState(false)
@@ -417,6 +420,7 @@ export default function PresencialSalao() {
   useVoltarFecha(!!mesaSel, () => sairDaMesa())
   useVoltarFecha(!!mesaSel && !!categoriaSel, () => setCategoriaSel(null))
   useVoltarFecha(!!mesaSel && !!montando, () => setMontando(null))
+  useVoltarFecha(!!mesaSel && !!obsProduto, () => setObsProduto(null))
   useVoltarFecha(!!mesaSel && buscaAberta, () => { setBusca(''); setBuscaAberta(false) })
   useVoltarFecha(!!mesaSel && fechando, () => setFechando(false))
   useVoltarFecha(!!pixAmpliado, () => setPixAmpliado(null))
@@ -1173,20 +1177,32 @@ export default function PresencialSalao() {
 
   // Adicionar item agora vai pro RASCUNHO (não vai pra cozinha ainda). Só quando o
   // garçom clica "Enviar para a cozinha" é que os itens são gravados e impressos.
-  function addItem(produto) {
+  // `semPergunta`: leitor de código de barras — no bipe não dá pra parar e perguntar recado.
+  function addItem(produto, semPergunta = false) {
     if (!comandaSel) return
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
     // Produto com complemento abre o modal de montagem em vez de cair direto no rascunho.
     if (compMap[produto.produto_id]?.length) { setMontando(produto); return }
+    // Só no celular: abre a folha do recado. No computador segue direto pro rascunho.
+    if (ehCelular && !semPergunta) { setObsProduto(produto); return }
+    adicionarSimples(produto, '')
+  }
+
+  // Produto sem complemento caindo no rascunho, com recado opcional. Recado diferente
+  // vira linha própria (senão o 2º café empilhava no 1º e herdava o recado dele).
+  function adicionarSimples(produto, recado) {
+    const obs = (recado ?? '').trim()
     empilhar({
-      produto_id: produto.produto_id, linha: String(produto.produto_id),
+      produto_id: produto.produto_id,
+      linha: obs ? `${produto.produto_id}::o${obs}` : String(produto.produto_id),
+      observacao: obs,
       nome: produto.nome, preco_venda: Number(produto.preco_venda),
       // Atacado e promoção viajam COM a linha: o preço de verdade depende da
       // quantidade, e ela só se fecha na hora de enviar (ver `precoDaLinha`).
       faixas_preco: produto.faixas_preco ?? null,
       preco_promocional: produto.preco_promocional ?? null,
       categoria: produto.categoria ?? null,
-      complementos: [], quantidade: 1, observacao: '',
+      complementos: [], quantidade: 1,
     })
   }
 
@@ -1313,7 +1329,8 @@ export default function PresencialSalao() {
   }
 
   // Fecha o modal de complementos criando a linha montada.
-  function addMontado(produto, escolhas, qtdItem = 1) {
+  function addMontado(produto, escolhas, qtdItem = 1, recado = '') {
+    const obs = (recado ?? '').trim()
     const adicional = adicionalComplementos(
       compMap[produto.produto_id] ?? [],
       escolhas.map(e => ({ grupoId: e.grupoId, preco: e.preco_adicional, qtd: e.qtd })),
@@ -1325,11 +1342,11 @@ export default function PresencialSalao() {
     const resumo = escolhas.map(e => (e.qtd > 1 ? `${e.qtd}× ${e.nome}` : e.nome)).join(', ')
     empilhar({
       produto_id: produto.produto_id,
-      linha: `${produto.produto_id}::${resumo}`,
+      linha: obs ? `${produto.produto_id}::${resumo}::o${obs}` : `${produto.produto_id}::${resumo}`,
       nome: resumo ? `${produto.nome} (${resumo})` : produto.nome,
       preco_venda: Number(produto.preco_venda) + adicional / qtd,
       complementos: escolhas,
-      quantidade: qtd, observacao: '',
+      quantidade: qtd, observacao: obs,
     })
     setMontando(null)
   }
@@ -2751,7 +2768,7 @@ export default function PresencialSalao() {
       e.preventDefault()
       // Bipada: o código aponta pra UM produto, vale mais que a linha marcada.
       const bipado = acharPorCodigo(produtosComCategoria, busca)
-      if (bipado) { setBusca(''); addItem(bipado); return }
+      if (bipado) { setBusca(''); addItem(bipado, true); return }
       const p = produtosFiltrados[destaque]
       if (!p) return
       addItem(p)
@@ -2770,7 +2787,7 @@ export default function PresencialSalao() {
     // três vezes achando que o leitor não pegou.
     if (!comandaSel) { setBipeSemMesa(Date.now()); return }
     const p = acharPorCodigo(produtosComCategoria, codigo)
-    if (p) { setAvisoBipe(null); addItem(p); return }
+    if (p) { setAvisoBipe(null); addItem(p, true); return }
     setAvisoBipe(codigo)
   }
   useEffect(() => ouvirBipada(codigo => aoBipar.current(codigo)), [])
@@ -4204,7 +4221,17 @@ export default function PresencialSalao() {
           grupos={compMap[montando.produto_id] ?? []}
           semObrigatorios={semObrigatorios}
           onCancelar={() => setMontando(null)}
-          onConfirmar={(escolhas, qtdItem) => addMontado(montando, escolhas, qtdItem)}
+          pedirRecado={ehCelular}
+          onConfirmar={(escolhas, qtdItem, recado) => addMontado(montando, escolhas, qtdItem, recado)}
+        />
+      )}
+
+      {/* ── Celular: recado do item (opcional) na hora de adicionar ── */}
+      {obsProduto && (
+        <ModalRecadoItem
+          produto={obsProduto}
+          onCancelar={() => setObsProduto(null)}
+          onConfirmar={(recado) => { adicionarSimples(obsProduto, recado); setObsProduto(null) }}
         />
       )}
 
@@ -4944,8 +4971,9 @@ const qtdBtn = {
 // Modal "montar o item": escolhe os complementos por grupo, com QUANTIDADE por opção
 // (a opção não some ao ser escolhida — dá pra somar no +). O `max` do grupo limita a
 // soma das quantidades daquele grupo; `min` obriga um mínimo antes de confirmar.
-function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onConfirmar }) {
+function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onConfirmar, pedirRecado = false }) {
   const [sel, setSel] = useState({}) // { grupoId: { opcaoId: qtd } }
+  const [recado, setRecado] = useState('')
 
   const somaDe = (mapa) => Object.values(mapa ?? {}).reduce((s, q) => s + q, 0)
   const somaGrupo = (gId) => somaDe(sel[gId])
@@ -5081,6 +5109,16 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
           )
         })}
 
+        {pedirRecado && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 6 }}>📝 Recado <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 12.5 }}>(opcional)</span></div>
+            <textarea value={recado} onChange={e => setRecado(e.target.value)} rows={2} maxLength={200}
+              placeholder="Ex.: sem cebola, bem passado…"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 10, fontSize: 15,
+                border: '1px solid var(--border)', background: 'var(--surface, transparent)', color: 'var(--text)', resize: 'none', fontFamily: 'inherit' }} />
+          </div>
+        )}
+
         </div>
 
         <div style={{
@@ -5093,13 +5131,46 @@ function ModalComplementos({ produto, grupos, semObrigatorios, onCancelar, onCon
             </div>
           )}
 
-          <button type="button" onClick={() => onConfirmar(escolhas, qtdItem)} disabled={faltando.length > 0}
+          <button type="button" onClick={() => onConfirmar(escolhas, qtdItem, recado)} disabled={faltando.length > 0}
             style={{ width: '100%', padding: '12px 0', borderRadius: 10,
               border: 'none', background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800,
               cursor: faltando.length > 0 ? 'default' : 'pointer', opacity: faltando.length > 0 ? .5 : 1 }}>
             {grupoQtd ? `Adicionar ${qtdItem} un · ${fmt(totalItem)}` : `Adicionar · ${fmt(precoFinal)}`}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Celular: folha que abre assim que o garçom escolhe um produto SEM complemento.
+// Ele escreve o recado pra cozinha (opcional) e toca em Adicionar; sem escrever nada,
+// é só adicionar. O recado já vai junto na comanda.
+function ModalRecadoItem({ produto, onCancelar, onConfirmar }) {
+  const [recado, setRecado] = useState('')
+  return (
+    <div onClick={onCancelar} className="sal-modal-overlay"
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} className="sal-modal-folha"
+        style={{ width: '100%', maxWidth: 460, background: 'var(--bg)', borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', padding: '16px 18px calc(14px + env(safe-area-inset-bottom, 0px))' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>{produto.nome}</div>
+          <button type="button" onClick={onCancelar} aria-label="Cancelar"
+            style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-muted)', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{fmt(produto.preco_venda)}</div>
+        <div style={{ fontWeight: 700, fontSize: 14.5, marginBottom: 6 }}>
+          📝 Recado <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 12.5 }}>(opcional)</span>
+        </div>
+        <textarea value={recado} onChange={e => setRecado(e.target.value)} rows={3} maxLength={200} autoFocus
+          placeholder="Ex.: sem cebola, bem passado…"
+          style={{ width: '100%', boxSizing: 'border-box', padding: '9px 10px', borderRadius: 10, fontSize: 15,
+            border: '1px solid var(--border)', background: 'var(--surface, transparent)', color: 'var(--text)', resize: 'none', fontFamily: 'inherit' }} />
+        <button type="button" onClick={() => onConfirmar(recado)}
+          style={{ width: '100%', marginTop: 12, padding: '12px 0', borderRadius: 10, border: 'none',
+            background: 'var(--primary)', color: '#fff', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}>
+          Adicionar · {fmt(produto.preco_venda)}
+        </button>
       </div>
     </div>
   )
