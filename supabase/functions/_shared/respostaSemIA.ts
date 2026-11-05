@@ -218,6 +218,7 @@ export function horarioDeHoje(
 
 function respostaDeHorario(
   empresa: Record<string, unknown>, excecoes: Excecoes = {},
+  link = "", linkRecente = false,
 ): string | null {
   const { ymd: hoje } = agoraNaLoja()
   const dia = comoFicaNoDia(hoje, empresa, excecoes)
@@ -226,9 +227,18 @@ function respostaDeHorario(
   // é loja que atende o dia todo — dizer "hoje a gente não abre" nesse caso era
   // o robô mandando o cliente embora com a porta aberta.
   if (lojaAbertaAgora(empresa, excecoes)) {
+    // E O CARDÁPIO VAI JUNTO. "Vocês estão funcionando?" é quase sempre a
+    // PRIMEIRA coisa que o cliente escreve — e responder só o horário o deixa
+    // parado esperando o link, porque a escada já achou resposta aqui e nunca
+    // chega na primeira fala (passo 6). Agv Grill, 05/11/2026: o cliente
+    // perguntou se estava funcionando, levou só o horário, e a atendente teve
+    // que mandar o cardápio na mão.
+    const convite = (link && !linkRecente)
+      ? `${NL}${NL}Nosso cardápio tá aqui, com tudo e o preço certinho:${NL}${link}`
+      : ""
     return dia.periodos.length
-      ? `Tô aqui sim! 🙌 Hoje a gente atende ${textoDosPeriodos(dia.periodos)}.`
-      : "Tô aqui sim! 🙌 Pode mandar seu pedido."
+      ? `Tô aqui sim! 🙌 Hoje a gente atende ${textoDosPeriodos(dia.periodos)}.${convite}`
+      : `Tô aqui sim! 🙌 Pode mandar seu pedido.${convite}`
   }
 
   // Fechada agora: o que ele quer saber é QUANDO volta — e é isso que o aviso
@@ -511,7 +521,7 @@ function respostaDeTaxa(
 
 function respostaDeInfo(
   texto: string, empresa: Record<string, unknown>, link: string, excecoes: Excecoes = {},
-  falaDoPresencial = false,
+  falaDoPresencial = false, linkRecente = false,
 ): string | null {
   const t = semAcento(texto)
   // Começo de PALAVRA, não pedaço de palavra. "cala*bre*sa" casava com "abre" e
@@ -527,7 +537,7 @@ function respostaDeInfo(
     return `Nosso cardápio tá aqui, com tudo e o preço certinho:${NL}${link}`
 
   if (tem("horari", "que horas", "quantas horas", "abre", "aberto", "fecha", "fechad", "funciona", "atende hoje", "ta ai", "tao ai"))
-    return respostaDeHorario(empresa, excecoes)
+    return respostaDeHorario(empresa, excecoes, link, linkRecente)
 
   // "Posso comer aí?" — só pra loja que atende na mesa/balcão. As palavras são
   // frases inteiras de propósito: "comer" sozinho pegaria "quero comer um
@@ -1471,8 +1481,15 @@ export async function responderSemIA({
     if (recado) return await responder(recado)
 
     // 3a) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
-    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial)
-    if (daInfo) return await responder(daInfo)
+    const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial, linkRecente)
+    // A MESMA resposta, palavra por palavra, duas vezes seguidas: ela já não
+    // resolveu da primeira vez. Agv Grill, 05/11/2026 — "vocês estão
+    // funcionando?" levou o horário; o cliente respondeu "é que no site está
+    // fechado desde segunda" e levou o MESMO horário de volta. Repetir ali é o
+    // robô provando que não entendeu. Deixa a escada seguir: quem termina a
+    // conversa é o passo 7, oferecendo gente.
+    const jaDisseIsso = !!daInfo && String(recentes[0]?.content ?? "").trim() === daInfo.trim()
+    if (daInfo && !jaDisseIsso) return await responder(daInfo)
 
     // 3b) "Tem picolé? Quanto é?" — preço e link DAQUELE produto (mig 0312).
     //     Opcional: a loja liga em WhatsApp → Resposta automática. Vem depois

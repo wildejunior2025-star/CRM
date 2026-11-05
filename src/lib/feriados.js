@@ -130,6 +130,41 @@ export function abertaAgora({ grade, excecoes, fechaFeriado } = {}) {
   })
 }
 
+// Quando a loja volta a abrir: "hoje às 09:00", "amanhã às 09:00", "sábado às
+// 09:00". Vazio = não dá pra saber (loja sem grade cadastrada).
+//
+// POR QUE ISSO EXISTE: a faixa de aviso dizia só "Loja fechada no momento". Quem
+// olha o cardápio às 19h de uma loja que atende 09:00–15:00 lê isso três dias
+// seguidos e conclui que a loja fechou as portas — foi exatamente o que uma
+// cliente da Agv Grill escreveu no WhatsApp em 05/11/2026 ("vi que no site está
+// fechado desde segunda"), com a loja aberta e vendendo todo dia.
+const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
+const somaDiasYMD = (dataYMD, n) => {
+  const [y, m, d] = dataYMD.split('-').map(Number)
+  return ymd(new Date(y, m - 1, d + n))
+}
+export function proximaAbertura({ grade, excecoes, fechaFeriado } = {}) {
+  if (!gradeValida(grade)) return ''
+  const toMin = (t) => { const [h, m] = String(t).slice(0, 5).split(':').map(Number); return (h || 0) * 60 + (m || 0) }
+  const agora = toMin(new Date().toLocaleTimeString('en-GB', {
+    hour12: false, timeZone: 'America/Fortaleza', hour: '2-digit', minute: '2-digit',
+  }))
+  const hoje = hojeBR()
+  for (let i = 0; i <= 7; i++) {
+    const data = somaDiasYMD(hoje, i)
+    const dia = comoFicaNoDia(data, { grade, excecoes, fechaFeriado })
+    if (!dia.aberto || !dia.periodos.length) continue
+    const inicios = dia.periodos.map(p => String(p.i).slice(0, 5)).filter(Boolean).sort()
+    // Hoje só vale o horário que ainda está por vir: às 17h de uma loja que
+    // abriu às 09h, "abre hoje às 09:00" não serve pra nada.
+    const alvo = i === 0 ? inicios.find(h => toMin(h) > agora) : inicios[0]
+    if (!alvo) continue
+    const quando = i === 0 ? 'hoje' : (i === 1 ? 'amanhã' : DIAS_SEMANA[diaDaSemanaDe(data)])
+    return `${quando} às ${alvo}`
+  }
+  return ''
+}
+
 // Quantos dias a loja abre no mês da data informada — o divisor do rateio de custo
 // fixo em Despesas & Lucro. Conta dia a dia, então já desconta feriado e folga.
 export function diasAbertosNoMes(dataYMD, { grade, excecoes, fechaFeriado } = {}) {

@@ -10,7 +10,7 @@ import { categoriaAbertaAgora } from '../lib/horarioCategoria'
 import { semAcento } from '../lib/texto'
 import { precoPorQuantidade, faixaAplicada, menorFaixa, precoRiscado, mapaFaixasCategoria, comFaixaDaCategoria, somaPorCategoria } from '../lib/precoQuantidade'
 import { criarBuscadorDescricao, comDescricaoNasOpcoes } from '../lib/descricaoSabor'
-import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR } from '../lib/feriados'
+import { abertaAgora, comoFicaNoDia, carregarExcecoes, hojeBR, proximaAbertura } from '../lib/feriados'
 import { capturarIndicacao } from '../lib/indicacao'
 import './DeliveryLoja.css'
 
@@ -1069,6 +1069,17 @@ export default function DeliveryLoja() {
   const motivoFechada = comoFicaNoDia(hojeBR(), {
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
   }).motivo
+  // E QUANDO VOLTA. Sem isso a faixa dizia só "Loja fechada no momento", e quem
+  // olhava o cardápio fora do horário três dias seguidos achava que a loja tinha
+  // fechado as portas (Agv Grill, 05/11/2026). Pausa na mão não promete horário:
+  // ali nem a loja sabe quando volta.
+  const voltaAbrir = useMemo(
+    () => (pausaManual ? '' : proximaAbertura({
+      grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loja, excecoes, pausaManual, tiqueRelogio],
+  )
   // Loja com agendamento ligado (mig 0222) monta sacola mesmo fechada: quem
   // quer almoçar 11h decide isso às 8h, e às 8h a loja está fechada. A escolha
   // do dia e da hora acontece no checkout, onde a grade da loja é consultada.
@@ -1387,9 +1398,10 @@ export default function DeliveryLoja() {
       {!lojaAberta && (
         <div className="dloja-closed-banner">
           <strong>Loja fechada{motivoFechada ? ` · ${motivoFechada}` : ' no momento'}</strong>
+          {voltaAbrir ? ` — abre ${voltaAbrir}.` : ''}
           {agendamentoLigado
-            ? ' — mas dá pra montar seu pedido e agendar pra quando a loja abrir. 🗓️'
-            : ' — você pode ver o cardápio, mas não é possível fazer pedidos.'}
+            ? ' Dá pra montar seu pedido agora e agendar pra quando a loja abrir. 🗓️'
+            : ' Você pode ver o cardápio, mas não é possível fazer pedidos.'}
         </div>
       )}
 
