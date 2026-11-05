@@ -275,6 +275,65 @@ function proximoDiaQueAbre(
 // Feriado marcado na mão (dias_excecao) ainda não entra aqui — quando a loja
 // fecha num feriado ela costuma usar o botão "Loja fechada", que este código
 // respeita.
+// O pedaço do aviso de entrega que pede a nota. É por ele que o robô reconhece
+// que a última coisa que a loja perguntou foi "e aí, como foi?".
+const MARCA_AVALIACAO = "Avalie de"
+
+/**
+ * A nota que o cliente mandou, 1 a 5 — ou null se a mensagem não é nota.
+ *
+ * Aceita "5", "nota 4", "5 estrelas", "bom dia hoje é 5" e ⭐⭐⭐⭐⭐. Recusa
+ * tudo que tem cara de outra coisa: endereço ("casa 3"), pedido ("quero 2"),
+ * dinheiro, hora. Só roda quando a última fala da loja foi o pedido de nota,
+ * então o risco de confundir já é pequeno — esta peneira é o segundo cinto.
+ */
+function notaDaAvaliacao(texto: string): number | null {
+  const t = semAcento(texto).trim()
+  const estrelas = (texto.match(/⭐|🌟|★/g) ?? []).length
+  if (estrelas >= 1 && estrelas <= 5 && !/[0-9]/.test(t)) return estrelas
+  if (t.length > 40) return null
+  if (/\b(quero|queria|manda|mandar|rua|avenida|numero|casa|apto|bloco|reais|troco|pix|hora|horas|min|minutos|kg|ml|litro)\b/.test(t)) return null
+  const m = /(?:^|[^0-9])([1-5])(?:[^0-9]|$)/.exec(t)
+  return m ? Number(m[1]) : null
+}
+
+/**
+ * A loja pediu a nota e ainda não teve resposta? Devolve o número do pedido.
+ *
+ * Olha a ÚLTIMA fala do robô nas últimas 24h: se foi o pedido de nota, o que
+ * veio agora é a resposta. Se o robô falou qualquer outra coisa depois, a
+ * conversa andou e um "5" solto já não é nota.
+ */
+async function avaliacaoPedida(
+  supabase: Sb, empresaId: string, phone: string,
+): Promise<number | null> {
+  const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data } = await supabase.from("whatsapp_conversas")
+    .select("content").eq("empresa_id", empresaId)
+    .like("phone", `%${chave8(phone)}`).eq("role", "assistant")
+    .gte("created_at", desde).order("created_at", { ascending: false }).limit(1)
+  const ultima = String((data as Array<Record<string, unknown>> | null)?.[0]?.content ?? "")
+  if (!ultima.includes(MARCA_AVALIACAO)) return null
+  return Number(/Pedido #(\d+)/.exec(ultima)?.[1] ?? 0)
+}
+
+/** Grava a nota no pedido. O número de pedido reinicia, então pega o mais novo. */
+async function gravarAvaliacao(
+  supabase: Sb, empresaId: string, numero: number, nota: number,
+): Promise<void> {
+  if (!numero) return
+  const { data } = await supabase.from("pedidos_delivery")
+    .select("id").eq("empresa_id", empresaId).eq("numero_pedido", numero)
+    .is("avaliacao_nota", null)
+    .gte("created_at", new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString())
+    .order("created_at", { ascending: false }).limit(1)
+  const id = (data as Array<Record<string, unknown>> | null)?.[0]?.id
+  if (!id) return
+  await supabase.from("pedidos_delivery")
+    .update({ avaliacao_nota: nota, avaliacao_at: new Date().toISOString() })
+    .eq("id", id)
+}
+
 const MARCA_FECHADA = "a gente tá fechado"
 // O começo da resposta de horário com a loja aberta. Serve pra reconhecer que o
 // robô acabou de dizer isso — ver o passo 3a.
@@ -1281,6 +1340,39 @@ export async function responderSemIA({
     const perguntouDoAtendente = String(recentes[0]?.content ?? "").includes(MARCA_ATENDENTE)
 
     const t = semAcento(mensagem).trim()
+
+    // 00) A NOTA DA AVALIAÇÃO. Vem antes de tudo, até da loja fechada: quem
+    //     responde "5" não está perguntando nada — está respondendo o que a
+    //     loja perguntou.
+    //
+    //     O aviso de entrega termina com "Avalie de 1 a 5 ⭐" desde sempre, e
+    //     ninguém lia a resposta: a nota ia pro vazio e o robô ainda mandava a
+    //     saudação com o cardápio por cima. Agv Grill, 05/11/2026 — a cliente
+    //     respondeu "5" às 12:34 e levou propaganda de volta. Em 10 dias isso
+    //     aconteceu 51 vezes entre Zebu, Agv e CDBom. Perguntar e ignorar é
+    //     pior que não perguntar.
+    //
+    //     A nota cai no mesmo campo que o cliente preencheria clicando nas
+    //     estrelas da tela do pedido (avaliacao_nota), que é o que o gestor já
+    //     mostra. Nota baixa não recebe só um "obrigado": chama gente.
+    const nota = notaDaAvaliacao(mensagem)
+    if (nota !== null) {
+      const numeroAvaliado = await avaliacaoPedida(supabase, empresaId, phone)
+      if (numeroAvaliado !== null) {
+        await gravarAvaliacao(supabase, empresaId, numeroAvaliado, nota)
+        if (nota >= 4) {
+          return await responder(
+            `Que bom que você gostou! 🤩${NL}` +
+            `Obrigado pela nota ${nota} — isso ajuda demais a gente. 🙏`,
+          )
+        }
+        await abrirChamado(supabase, empresaId, phone, `avaliação ${nota} de 5: ${mensagem}`)
+        return await responder(
+          `Poxa, obrigado por contar. 🙏 Nota ${nota} não é o que a gente queria pra você.${NL}` +
+          "Já chamei alguém da loja pra falar com você e entender o que deu errado.",
+        )
+      }
+    }
 
     // 0) LOJA FECHADA. Nada de convidar pra pedir com a porta fechada: o pedido
     //    cairia num painel que ninguém está olhando, e o cliente ficaria
