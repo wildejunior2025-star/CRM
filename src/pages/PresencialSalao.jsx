@@ -3657,9 +3657,19 @@ export default function PresencialSalao() {
                 <button type="button" onClick={() => { setBusca(''); setBuscaAberta(false); if (buscaRef.current) buscaRef.current.blur() }}>
                   ← Voltar
                 </button>
-                {rascunho.length > 0 && (
+                {rascunho.length > 0 && (!semCozinha && comandaSel.status !== 'aguardando_conferencia' ? (
+                  /* Antes era só um contador: o garçom pesquisava, adicionava e
+                     tinha que voltar pra achar o botão verde. Agora o contador
+                     É o botão de enviar pra cozinha. */
+                  <button type="button" disabled={enviando}
+                    onClick={() => { enviarCozinha(); setBusca(''); setBuscaAberta(false); if (buscaRef.current) buscaRef.current.blur() }}
+                    style={{ background: '#16a34a', color: '#fff', border: 'none', fontWeight: 800, fontSize: 13.5,
+                      opacity: enviando ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                    {enviando ? 'Enviando...' : `🍳 Enviar ${rascunho.reduce((n, r) => n + r.quantidade, 0)} · ${fmt(subtotalRascunho)}`}
+                  </button>
+                ) : (
                   <span>{rascunho.reduce((n, r) => n + r.quantidade, 0)} a enviar · {fmt(subtotalRascunho)}</span>
-                )}
+                ))}
               </div>
               <div className="sal-busca" style={{ position: 'relative', marginBottom: 8 }}>
                 <input ref={buscaRef} value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={teclaBusca} onFocus={() => setBuscaAberta(true)} placeholder="Buscar produto ou bipar o código..."
