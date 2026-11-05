@@ -674,6 +674,16 @@
     height: auto;
     min-height: 92px;
     align-self: stretch;
+    position: relative;
+  }
+
+  /* A foto NÃO pode mandar na altura do card: com altura automática, foto
+     vertical (tipo a do Pastel Nordestino) esticava o card e ele ficava bem
+     maior que os vizinhos. Solta do fluxo, ela só preenche a caixa (corte
+     centralizado) e todos os cards ficam do mesmo tamanho. */
+  .dloja-prod-foto-btn {
+    position: absolute;
+    inset: 0;
   }
 
   .dloja-prod-info {
