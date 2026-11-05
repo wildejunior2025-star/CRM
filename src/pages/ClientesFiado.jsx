@@ -92,12 +92,23 @@ const PERIODOS = [
   { id: '7', label: 'Últimos 7 dias' },
   { id: '30', label: 'Últimos 30 dias' },
   { id: 'mes', label: 'Este mês' },
+  { id: 'custom', label: 'Personalizado' },
 ]
-function desdeDoPeriodo(id) {
+// de/ate vêm do <input type="date"> ("AAAA-MM-DD", dia local, ate inclusive).
+function desdeDoPeriodo(id, de) {
   const agora = new Date()
   if (id === 'mes') return new Date(agora.getFullYear(), agora.getMonth(), 1)
   if (id === '7' || id === '30') return new Date(agora.getTime() - Number(id) * 86400000)
+  if (id === 'custom' && de) return new Date(`${de}T00:00:00`)
   return null
+}
+function ateDoPeriodo(id, ate) {
+  if (id === 'custom' && ate) return new Date(`${ate}T23:59:59.999`)
+  return null
+}
+function dentroDoPeriodo(v, id, de, ate) {
+  const d = desdeDoPeriodo(id, de), a = ateDoPeriodo(id, ate), t = new Date(v.created_at)
+  return (!d || t >= d) && (!a || t <= a)
 }
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -232,6 +243,8 @@ export default function ClientesFiado({ empresaId }) {
   const [formaEdit, setFormaEdit] = useState(null)
   // Filtro de período do histórico de compras (vale pra todos os clientes abertos).
   const [periodo, setPeriodo] = useState('tudo')
+  const [periodoDe, setPeriodoDe] = useState('')
+  const [periodoAte, setPeriodoAte] = useState('')
 
   // Grava o telefone de quem foi cadastrado sem ele.
   async function salvarTelefone(clienteId) {
@@ -622,8 +635,7 @@ export default function ClientesFiado({ empresaId }) {
                                   .reduce((s, v) => s + Number(v.total || 0), 0)
                                 const lista = pagos[l.cliente_id] ?? []
                                 const pagou = lista.reduce((s, p) => s + Number(p.valor || 0), 0)
-                                const desde = desdeDoPeriodo(periodo)
-                                const noPeriodo = compras[l.cliente_id].filter(v => !desde || new Date(v.created_at) >= desde)
+                                const noPeriodo = compras[l.cliente_id].filter(v => dentroDoPeriodo(v, periodo, periodoDe, periodoAte))
                                 const totalPeriodo = noPeriodo.filter(v => v.forma_pagamento !== 'a_vista')
                                   .reduce((s, v) => s + Number(v.total || 0), 0)
                                 return (
@@ -660,13 +672,29 @@ export default function ClientesFiado({ empresaId }) {
                                           background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }}>
                                         {PERIODOS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                                       </select>
+                                      {periodo === 'custom' && (
+                                        <>
+                                          {[['De', periodoDe, setPeriodoDe], ['até', periodoAte, setPeriodoAte]].map(([rot, val, set]) => (
+                                            <label key={rot} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                              {rot}
+                                              <input type="date" value={val} onChange={e => set(e.target.value)}
+                                                style={{ padding: '3px 6px', borderRadius: 7, fontSize: 12.5, border: '1px solid var(--border)',
+                                                  background: 'var(--input-bg, var(--bg))', color: 'var(--text)' }} />
+                                            </label>
+                                          ))}
+                                        </>
+                                      )}
                                       <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                                         {noPeriodo.length} {noPeriodo.length === 1 ? 'compra' : 'compras'} · <strong>{fmtBRL(totalPeriodo)}</strong>
                                       </span>
                                       <button type="button"
                                         onClick={() => imprimirExtrato({
                                           cliente: l.cliente_nome, nomeLoja, saldo: l.saldo_fiado,
-                                          periodoLabel: PERIODOS.find(p => p.id === periodo)?.label ?? '',
+                                          periodoLabel: periodo === 'custom'
+                                            ? (periodoDe || periodoAte
+                                              ? `De ${periodoDe ? periodoDe.split('-').reverse().join('/') : 'o início'} até ${periodoAte ? periodoAte.split('-').reverse().join('/') : 'hoje'}`
+                                              : 'Todo o período')
+                                            : PERIODOS.find(p => p.id === periodo)?.label ?? '',
                                           vendas: noPeriodo, pagamentos: lista,
                                         })}
                                         style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontSize: 12.5,
@@ -678,7 +706,7 @@ export default function ClientesFiado({ empresaId }) {
                                 )
                               })()}
 
-                              {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); const desde = desdeDoPeriodo(periodo); return compras[l.cliente_id].filter(v => !desde || new Date(v.created_at) >= desde).map(v => {
+                              {(() => { const falta = faltaPorVenda(compras[l.cliente_id], l.saldo_fiado); return compras[l.cliente_id].filter(v => dentroDoPeriodo(v, periodo, periodoDe, periodoAte)).map(v => {
                                 const canal = canalDaVenda(v.observacoes)
                                 const emAberto = falta.get(v.id)                       // undefined = quitado
                                 const ehFiado  = v.forma_pagamento !== 'a_vista'
