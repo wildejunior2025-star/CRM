@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import CortadorFoto from '../components/CortadorFoto'
 import React from 'react'
 import { blocosDeOpcoes } from '../lib/complementos'
 import { supabase, fetchAll } from '../lib/supabaseClient'
@@ -1232,6 +1233,18 @@ export default function Produtos() {
     }))
   }
 
+  // Tela de corte: devolve a foto cortada, o original (GIF) ou null (cancelou).
+  const [corte, setCorte] = useState(null)
+  function pedirCorte(file) {
+    if (file.type === 'image/gif') return Promise.resolve(file)
+    return new Promise(resolve => setCorte({ file, resolve }))
+  }
+  function fecharCorte(resultado) {
+    const c = corte
+    setCorte(null)
+    c?.resolve(resultado)
+  }
+
   async function handleFotoChange(e) {
     const file = e.target.files?.[0]
     // Zera o input logo: sem isso, tirar/escolher a MESMA foto de novo não
@@ -1240,12 +1253,14 @@ export default function Produtos() {
     if (!file) return
     if (!profile?.empresa_id) { setError('Empresa não identificada para upload.'); return }
 
-    trocarPreview(URL.createObjectURL(file))
+    const cortada = await pedirCorte(file)
+    if (!cortada) return
+    trocarPreview(URL.createObjectURL(cortada))
     setUploadingFoto(true)
     setError(null)
 
     try {
-      const arquivo = await comprimirImagem(file)
+      const arquivo = await comprimirImagem(cortada)
       // Nome vindo da câmera/galeria pode ter acento e espaço — o storage recusa.
       const nomeSeguro = (arquivo.name || 'foto.jpg')
         .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
@@ -1303,10 +1318,12 @@ export default function Produtos() {
     if (!file || !alvo) return
     if (!profile?.empresa_id) { setError('Empresa não identificada para upload.'); return }
 
+    const cortada = await pedirCorte(file)
+    if (!cortada) { alvoFotoRef.current = null; return }
     setSubindoFoto(alvo)
     setError(null)
     try {
-      const arquivo = await comprimirImagem(file)
+      const arquivo = await comprimirImagem(cortada)
       const nomeSeguro = (arquivo.name || 'foto.jpg')
         .normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^\w.-]+/g, '_')
 
@@ -1902,6 +1919,7 @@ export default function Produtos() {
   return (
     <div>
       {avisoConfirmar}
+      {corte && <CortadorFoto arquivo={corte.file} onConcluir={fecharCorte} onCancelar={() => fecharCorte(null)} />}
       {/* Inputs da troca de foto pela lista. Ficam fora da tabela: se vivessem
           dentro da linha, o React os recriaria a cada render e o arquivo
           escolhido se perderia no meio do caminho. */}
