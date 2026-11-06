@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual, hojeIso } from '../../lib/microciclo'
 import { curto } from '../../lib/diaSemana'
+import { linkDoVideo } from '../../lib/videoExercicio'
 import { useAuth } from '../../hooks/useAuth'
 
 // O professor monta o treino do aluno pelo celular, do mesmo jeito que fazia
@@ -127,7 +128,9 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
   // no treino. É o que os apps concorrentes mostram com foto e vídeo.
   async function mudarVideo(ex) {
     const atual = ex.video_url || ''
-    const link = window.prompt(`Link do vídeo de ${ex.nome} (deixe vazio para tirar):`, atual)
+    const link = window.prompt(
+      `Link do vídeo de ${ex.nome} (deixe vazio para tirar).`
+      + '\nVale pra TODOS os alunos que fizerem este exercício:', atual)
     if (link === null) return
     const { error } = await supabase
       .from('academia_exercicios')
@@ -135,6 +138,16 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
       .eq('id', ex.id)
     if (error) return setErro(error.message)
     setExercicios(l => l.map(x => (x.id === ex.id ? { ...x, video_url: link.trim() || null } : x)))
+  }
+
+  // O vídeo fica no EXERCÍCIO (academia_exercicios), não no item do treino:
+  // prendeu uma vez, vale pra todo aluno que fizer aquele exercício.
+  const videoDe = item => exercicios.find(e => e.id === item.exercicio_id)?.video_url || null
+
+  async function mudarVideoDoItem(item) {
+    const ex = exercicios.find(e => e.id === item.exercicio_id)
+    if (!ex) return setErro('Este exercício foi apagado da lista da academia.')
+    await mudarVideo(ex)
   }
 
   async function remover(item) {
@@ -712,6 +725,18 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
                     {i.maquina ? `máquina ${i.maquina}` : 'peso livre'}
                     {cargas[i.id]?.carga ? ` · última carga ${cargas[i.id].carga} kg` : ''}
                   </small>
+                  {/* O mesmo vídeo que o aluno vê, aqui também: o professor
+                      mostra a execução na hora, do lado do aparelho, sem ter
+                      que abrir o YouTube na mão. */}
+                  <span className="al-video-linha">
+                    <a className="al-video" href={linkDoVideo(i.nome, videoDe(i))}
+                      target="_blank" rel="noreferrer">
+                      {videoDe(i) ? '▶ ver como faz' : '▶ procurar no YouTube'}
+                    </a>
+                    <button className="al-video-trocar" onClick={() => mudarVideoDoItem(i)}>
+                      {videoDe(i) ? 'trocar vídeo' : 'prender um vídeo'}
+                    </button>
+                  </span>
                 </span>
                 <select value={i.variacao || ''} onChange={e => mudarVariacao(i, e.target.value)}>
                   {VARIACOES.map(v => <option key={v} value={v}>{v || '—'}</option>)}

@@ -421,3 +421,7 @@
 .al-evolucao strong { font-size: 17px; }
 .al-evolucao span { color: var(--al-apagado); font-size: 14px; }
 .al-evoluiu { color: var(--al-verde); font-weight: 700; }
+
+/* Vídeo na lista do professor */
+.al-video-linha { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.al-video-trocar { background: none; border: 0; padding: 0; font: inherit; font-size: 14px; color: var(--al-apagado); text-decoration: underline; cursor: pointer; }

@@ -2,23 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual } from '../../lib/microciclo'
 import { ehHoje, diaDeHoje } from '../../lib/diaSemana'
+import { buscaNoYoutube } from '../../lib/videoExercicio'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
 // de cada exercício — é por ele que o aluno acha o aparelho na academia.
 //
 // Série e repetição vêm do microciclo (a tabela de semanas do cartão): se o
 // professor tiver montado, cada exercício mostra "3 séries de 8 a 12".
-
-// Vídeo de execução: o professor pode prender um vídeo certo no exercício
-// (botão 🎥 na área dele). Quando não prendeu — que é o caso de quase todos
-// —, o aluno cai numa busca pronta no YouTube em vez de ficar sem nada.
-// Link de busca não quebra com o tempo, que é o problema de guardar vídeo.
-// Pede SHORTS na busca: o aluno está no celular, e short é vertical — enche
-// a tela, sem aquela tarja preta em cima e embaixo do vídeo deitado.
-function buscaNoYoutube(nome) {
-  const busca = encodeURIComponent(`${nome} execução correta academia #shorts`)
-  return `https://www.youtube.com/results?search_query=${busca}`
-}
 
 // Subiu de verdade? Só quando há duas anotações diferentes e a de agora é
 // maior — repetir a mesma carga não é evolução, e não vale inventar aplauso.
