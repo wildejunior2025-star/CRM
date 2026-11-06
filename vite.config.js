@@ -78,6 +78,7 @@ export default defineConfig({
           // 20/09/2026. No domínio do cardápio nem existe mais service worker
           // (ver main.jsx); esta linha cobre quem chega pelo domínio principal.
           /^\/checkout/,
+          /^\/bingo/,        // bingo das cartelas: página estática em public/bingo
         ],
         // Sem skipWaiting: é o main.jsx que manda o SKIP_WAITING na hora certa.
         clientsClaim: true,

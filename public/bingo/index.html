@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bingo – Cartelas</title>
+<style>
+  :root{
+    --bg:#f4f1ea; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#cfcac0;
+    --accent:#d6336c; --accent2:#1c7ed6; --ok:#2b8a3e; --dab:#ffd43b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{min-height:100vh}
+  .wrap{max-width:760px;margin:0 auto;padding:16px}
+  h1{font-size:28px;margin:8px 0 4px;text-align:center;letter-spacing:.5px}
+  .sub{color:var(--muted);text-align:center;margin:0 0 20px}
+  button{font:inherit;border:0;border-radius:12px;padding:14px 18px;cursor:pointer;font-weight:600}
+  .btn{background:var(--accent);color:#fff}
+  .btn.blue{background:var(--accent2)}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  .btn.big{font-size:20px;padding:18px 22px;width:100%}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row > *{flex:1}
+  .panel{background:#fff;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:14px}
+  input{font:inherit;font-size:20px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;width:100%}
+  label{display:block;font-weight:600;margin-bottom:6px}
+  .hidden{display:none!important}
+
+  /* Cartela 3x9 */
+  .ticket{background:var(--card);border:2px solid #333;border-radius:14px;padding:8px;margin:0 auto}
+  .ticket-head{display:flex;justify-content:space-between;align-items:baseline;padding:2px 6px 8px}
+  .ticket-head .num{font-size:22px;font-weight:800}
+  .ticket-head .tag{color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(9,1fr);border-top:1px solid #999;border-left:1px solid #999}
+  .cell{aspect-ratio:1/1.15;border-right:1px solid #999;border-bottom:1px solid #999;display:flex;align-items:center;justify-content:center;
+        font-weight:800;font-size:clamp(16px,5.2vw,34px);user-select:none;-webkit-tap-highlight-color:transparent;position:relative}
+  .cell.empty{background:repeating-linear-gradient(45deg,#f6f3ee,#f6f3ee 6px,#efebe3 6px,#efebe3 12px)}
+  .cell.n{cursor:pointer}
+  .cell.n.on::before{content:"";position:absolute;inset:12%;border-radius:50%;background:var(--dab);opacity:.85;z-index:0}
+  .cell span{position:relative;z-index:1}
+  .cell.hit{color:var(--ok)}
+  .cell.hit::after{content:"";position:absolute;inset:14%;border:3px solid var(--ok);border-radius:50%}
+
+  .status{text-align:center;font-size:20px;font-weight:800;min-height:30px;margin:12px 0}
+  .status.win{color:var(--ok);font-size:26px}
+
+  /* Painel do organizador 1-90 */
+  .board{display:grid;grid-template-columns:repeat(10,1fr);gap:5px}
+  .ball{aspect-ratio:1;border-radius:50%;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+        font-weight:700;font-size:clamp(12px,3.4vw,18px);cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+  .ball.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .last{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;min-height:58px;align-items:center}
+  .last .b{width:52px;height:52px;border-radius:50%;background:var(--accent2);color:#fff;font-weight:800;font-size:22px;display:flex;align-items:center;justify-content:center}
+  .last .b:first-child{width:64px;height:64px;font-size:28px;background:var(--accent)}
+  .count{text-align:center;color:var(--muted);margin:6px 0 12px}
+
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+  .modal .box{background:#fff;border-radius:16px;padding:20px;max-width:380px;width:100%}
+  .modal p{font-size:18px;margin:0 0 16px}
+  .link{background:none;color:var(--accent2);padding:6px;font-weight:600;text-decoration:underline}
+  .center{text-align:center}
+  .help{color:var(--muted);font-size:14px;line-height:1.45}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- INÍCIO -->
+  <section id="v-inicio">
+    <h1>🎱 BINGO</h1>
+    <p class="sub">Cartelas de 1 a 90 · as bolas saem de verdade</p>
+    <div class="panel">
+      <button class="btn big" id="b-nova">Pegar uma cartela</button>
+    </div>
+    <div class="panel">
+      <label for="i-abrir">Já tem cartela? Digite o número dela</label>
+      <div class="row">
+        <input id="i-abrir" inputmode="numeric" placeholder="Ex.: 4821" maxlength="5">
+        <button class="btn blue" id="b-abrir" style="flex:0 0 auto">Abrir</button>
+      </div>
+    </div>
+    <div class="panel center">
+      <button class="btn ghost" id="b-org" style="width:100%">Sou quem canta as bolas (organizador)</button>
+    </div>
+    <p class="help center">Cada cartela tem um número. O mesmo número sempre mostra a mesma cartela,<br>então o organizador consegue conferir quem gritou BINGO.</p>
+  </section>
+
+  <!-- CARTELA DO JOGADOR -->
+  <section id="v-cartela" class="hidden">
+    <div id="t-jogador"></div>
+    <div class="status" id="st-jogador"></div>
+    <p class="help center">Toque no número quando a bola sair. Toque de novo pra desmarcar.</p>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="b-limpar">Limpar marcações</button>
+      <button class="btn ghost" id="b-trocar">Outra cartela</button>
+    </div>
+    <div class="center" style="margin-top:8px"><button class="link" id="b-voltar1">Início</button></div>
+  </section>
+
+  <!-- ORGANIZADOR -->
+  <section id="v-org" class="hidden">
+    <h1>Bolas sorteadas</h1>
+    <p class="sub">Toque na bola que saiu do globo</p>
+    <div class="last" id="ultimas"></div>
+    <div class="count" id="contagem"></div>
+    <div class="panel"><div class="board" id="board"></div></div>
+
+    <div class="panel">
+      <label for="i-conf">Conferir cartela (quem gritou BINGO)</label>
+      <div class="row">
+        <input id="i-conf" inputmode="numeric" placeholder="Número da cartela" maxlength="5">
+        <button class="btn blue" id="b-conf" style="flex:0 0 auto">Conferir</button>
+      </div>
+      <div id="conf-res" style="margin-top:14px"></div>
+    </div>
+
+    <div class="row">
+      <button class="btn ghost" id="b-desfazer">Desfazer última</button>
+      <button class="btn ghost" id="b-zerar">Nova rodada</button>
+    </div>
+    <div class="center" style="margin-top:8px"><button class="link" id="b-voltar2">Início</button></div>
+  </section>
+</div>
+
+<div class="modal hidden" id="modal">
+  <div class="box">
+    <p id="modal-txt"></p>
+    <div class="row">
+      <button class="btn ghost" id="modal-nao">Cancelar</button>
+      <button class="btn" id="modal-sim">Sim</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ---------- armazenamento (pode não existir) ----------
+  const store = {
+    get(k, d){ try{ const v = localStorage.getItem(k); return v==null ? d : JSON.parse(v); }catch(e){ return d; } },
+    set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+    del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+  };
+  const mem = {}; // reserva se localStorage não funcionar
+  function getS(k,d){ const v = store.get(k, undefined); return v===undefined ? (k in mem ? mem[k] : d) : v; }
+  function setS(k,v){ mem[k]=v; store.set(k,v); }
+
+  // ---------- gerador determinístico ----------
+  function rng(seed){
+    let a = (seed * 2654435761) >>> 0 || 1;
+    return function(){ // mulberry32
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function shuffle(arr, r){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+  const COLS = [[1,9],[10,19],[20,29],[30,39],[40,49],[50,59],[60,69],[70,79],[80,90]];
+
+  // Cartela 90 bolas: 3 linhas x 9 colunas, 15 números, 5 por linha, toda coluna com 1 a 3 números
+  function gerarCartela(numero){
+    const r = rng(numero);
+    for(let tent=0; tent<5000; tent++){
+      const qtd = Array(9).fill(1);
+      let extra = 6;
+      while(extra>0){ const c=Math.floor(r()*9); if(qtd[c]<3){ qtd[c]++; extra--; } }
+      const grade = [Array(9).fill(0),Array(9).fill(0),Array(9).fill(0)];
+      const somaLinha = [0,0,0];
+      for(let c=0;c<9;c++){
+        const linhas = shuffle([0,1,2], r).slice(0, qtd[c]);
+        linhas.forEach(l => { grade[l][c]=1; somaLinha[l]++; });
+      }
+      if(somaLinha.some(s => s!==5)) continue;
+      for(let c=0;c<9;c++){
+        const [ini,fim] = COLS[c];
+        const pool=[]; for(let n=ini;n<=fim;n++) pool.push(n);
+        const nums = shuffle(pool, r).slice(0, qtd[c]).sort((a,b)=>a-b);
+        let k=0;
+        for(let l=0;l<3;l++) if(grade[l][c]) grade[l][c] = nums[k++];
+      }
+      return grade;
+    }
+    return null;
+  }
+
+  // ---------- desenho da cartela ----------
+  function desenhar(alvo, numero, opts){
+    const grade = gerarCartela(numero);
+    alvo.innerHTML = '';
+    const t = document.createElement('div'); t.className='ticket';
+    t.innerHTML = '<div class="ticket-head"><span class="num">Cartela nº '+numero+'</span><span class="tag">1 a 90</span></div>';
+    const g = document.createElement('div'); g.className='grid';
+    for(let l=0;l<3;l++) for(let c=0;c<9;c++){
+      const v = grade[l][c];
+      const d = document.createElement('div');
+      if(!v){ d.className='cell empty'; }
+      else{
+        d.className='cell n'; d.dataset.n=v;
+        d.innerHTML='<span>'+v+'</span>';
+        if(opts.marcados && opts.marcados.includes(v)) d.classList.add('on');
+        if(opts.sorteados && opts.sorteados.includes(v)) d.classList.add('hit');
+        if(opts.onTap) d.addEventListener('click', ()=>opts.onTap(v, d));
+      }
+      g.appendChild(d);
+    }
+    t.appendChild(g); alvo.appendChild(t);
+    return grade;
+  }
+  function resultado(grade, conjunto){
+    const s = new Set(conjunto);
+    let linhas = 0, total = 0, marc = 0;
+    grade.forEach(lin => {
+      const ns = lin.filter(Boolean);
+      const ok = ns.filter(n=>s.has(n)).length;
+      marc += ok; total += ns.length;
+      if(ok===ns.length) linhas++;
+    });
+    return {linhas, cheia: marc===total, marc, total};
+  }
+
+  // ---------- telas ----------
+  const $ = id => document.getElementById(id);
+  const views = ['v-inicio','v-cartela','v-org'];
+  function mostrar(v){ views.forEach(x => $(x).classList.toggle('hidden', x!==v)); window.scrollTo(0,0); }
+
+  function rota(){
+    const h = (location.hash||'').replace('#','');
+    const m = h.match(/^cartela-(\d{1,5})$/);
+    if(m && +m[1]>0){ abrirCartela(+m[1]); return; }
+    if(h==='organizador'){ abrirOrg(); return; }
+    const ultima = getS('bingo_minha', null);
+    mostrar('v-inicio');
+    if(ultima) $('i-abrir').value = ultima;
+  }
+  function ir(h){ if(location.hash==='#'+h) rota(); else location.hash = h; }
+
+  // ---------- jogador ----------
+  let atual = null;
+  function abrirCartela(n){
+    atual = n; setS('bingo_minha', n);
+    const chave = 'bingo_marcas_'+n;
+    let marcas = getS(chave, []);
+    let grade;
+    const atualizar = () => {
+      const r = resultado(grade, marcas);
+      const st = $('st-jogador');
+      st.className = 'status';
+      if(r.cheia){ st.textContent='🎉 CARTELA CHEIA! Grite BINGO!'; st.classList.add('win'); }
+      else if(r.linhas>0){ st.textContent='✅ Fechou '+r.linhas+(r.linhas>1?' linhas':' linha')+'! ('+r.marc+'/15)'; st.classList.add('win'); }
+      else st.textContent = r.marc+' de 15 marcados';
+    };
+    grade = desenhar($('t-jogador'), n, {marcados: marcas, onTap:(v,d)=>{
+      if(marcas.includes(v)) marcas = marcas.filter(x=>x!==v); else marcas.push(v);
+      d.classList.toggle('on'); setS(chave, marcas); atualizar();
+    }});
+    atualizar();
+    mostrar('v-cartela');
+  }
+  function numeroAleatorio(){ return 1 + Math.floor(Math.random()*99999); }
+
+  $('b-nova').onclick = () => ir('cartela-'+numeroAleatorio());
+  $('b-abrir').onclick = () => { const n = parseInt($('i-abrir').value,10); if(n>0 && n<=99999) ir('cartela-'+n); };
+  $('i-abrir').addEventListener('keydown', e => { if(e.key==='Enter') $('b-abrir').click(); });
+  $('b-org').onclick = () => ir('organizador');
+  $('b-voltar1').onclick = $('b-voltar2').onclick = () => { history.replaceState(null,'',location.pathname); rota(); };
+  $('b-limpar').onclick = () => confirmar('Apagar todas as marcações desta cartela?', () => { setS('bingo_marcas_'+atual, []); abrirCartela(atual); });
+  $('b-trocar').onclick = () => confirmar('Pegar outra cartela? Anote o nº '+atual+' se quiser voltar nela.', () => ir('cartela-'+numeroAleatorio()));
+
+  // ---------- organizador ----------
+  let sorteadas = getS('bingo_sorteadas', []);
+  function abrirOrg(){
+    const b = $('board'); b.innerHTML='';
+    for(let n=1;n<=90;n++){
+      const d=document.createElement('div'); d.className='ball'; d.textContent=n; d.dataset.n=n;
+      d.onclick = () => {
+        if(sorteadas.includes(n)) sorteadas = sorteadas.filter(x=>x!==n); else sorteadas.push(n);
+        setS('bingo_sorteadas', sorteadas); pintarOrg();
+      };
+      b.appendChild(d);
+    }
+    pintarOrg(); mostrar('v-org');
+  }
+  function pintarOrg(){
+    document.querySelectorAll('.ball').forEach(d => d.classList.toggle('on', sorteadas.includes(+d.dataset.n)));
+    $('ultimas').innerHTML = sorteadas.slice(-6).reverse().map(n=>'<div class="b">'+n+'</div>').join('') || '<span class="help">Nenhuma bola ainda</span>';
+    $('contagem').textContent = sorteadas.length+' de 90 bolas sorteadas';
+    if($('conf-res').dataset.n) conferir(+$('conf-res').dataset.n);
+  }
+  function conferir(n){
+    const box = $('conf-res'); box.dataset.n = n;
+    const grade = desenhar(box, n, {sorteados: sorteadas});
+    const r = resultado(grade, sorteadas);
+    const p = document.createElement('div'); p.className='status'+(r.cheia||r.linhas?' win':'');
+    p.textContent = r.cheia ? '🎉 BINGO! Cartela cheia confirmada'
+                  : r.linhas ? '✅ '+r.linhas+(r.linhas>1?' linhas completas':' linha completa')+' ('+r.marc+'/15) — cartela ainda não cheia'
+                  : '❌ Ainda não: '+r.marc+' de 15 saíram';
+    box.appendChild(p);
+  }
+  $('b-conf').onclick = () => { const n=parseInt($('i-conf').value,10); if(n>0 && n<=99999) conferir(n); };
+  $('i-conf').addEventListener('keydown', e => { if(e.key==='Enter') $('b-conf').click(); });
+  $('b-desfazer').onclick = () => { sorteadas.pop(); setS('bingo_sorteadas', sorteadas); pintarOrg(); };
+  $('b-zerar').onclick = () => confirmar('Começar nova rodada? Todas as bolas marcadas serão apagadas.', () => {
+    sorteadas=[]; setS('bingo_sorteadas', sorteadas); $('conf-res').innerHTML=''; delete $('conf-res').dataset.n; pintarOrg();
+  });
+
+  // ---------- confirmação na própria página ----------
+  function confirmar(txt, sim){
+    $('modal-txt').textContent = txt; $('modal').classList.remove('hidden');
+    $('modal-sim').onclick = () => { $('modal').classList.add('hidden'); sim(); };
+    $('modal-nao').onclick = () => $('modal').classList.add('hidden');
+  }
+
+  window.addEventListener('hashchange', rota);
+  rota();
+})();
+</script>
+</body>
+</html>

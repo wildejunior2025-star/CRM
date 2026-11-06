@@ -22,6 +22,7 @@ const ROTAS_APP = new Set([
   'delivery', 'entregas', 'cozinha', 'mesas', 'comandas', 'relatorios',
   'configuracoes', 'minha-loja', 'complementos', 'login', 'entrar', 'cadastro',
   'portal', 'super-admin', 'assets', 'favicon.ico', 'robots.txt',
+  'bingo', // página estática das cartelas (public/bingo)
 ])
 
 const CACHE_SEG = 300 // 5 min
