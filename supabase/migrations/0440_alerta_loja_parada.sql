@@ -61,6 +61,7 @@ declare
   v_ids    uuid[] := '{}';
   r        record;
   v_dias   int;
+  v_lim    int;
 begin
   select regexp_replace(valor, '\D', '', 'g') into v_tel
     from config_global where chave = 'aviso_fwc_destino';
@@ -70,7 +71,11 @@ begin
            greatest(
              (select max(created_at) from pedidos_delivery where empresa_id = e.id),
              (select max(created_at) from comandas         where empresa_id = e.id)
-           ) as ultimo
+           ) as ultimo,
+           least(
+             (select min(created_at) from pedidos_delivery where empresa_id = e.id),
+             (select min(created_at) from comandas         where empresa_id = e.id)
+           ) as primeiro
       from empresas e
      where e.status in ('ativo', 'trial')
        and not e.alerta_parada_off
@@ -81,7 +86,11 @@ begin
 
     v_dias := floor(extract(epoch from (now() - coalesce(r.ultimo, r.created_at))) / 86400);
 
-    if v_dias < p_dias then
+    -- Loja nova (menos de 30 dias de uso) ainda esta criando o habito: 1 dia
+    -- parada ja e sinal de risco (concorrente liga e leva). Antiga: p_dias.
+    v_lim := case when r.primeiro > now() - interval '30 days' then least(1, p_dias) else p_dias end;
+
+    if v_dias < v_lim then
       -- Voltou a usar: se parar de novo, avisa de novo.
       if r.alerta_parada_em is not null then
         update empresas set alerta_parada_em = null where id = r.id;
@@ -117,8 +126,8 @@ begin
     'telefone', v_tel,
     'mensagens', jsonb_build_array(
       '⚠️ *Lojas paradas*' || E'\n\n' || array_to_string(v_linhas, E'\n') ||
-      E'\n\n_Conta pedido, venda de balcao e comanda de mesa. Passou de ' ||
-      p_dias || ' dias sem nada._'
+      E'\n\n_Conta pedido, venda de balcao e comanda de mesa. Loja nova: avisa com 1 dia parada. Antiga: com ' ||
+      p_dias || ' dias._'
     )
   );
 end;
