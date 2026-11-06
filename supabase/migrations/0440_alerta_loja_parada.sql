@@ -76,6 +76,9 @@ begin
        and not e.alerta_parada_off
      order by 5 nulls first, e.nome
   loop
+    -- Loja que nunca teve movimento ainda nao foi ativada: nao avisa.
+    if r.ultimo is null then continue; end if;
+
     v_dias := floor(extract(epoch from (now() - coalesce(r.ultimo, r.created_at))) / 86400);
 
     if v_dias < p_dias then
