@@ -56,12 +56,15 @@ security definer
 set search_path = public
 as $$
 declare
-  v_tel    text;
-  v_linhas text[] := '{}';
-  v_ids    uuid[] := '{}';
-  r        record;
-  v_dias   int;
-  v_lim    int;
+  v_tel     text;
+  v_linhas  text[] := '{}';
+  v_ids     uuid[] := '{}';
+  r         record;
+  v_dias    int;
+  v_lim     int;
+  v_uteis   int;
+  v_hoje    date := (now() at time zone 'America/Sao_Paulo')::date;
+  v_tipicos int[];
 begin
   select regexp_replace(valor, '\D', '', 'g') into v_tel
     from config_global where chave = 'aviso_fwc_destino';
@@ -84,14 +87,38 @@ begin
     -- Loja que nunca teve movimento ainda nao foi ativada: nao avisa.
     if r.ultimo is null then continue; end if;
 
-    v_dias := floor(extract(epoch from (now() - coalesce(r.ultimo, r.created_at))) / 86400);
+    v_dias := floor(extract(epoch from (now() - r.ultimo)) / 86400);
+
+    -- DIAS EM QUE A LOJA COSTUMA ABRIR (aprendido do historico, 35 dias).
+    -- Loja que fecha de proposito (ex.: Marajo, so abre 4 dias) nao pode ser
+    -- cobrada pelos dias de folga. Dia da semana "tipico" = teve movimento em
+    -- 2+ datas diferentes (1+ se a loja e nova, com menos de 14 dias de uso).
+    select array_agg(dow) into v_tipicos from (
+      select extract(dow from d)::int as dow
+        from (
+          select (created_at at time zone 'America/Sao_Paulo')::date as d
+            from pedidos_delivery where empresa_id = r.id and created_at > now() - interval '35 days'
+          union all
+          select (created_at at time zone 'America/Sao_Paulo')::date
+            from comandas where empresa_id = r.id and created_at > now() - interval '35 days'
+        ) x
+       group by 1
+      having count(distinct d) >= case when r.primeiro > now() - interval '14 days' then 1 else 2 end
+    ) t;
+
+    -- Dias ABERTOS que passaram sem movimento (hoje nao conta: o aviso sai de manha).
+    select count(*) into v_uteis
+      from generate_series(
+             (r.ultimo at time zone 'America/Sao_Paulo')::date + 1, v_hoje - 1, interval '1 day'
+           ) g(d)
+     where v_tipicos is null or extract(dow from g.d)::int = any(v_tipicos);
 
     -- Loja nova (menos de 30 dias de uso) ainda esta criando o habito: 1 dia
-    -- parada ja e sinal de risco (concorrente liga e leva). Antiga: p_dias.
-    v_lim := case when r.primeiro > now() - interval '30 days' then least(1, p_dias) else p_dias end;
+    -- aberto sem uso ja e risco (concorrente liga e leva). Antiga: p_dias-1.
+    v_lim := case when r.primeiro > now() - interval '30 days' then 1
+                  else greatest(p_dias - 1, 1) end;
 
-    if v_dias < v_lim then
-      -- Voltou a usar: se parar de novo, avisa de novo.
+    if v_uteis < v_lim then
       if r.alerta_parada_em is not null then
         update empresas set alerta_parada_em = null where id = r.id;
       end if;
@@ -105,12 +132,9 @@ begin
 
     v_ids := v_ids || r.id;
     v_linhas := v_linhas || (
-      '• *' || btrim(r.nome) || '* — ' ||
-      case when r.ultimo is null
-        then 'nunca teve movimento (cadastrada ha ' || v_dias || ' dias)'
-        else 'sem movimento ha ' || v_dias || ' dias (ultimo: ' ||
-             to_char(r.ultimo at time zone 'America/Sao_Paulo', 'DD/MM') || ')'
-      end
+      '• *' || btrim(r.nome) || '* — sem movimento ha ' || v_dias || ' dias (ultimo: ' ||
+      to_char(r.ultimo at time zone 'America/Sao_Paulo', 'DD/MM') || ')' ||
+      case when v_uteis < v_dias then ' — ' || v_uteis || ' dia(s) aberto(s) sem uso' else '' end
     );
   end loop;
 
@@ -126,8 +150,7 @@ begin
     'telefone', v_tel,
     'mensagens', jsonb_build_array(
       '⚠️ *Lojas paradas*' || E'\n\n' || array_to_string(v_linhas, E'\n') ||
-      E'\n\n_Conta pedido, venda de balcao e comanda de mesa. Loja nova: avisa com 1 dia parada. Antiga: com ' ||
-      p_dias || ' dias._'
+      E'\n\n_Conta pedido, venda de balcao e comanda de mesa, so nos dias em que a loja costuma abrir._'
     )
   );
 end;
