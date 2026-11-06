@@ -2101,9 +2101,36 @@ export default function DeliveryCheckout() {
     window.scrollTo({ top: 0 })
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  // PEDIDO IGUAL EM SEGUIDA (CDBom, 06/11: a mesma sacola de 110 itens entrou 5
+  // vezes em 8 segundos — a tela demorou, a cliente tocou de novo). A trava de
+  // cima só segura enquanto o envio está no ar; quando ele termina, o toque
+  // seguinte criava outro pedido. Agora o último pedido fica anotado no
+  // aparelho (assinatura + id + hora) e, se vier um IGUAL em até 3 minutos, a
+  // pessoa escolhe: ver o que já fez ou fazer outro mesmo.
+  const [pedidoIgual, setPedidoIgual] = useState(null)   // { id } do pedido já feito
+  const chaveRecente = `pedido_recente_${empresaId}`
+  function assinaturaPedido() {
+    const linhas = (itens ?? []).map(i => `${i.id}:${i.quantidade}:${(i.complementos ?? []).map(c => c?.nome).join('+')}`).sort().join('|')
+    return `${String(form.telefone ?? '').replace(/\D/g, '')}#${Number(total).toFixed(2)}#${linhas}`
+  }
+  function anotarPedidoFeito(id) {
+    try { localStorage.setItem(chaveRecente, JSON.stringify({ sig: assinaturaPedido(), id, ts: Date.now() })) } catch { /* ok */ }
+  }
+  function pedidoIgualRecente() {
+    try {
+      const r = JSON.parse(localStorage.getItem(chaveRecente) || 'null')
+      if (r && r.id && r.sig === assinaturaPedido() && Date.now() - r.ts < 3 * 60 * 1000) return r
+    } catch { /* ok */ }
+    return null
+  }
+
+  async function handleSubmit(e, forcar = false) {
+    e?.preventDefault?.()
     if (enviandoRef.current) return
+    if (!forcar) {
+      const igual = pedidoIgualRecente()
+      if (igual) { setPedidoIgual({ id: igual.id }); return }
+    }
     enviandoRef.current = true
     try {
       await enviarPedido()
@@ -2347,6 +2374,7 @@ export default function DeliveryCheckout() {
       }
       lembrarCliente()
       registrarPedido(pixData.order_id, empresaId)
+      anotarPedidoFeito(pixData.order_id)
       navigate(`/pedido/${pixData.order_id}`, { replace: true })
       return
     }
@@ -2403,11 +2431,33 @@ export default function DeliveryCheckout() {
     // Degrau 4: fechou. Quem chega aqui saiu do funil pela porta certa.
     marcarEtapa(empresaId, 'pedido', state?.subtotal ?? null)
     registrarPedido(data.id, empresaId)
+    anotarPedidoFeito(data.id)
     navigate(`/pedido/${data.id}`, { replace: true })
   }
 
   return (
     <div className="dco-root" data-tema={tema}>
+      {pedidoIgual && (
+        <div role="dialog" aria-modal="true"
+          style={{ position: 'fixed', inset: 0, zIndex: 5000, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ width: '100%', maxWidth: 380, background: '#fff', color: '#111', borderRadius: 16, padding: 20, boxSizing: 'border-box' }}>
+            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>Você acabou de fazer um pedido igual</div>
+            <div style={{ fontSize: 14, lineHeight: 1.5, opacity: .8, marginBottom: 16 }}>
+              Já enviamos esse mesmo pedido há poucos instantes. Quer acompanhar o que já fez ou enviar outro?
+            </div>
+            <button type="button"
+              onClick={() => { const id = pedidoIgual.id; setPedidoIgual(null); navigate(`/pedido/${id}`, { replace: true }) }}
+              style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer', marginBottom: 8 }}>
+              Ver o pedido que já fiz
+            </button>
+            <button type="button"
+              onClick={() => { setPedidoIgual(null); handleSubmit(null, true) }}
+              style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1.5px solid #d1d5db', background: 'transparent', color: '#111', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
+              Fazer outro pedido igual
+            </button>
+          </div>
+        </div>
+      )}
       <header className="dco-header">
         <div className="dco-header-inner">
           <button className="dco-back-btn" onClick={() => navigate(-1)} aria-label="Voltar">
