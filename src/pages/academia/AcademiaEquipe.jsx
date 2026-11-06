@@ -91,6 +91,87 @@ function CodigosDoCaixa() {
   )
 }
 
+// Editar quem já tem login. A tela só sabia CRIAR: quem errava o e-mail no
+// cadastro (aconteceu com o "edsonpereira@100hotmail.com") ficava com a conta
+// torta pra sempre, porque mexer em auth.users não dá pelo site. Quem escreve
+// é a função academia_editar_equipe, que confere no servidor que quem pediu é
+// admin da mesma empresa.
+function Editar({ pessoa, onFechar, onSalvou }) {
+  const [form, setForm] = useState({
+    nome: pessoa.nome || '',
+    email: pessoa.email || '',
+    telefone: pessoa.telefone || '',
+    perfil: pessoa.perfil === 'professor' ? 'professor' : 'admin',
+    senha: '',
+  })
+  const [indo, setIndo] = useState(false)
+  const [erro, setErro] = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  async function salvar(e) {
+    e.preventDefault()
+    setErro(null)
+    if (!form.nome.trim()) return setErro('Coloque o nome da pessoa.')
+    if (!form.email.trim()) return setErro('Coloque o e-mail que ela usa pra entrar.')
+    if (form.senha && form.senha.length < 6) return setErro('A senha precisa de pelo menos 6 letras ou números.')
+    setIndo(true)
+    const { data, error } = await supabase.rpc('academia_editar_equipe', {
+      p_id: pessoa.id,
+      p_nome: form.nome.trim(),
+      p_email: form.email.trim().toLowerCase(),
+      p_telefone: form.telefone.trim(),
+      p_perfil: form.perfil,
+      p_senha: form.senha || null,
+    })
+    setIndo(false)
+    if (error) return setErro(error.message)
+    if (!data?.ok) return setErro(data?.erro || 'Não deu pra salvar.')
+    onSalvou(
+      `Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()}`
+      + (form.senha ? ' e a senha nova.' : '.'))
+  }
+
+  return (
+    <div className="ac-modal" onClick={onFechar}>
+      <form className="ac-card ac-form ac-modal-caixa" onClick={e => e.stopPropagation()} onSubmit={salvar}>
+        <h2>Editar {pessoa.nome || 'pessoa'}</h2>
+        <div className="ac-form-campos">
+          <label>Nome
+            <input value={form.nome} onChange={e => set('nome', e.target.value)} />
+          </label>
+          <label>E-mail pra entrar
+            <input type="email" autoComplete="off" value={form.email}
+              onChange={e => set('email', e.target.value)} />
+          </label>
+          <div className="ac-dupla">
+            <label>WhatsApp
+              <input inputMode="tel" value={form.telefone}
+                onChange={e => set('telefone', e.target.value)} placeholder="(84) 99999-9999" />
+            </label>
+            <label>O que essa pessoa faz
+              <select value={form.perfil} onChange={e => set('perfil', e.target.value)}>
+                <option value="admin">Academia — tudo</option>
+                <option value="professor">Professor / personal</option>
+              </select>
+            </label>
+          </div>
+          <label>Senha nova
+            <input type="text" autoComplete="off" value={form.senha}
+              onChange={e => set('senha', e.target.value)} placeholder="deixe vazio pra manter a de hoje" />
+          </label>
+        </div>
+
+        {erro && <div className="ac-erro">{erro}</div>}
+
+        <div className="ac-form-botoes">
+          <button type="button" className="btn btn-secondary" onClick={onFechar}>Cancelar</button>
+          <button className="btn btn-primary" disabled={indo}>{indo ? 'Salvando...' : 'Salvar'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 export default function AcademiaEquipe() {
   const { empresa, profile } = useAuth()
   const [gente, setGente] = useState([])
@@ -99,6 +180,7 @@ export default function AcademiaEquipe() {
   const [criando, setCriando] = useState(false)
   const [erro, setErro] = useState(null)
   const [aviso, setAviso] = useState(null)
+  const [editando, setEditando] = useState(null)
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -171,7 +253,7 @@ export default function AcademiaEquipe() {
         <div className="ac-tabela-caixa">
           <table className="ac-tabela">
             <thead>
-              <tr><th>Nome</th><th>Entra com</th><th>WhatsApp</th><th>Acesso</th></tr>
+              <tr><th>Nome</th><th>Entra com</th><th>WhatsApp</th><th>Acesso</th><th></th></tr>
             </thead>
             <tbody>
               {gente.map(g => (
@@ -183,11 +265,27 @@ export default function AcademiaEquipe() {
                   <td data-rotulo="Entra com">{g.email}</td>
                   <td data-rotulo="WhatsApp">{g.telefone || '—'}</td>
                   <td data-rotulo="Acesso">{g.perfil === 'professor' ? 'Professor' : 'Academia'}</td>
+                  <td data-rotulo="">
+                    {g.perfil !== 'super_admin' && (
+                      <button type="button" className="btn btn-secondary btn-sm"
+                        onClick={() => { setEditando(g); setAviso(null); setErro(null) }}>
+                        Editar
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {editando && (
+        <Editar
+          pessoa={editando}
+          onFechar={() => setEditando(null)}
+          onSalvou={msg => { setEditando(null); setAviso(msg); carregar() }}
+        />
       )}
 
       <CodigosDoCaixa />
