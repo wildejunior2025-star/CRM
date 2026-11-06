@@ -1184,7 +1184,10 @@ export default function PresencialSalao() {
     // Produto com complemento abre o modal de montagem em vez de cair direto no rascunho.
     if (compMap[produto.produto_id]?.length) { setMontando(produto); return }
     // Só no celular: abre a folha do recado. No computador segue direto pro rascunho.
-    if (ehCelular && !semPergunta) { setObsProduto(produto); return }
+    // Categoria que NÃO vai pra cozinha/papel (setor 'nenhum': bebida, bala, pote
+    // de sorvete) não tem recado pra escrever: entra direto com um toque.
+    const semRecado = catInfo?.[produto.categoria]?.setor === 'nenhum'
+    if (ehCelular && !semPergunta && !semRecado) { setObsProduto(produto); return }
     adicionarSimples(produto, '')
   }
 
