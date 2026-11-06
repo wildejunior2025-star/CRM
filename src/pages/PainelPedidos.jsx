@@ -10002,6 +10002,7 @@ export default function PainelPedidos() {
   // Ids dos pedidos "aguardando" que esta tela já viu. Começa null pra primeira
   // carga entrar calada (ver carregarPedidos).
   const vistosRef = useRef(null)
+  const papelTentadoRef = useRef(new Set())   // pedidos que a recarga já tentou imprimir
 
   function iniciarLoopSom() {
     if (!somAtivoConfig()) return
@@ -10155,6 +10156,32 @@ export default function PainelPedidos() {
       }
       vistosRef.current = new Set(aguardando)
     }
+
+    // O PAPEL TAMBÉM NÃO PODE DEPENDER SÓ DO EVENTO DO WEBSOCKET (06/11/2026, Marajó).
+    //
+    // Mesmo problema do som, só que pior: o pedido entrava na recarga calado e a
+    // térmica Bluetooth nunca recebia nada — o dono via o pedido na tela e o papel
+    // não saía (#582 e #584 do Marajó; só o #583 imprimiu, porque o evento chegou).
+    // Aqui, todo pedido aceito (ou aguardando, que o autoImprimir ignora) recente
+    // que ainda não foi tentado nesta sessão tenta imprimir. Quem desempata
+    // duplicidade é o banco (reservar_impressao), então outro aparelho que já
+    // imprimiu faz esta tentativa virar nada.
+    try {
+      const tentados = papelTentadoRef.current
+      const janelaMs = (carregadoDe.current === empresa.id ? 30 : 10) * 60_000
+      const agora = Date.now()
+      for (const p of lista) {
+        if (tentados.has(p.id)) continue
+        if (!['aguardando', 'confirmado'].includes(p.status)) continue
+        const desde = new Date(p.aguardando_desde || p.created_at).getTime()
+        if (!desde || agora - desde > janelaMs) { tentados.add(p.id); continue }
+        if (p.status === 'confirmado') {
+          tentados.add(p.id)
+          const guardado = p.agendado_para && aguardandoHora(p.agendado_para, Number(empresa?.agendamento_libera_min ?? 45))
+          if (!guardado && deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(p)
+        }
+      }
+    } catch { /* papel é melhor esforço — nunca quebra a recarga */ }
 
     setPedidos(lista)
     carregadoDe.current = empresa.id
