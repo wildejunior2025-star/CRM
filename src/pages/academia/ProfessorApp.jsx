@@ -48,7 +48,7 @@ export default function ProfessorApp() {
   if (aluno) {
     return (
       <Suspense fallback={<div className="al-centro">Carregando...</div>}>
-        <ProfessorTreino aluno={aluno} onVoltar={() => setAluno(null)} />
+        <ProfessorTreino aluno={aluno} app={ciclos[aluno.id]} onVoltar={() => setAluno(null)} />
       </Suspense>
     )
   }
@@ -110,6 +110,13 @@ export default function ProfessorApp() {
                       {s.status === 'liberado' ? 'Em dia' : 'Vencida'}
                     </span>
                     {acabou(ciclos[a.id]) && <span className="al-tag ciclo">ciclo terminado</span>}
+                    {/* Montar treino pra quem não entra no app é trabalho que
+                        não chega no aluno. A marca avisa antes. */}
+                    {ciclos[a.id] && !ciclos[a.id].entra_app && (
+                      <span className="al-tag semapp">
+                        {ciclos[a.id].falta === 'telefone' ? 'sem telefone' : 'sem app'}
+                      </span>
+                    )}
                   </span>
                 </button>
               </li>

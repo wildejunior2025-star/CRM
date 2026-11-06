@@ -425,3 +425,9 @@
 /* Vídeo na lista do professor */
 .al-video-linha { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .al-video-trocar { background: none; border: 0; padding: 0; font: inherit; font-size: 14px; color: var(--al-apagado); text-decoration: underline; cursor: pointer; }
+
+/* Aluno que não entra no app */
+.al-tag.semapp { background: #fff3e0; color: #9a5b00; white-space: nowrap; }
+.al-sem-app { background: #fff3e0; color: #7a4800; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 3px; }
+.al-sem-app strong { font-size: 16px; }
+.al-sem-app span { font-size: 14px; line-height: 1.45; }

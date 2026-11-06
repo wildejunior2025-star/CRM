@@ -13,7 +13,7 @@ const LETRAS = ['A', 'B', 'C', 'D', 'E', 'F']
 const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const VARIACOES = ['', 'H', 'UNI', 'ABERTO', 'CROSS']
 
-export default function ProfessorTreino({ aluno, onVoltar }) {
+export default function ProfessorTreino({ aluno, app, onVoltar }) {
   const { profile } = useAuth()
   const [exercicios, setExercicios] = useState([])
   const [treinos, setTreinos] = useState([])
@@ -390,7 +390,7 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
           </label>
         </section>
 
-        {(aluno.diabetes || aluno.hipertensao || aluno.cardiopata || aluno.saude_outra) && (
+      {(aluno.diabetes || aluno.hipertensao || aluno.cardiopata || aluno.saude_outra) && (
           <div className="al-alerta-saude">
             A IA vai respeitar: {[aluno.diabetes && 'diabetes', aluno.hipertensao && 'hipertensao',
               aluno.cardiopata && 'cardiopata', aluno.saude_outra].filter(Boolean).join(' - ')}
@@ -677,6 +677,19 @@ export default function ProfessorTreino({ aluno, onVoltar }) {
         </div>
         {aluno.foto && <img className="al-foto" src={aluno.foto} alt="" />}
       </header>
+
+      {/* Avisa ANTES de ele montar: sem telefone no cadastro o aluno não
+          entra no app, e o treino não chega em ninguém. */}
+      {app && !app.entra_app && (
+        <div className="al-sem-app">
+          <strong>Este aluno não vê o treino no celular</strong>
+          <span>
+            {app.falta === 'telefone'
+              ? 'Falta o telefone no cadastro — é com ele que o aluno entra no app. Peça pra passar na recepção e deixar o número.'
+              : 'Ele ainda não tem conta no app. A recepção cria em dois toques, no cadastro dele.'}
+          </span>
+        </div>
+      )}
 
       {(aluno.diabetes || aluno.hipertensao || aluno.cardiopata || aluno.saude_outra) && (
         <div className="al-alerta-saude">
