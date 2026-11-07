@@ -8111,8 +8111,10 @@ export default function PainelPedidos() {
     // Quem usa aceite automatico confirma em um segundo e cai aqui de novo
     // ja como 'confirmado'. Balcao nasce confirmado e nem passa por isto.
     if (pedido?.status === 'aguardando') return
+    let btConhecida = false
     try {
       const mod = await import('../utils/imprimirBluetooth')
+      btConhecida = mod.temImpressoraConhecida() && mod.imprimeOrigem(pedido.origem)
       if (mod.estaConectada() || await mod.reconectarSilencioso()) {
         // Origem desligada NESTA impressora: não imprime aqui — e também não
         // cai no caminho de baixo, senão o "desligado" não desligaria nada.
@@ -8122,6 +8124,14 @@ export default function PainelPedidos() {
         return
       }
     } catch { /* sem Bluetooth ou falhou — usa o caminho normal abaixo */ }
+    // Este aparelho TEM térmica Bluetooth pareada mas ela não respondeu (caiu, ou
+    // o Android suspendeu a aba). Antes o pedido virava nada, em silêncio — foi o
+    // #586 do Marajó (06/11). Agora fica numa fila: tenta de novo sozinho a cada
+    // poucos segundos e, enquanto não sai, aparece o aviso vermelho com o botão.
+    if (btConhecida) {
+      setPapelPendente(l => l.some(x => x.id === pedido.id) ? l : [...l, pedido])
+      return
+    }
     // Celular sem a térmica: a janela do Android por cima do Painel a cada
     // pedido novo atrapalha mais do que ajuda (ver semJanelaDoNavegador).
     if (semJanelaDoNavegador()) return
@@ -8201,6 +8211,37 @@ export default function PainelPedidos() {
   // aparece o aviso "toque pra ligar o som" — antes o pedido chegava mudo e
   // ninguém sabia por quê (relato do Wilde, 05/11).
   const [somTravado, setSomTravado] = useState(false)
+
+  // Pedidos que NÃO saíram na térmica Bluetooth deste aparelho porque ela estava
+  // desligada/desconectada. Tenta de novo sozinho; se não der, o aviso vermelho
+  // pede um toque (religar exige gesto no Android).
+  const [papelPendente, setPapelPendente] = useState([])
+  useEffect(() => {
+    if (!papelPendente.length) return
+    let rodando = false
+    const t = setInterval(async () => {
+      if (rodando) return
+      rodando = true
+      try {
+        const mod = await import('../utils/imprimirBluetooth')
+        if (!(mod.estaConectada() || await mod.reconectarSilencioso())) return
+        for (const p of papelPendente) {
+          if (await minhaVezDeImprimir(p)) await mod.imprimirPedidoCelular(p, empresa)
+        }
+        setPapelPendente([])
+      } catch { /* tenta na próxima */ } finally { rodando = false }
+    }, 8000)
+    return () => clearInterval(t)
+  }, [papelPendente, empresa])
+  async function imprimirPendentesAgora() {
+    try {
+      const mod = await import('../utils/imprimirBluetooth')
+      for (const p of papelPendente) await mod.imprimirPedidoCelular(p, empresa)
+      setPapelPendente([])
+    } catch (e) {
+      alert('Impressora celular (Bluetooth): ' + (e?.message || e))
+    }
+  }
   useEffect(() => {
     prepararSom()
     const t = setInterval(() => setSomTravado(somBloqueado()), 1500)
@@ -13242,6 +13283,14 @@ export default function PainelPedidos() {
               border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer',
               boxShadow: '0 6px 20px rgba(0,0,0,.35)' }}>
             🔔 Toque aqui para LIGAR O SOM dos pedidos
+          </button>
+        )}
+        {papelPendente.length > 0 && (
+          <button type="button" onClick={imprimirPendentesAgora}
+            style={{ position: 'fixed', top: somTravado && somAtivo ? 68 : 8, left: 8, right: 70, zIndex: 9999, padding: '12px 14px',
+              borderRadius: 12, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 15,
+              cursor: 'pointer', boxShadow: '0 6px 20px rgba(0,0,0,.35)' }}>
+            🖨️ Impressora desligada — {papelPendente.length} pedido(s) sem papel. Toque para imprimir
           </button>
         )}
       </nav>
