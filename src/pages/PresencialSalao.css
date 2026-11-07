@@ -686,3 +686,10 @@ html[data-teclado='aberto'] .sal-overlay {
   .sal-linha-item > .sal-linha-nome { flex: 1 1 100% !important; }
   .sal-linha-item > .sal-linha-nome + * { margin-left: auto; }
 }
+
+/* CELULAR: fiado, consumo de funcionários, tem cozinha e complementos
+ * obrigatórios ficam atrás do botão "⋯ Mais" (só o ADM os vê). O garçom no
+ * salão quase só usa o "Atualizar". !important: os botões têm display inline. */
+@media (max-width: 1099px) {
+  .sal-mais:not(.sal-mais--aberto) { display: none !important; }
+}

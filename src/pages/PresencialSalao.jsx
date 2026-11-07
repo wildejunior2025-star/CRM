@@ -607,9 +607,17 @@ export default function PresencialSalao() {
   // Aqui não vale o freio do `ocupadoRef`: quem apertou foi a pessoa, e ela
   // está pedindo exatamente que a tela mude.
   const [atualizando, setAtualizando] = useState(false)
+  const [msgVersao, setMsgVersao] = useState('')
+  const [maisAberto, setMaisAberto] = useState(false) // celular: atalhos secundários escondidos
   const atualizarAgora = useCallback(async () => {
     setAtualizando(true)
+    setMsgVersao('')
     try { await loadMesas() } finally { setAtualizando(false) }
+    // Também procura VERSÃO NOVA do sistema: o garçom usa este botão pra sair da
+    // versão velha sem fechar e abrir o aplicativo.
+    const r = await (window.__fwcChecarVersao?.() ?? Promise.resolve('erro'))
+    if (r === 'atualizando') setMsgVersao('⬆️ Versão nova! Atualizando… (depois toque em Conectar na impressora)')
+    else if (r === 'atual') { setMsgVersao('✅ Já está na versão mais nova.'); setTimeout(() => setMsgVersao(''), 4000) }
   }, [loadMesas])
 
   useEffect(() => { loadCatalogo() }, [loadCatalogo])
@@ -2898,8 +2906,20 @@ export default function PresencialSalao() {
             >
               {atualizando ? '⏳ Atualizando…' : '🔄 Atualizar'}
             </button>
+            {/* Celular: fiado, consumo, cozinha e complementos ficam escondidos
+                atrás de "Mais" — o garçom no salão quase só usa Atualizar. */}
+            <button type="button" className="sal-so-mobile" onClick={() => setMaisAberto(v => !v)}
+              aria-expanded={maisAberto}
+              style={{ padding: '7px 14px', borderRadius: 10, cursor: 'pointer', fontSize: 13.5, fontWeight: 700,
+                border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+              {maisAberto ? '▲ Menos' : '⋯ Mais'}
+            </button>
+            {msgVersao && (
+              <div style={{ flexBasis: '100%', fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>{msgVersao}</div>
+            )}
             <button
               type="button"
+              className={'sal-mais' + (maisAberto ? ' sal-mais--aberto' : '')}
               onClick={() => setShowFiado(true)}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -2912,6 +2932,7 @@ export default function PresencialSalao() {
             </button>
             <button
               type="button"
+              className={'sal-mais' + (maisAberto ? ' sal-mais--aberto' : '')}
               onClick={() => setShowConsumoFunc(true)}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -2944,6 +2965,7 @@ export default function PresencialSalao() {
         {ehAdmin && (
           <button
             type="button"
+            className={'sal-mais' + (maisAberto ? ' sal-mais--aberto' : '')}
             onClick={alternarCozinha}
             disabled={salvandoCoz}
             title="Depósito, conveniência, adega: sem preparo, o item vai direto pra comanda."
@@ -2968,6 +2990,7 @@ export default function PresencialSalao() {
         {ehAdmin && (
           <button
             type="button"
+            className={'sal-mais' + (maisAberto ? ' sal-mais--aberto' : '')}
             onClick={alternarObrigatorios}
             disabled={salvandoObrig}
             title="Vale no Salão e no cardápio do QR da mesa. A Loja Online e a Nova venda continuam exigindo."

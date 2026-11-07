@@ -137,6 +137,28 @@ function aplicarAtualizacao() {
   setTimeout(() => window.location.reload(), 5000)
 }
 
+// Botão "Atualizar" do Salão: a pessoa APERTOU, então não vale esperar tela
+// livre nem avisar da impressora — procura versão nova AGORA e, se houver,
+// entra nela. Antes o botão só relia as mesas e o garçom tinha que fechar e
+// abrir o aplicativo pra sair da versão velha (Restaurante do Irmão, 07/11/2026).
+// Devolve 'atualizando' | 'atual' | 'erro'.
+window.__fwcChecarVersao = async () => {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration?.()
+    if (!reg) return 'erro'
+    await reg.update()
+    if (reg.installing) {
+      const sw = reg.installing
+      await new Promise(res => {
+        sw.addEventListener('statechange', () => { if (sw.state === 'installed' || sw.state === 'redundant') res() })
+        setTimeout(res, 10000)
+      })
+    }
+    if (reg.waiting) { aplicarAtualizacao(); return 'atualizando' }
+    return 'atual'
+  } catch { return 'erro' }
+}
+
 function mostrarAvisoAtualizacao(motivo = 'impressora') {
   if (document.getElementById('fwc-update-bar')) return
 
