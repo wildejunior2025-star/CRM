@@ -658,7 +658,8 @@ html[data-teclado='aberto'] .sal-overlay {
 .sal-rodape-alca { display: none; }
 
 @media (max-width: 1099px) {
-  .sal-rodape[data-recolhido] .sal-extra { display: none; }
+  /* !important: a linha Viagem/Recado tem display:flex no próprio elemento. */
+  .sal-rodape[data-recolhido] .sal-extra { display: none !important; }
   .sal-rodape { padding-top: 10px; }
 
   .sal-rodape-alca {
