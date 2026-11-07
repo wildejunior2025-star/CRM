@@ -8027,7 +8027,7 @@ export default function PainelPedidos() {
       if (!['aguardando', 'confirmado'].includes(p.status)) continue
       if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(p)
       iniciarLoopSom()
-      if (p.status === 'aguardando' && aceitarAutoAtivo()) handleConfirmar(p.id, tempoPrevistoMin(p, empresa))
+      if (p.status === 'aguardando' && aceitarAutoAtivo()) handleConfirmar(p.id, tempoPrevistoMin(p, empresa), p)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidos, ticAgenda])
@@ -10748,7 +10748,7 @@ export default function PainelPedidos() {
               }
               if (!guardado && novo.status === 'aguardando') {
                 iniciarLoopSom()
-                if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
+                if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa), novo)
               }
             }
           } else if (payload.eventType === 'UPDATE') {
@@ -10766,7 +10766,7 @@ export default function PainelPedidos() {
                   if (!guardado && novo.status === 'aguardando') {
                     iniciarLoopSom()
                     if (deveAutoImprimir() && !fwcImprimeRef.current) autoImprimirPedido(novo)
-                    if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa))
+                    if (aceitarAutoAtivo()) handleConfirmar(novo.id, tempoPrevistoMin(novo, empresa), novo)
                   }
                   return [...prev, novo]
                 }
@@ -10886,7 +10886,7 @@ export default function PainelPedidos() {
     await supabase.from('pedidos_delivery').update({ entregador_id: entregadorId }).eq('id', id)
   }
 
-  async function handleAvancar(id, novoStatus, extra = {}) {
+  async function handleAvancar(id, novoStatus, extra = {}, pedidoDado = null) {
     // Trava da RETIRADA: não conclui ('entregue') sem o cliente informar o código
     // de retirada. Igual ao motoboy na entrega. Abre o mini-modal do código.
     if (novoStatus === 'entregue' && !extra.__codigoOk) {
@@ -10926,8 +10926,18 @@ export default function PainelPedidos() {
     // A tela é atualizada antes do aviso do banco chegar, então o gancho do
     // realtime não enxerga a mudança 'aguardando' → 'confirmado' feita por este
     // aparelho; quem imprime neste caso é esta linha.
+    //
+    // ACEITE AUTOMÁTICO (06/11/2026, Marajó #586/#589): o aceite sai de dentro do
+    // aviso do tempo real, no mesmo instante em que o pedido nasce — e o `pedidos`
+    // desta função ainda não tem o pedido novo. `aceitouAgora` ficava vazio, o
+    // papel não saía aqui, e o aviso do banco chegava depois com a tela já
+    // 'confirmado' (a atualização otimista abaixo) — ninguém imprimia. Era o
+    // "aceita e não imprime" desde que o pedido aguardando parou de imprimir.
+    // Quem aceita automático passa o pedido de mão.
     const aceitouAgora = novoStatus === 'confirmado'
-      ? pedidos.find(x => x.id === id && x.status === 'aguardando') : null
+      ? (pedidos.find(x => x.id === id && x.status === 'aguardando')
+          || (pedidoDado && pedidoDado.id === id && pedidoDado.status === 'aguardando' ? pedidoDado : null))
+      : null
 
     // Atualização otimista — resposta imediata sem esperar Realtime
     if (STATUS_FINALIZADOS.has(novoStatus)) {
@@ -10961,13 +10971,13 @@ export default function PainelPedidos() {
     await supabase.from('pedidos_delivery').update(update).eq('id', id)
   }
 
-  async function handleConfirmar(id, minutos = null) {
+  async function handleConfirmar(id, minutos = null, pedidoDado = null) {
     const extra = {}
     if (minutos) {
       extra.tempo_preparo_min = minutos
       extra.pronto_previsto_at = new Date(Date.now() + minutos * 60000).toISOString()
     }
-    await handleAvancar(id, 'confirmado', extra)
+    await handleAvancar(id, 'confirmado', extra, pedidoDado)
   }
 
   async function handleConfirmarRecusa(id, motivo) {
