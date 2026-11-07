@@ -10284,7 +10284,13 @@ export default function PainelPedidos() {
         if (!Number.isFinite(quando) || quando < abertoEmRef.current) continue
         if (precontaFeitaRef.current.get(c.id) === quando) continue
         precontaFeitaRef.current.set(c.id, quando)
-        imprimirPreContaMesa(c)
+        // O carimbo chega a TODO Painel aberto (PC, tablet, outra aba): a vez de
+        // imprimir é dada no banco a UM só (mig 0441). Falha do banco = imprime
+        // (melhor repetir que ficar sem a pré-conta).
+        const carimbo = c.preconta_pedida_em
+        supabase.rpc('reservar_preconta', { p_comanda: c.id, p_carimbo: carimbo, p_quem: 'painel' })
+          .then(({ data, error }) => { if (error || data !== false) imprimirPreContaMesa(c) },
+                () => imprimirPreContaMesa(c))
       }
 
       const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
