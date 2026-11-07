@@ -145,6 +145,7 @@ Deno.serve(async (req) => {
 
   try {
     if (acao === "diagnostico")       return json(await diagnostico(sb, body?.empresa_id))
+    if (acao === "definir_serie")     return json(await definirSerie(sb, req, body?.empresa_id, body?.serie, body?.proximo_numero))
     if (acao === "registrar_empresa") return json(await registrarEmpresa(sb, body?.empresa_id, body?.senha_certificado, body?.dry_run === true))
     if (acao === "emitir")            return json(await emitir(sb, body?.pedido_id, body?.cpf, body?.comanda_id))
     if (acao === "simular")           return json(await simular(sb, req, body?.empresa_id, body?.itens))
@@ -212,6 +213,43 @@ async function diagnostico(sb: any, empresaId: string) {
     na_lista: achadaNaLista,
     csc_no_emissor: csc,
   }
+}
+
+// DEFINIR SERIE — loja que vem de outro emissor (CDBom: serie 1 ate o 1776, 07/11/2026)
+// precisa de serie nova, senao a SEFAZ recusa numero repetido (539). A serie e o proximo
+// numero moram no Focus. So service_role, e RECUSA se a loja ja emitiu nota real por aqui
+// (mexer no contador de loja em uso repetiria numero). Vale nos dois ambientes.
+async function definirSerie(sb: any, req: Request, empresaId: string, serie: unknown, proximo: unknown) {
+  const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "")
+  let role = ""
+  try { role = JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role } catch { /* ignora */ }
+  if (role !== "service_role") return { ok: false, error: "só service_role" }
+  const s = Number(serie), n = Number(proximo ?? 1)
+  if (!empresaId || !Number.isInteger(s) || s < 1 || s > 999 || !Number.isInteger(n) || n < 1) return { ok: false, error: "empresa_id, serie e proximo_numero inválidos" }
+
+  const { count } = await sb.from("nfce_notas").select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresaId).eq("ambiente", "producao").eq("status", "autorizada")
+  if ((count ?? 0) > 0) return { ok: false, error: "loja já emitiu nota de produção por aqui; não mexo no contador" }
+
+  const { data: emp } = await sb.from("empresas").select("cnpj").eq("id", empresaId).maybeSingle()
+  const token = tokenPrincipal()
+  if (!emp || !token) return { ok: false, error: "empresa ou token do emissor ausente" }
+  const id = await idNoEmissor(sb, empresaId, soDigitos(emp.cnpj), token)
+  if (!id) return { ok: false, error: "loja não encontrada no emissor" }
+
+  const res = await fetch(`${FOCUS_REVENDA}/v2/empresas/${id}`, {
+    method: "PUT",
+    headers: { "Authorization": authHeader(token), "Content-Type": "application/json" },
+    body: JSON.stringify({
+      serie_nfce_producao: s, proximo_numero_nfce_producao: n,
+      serie_nfce_homologacao: s, proximo_numero_nfce_homologacao: n,
+    }),
+  })
+  const txt = await res.text()
+  if (!res.ok) return { ok: false, error: `Focus ${res.status}: ${txt.slice(0, 300)}` }
+  await sb.from("empresa_fiscal").update({ serie: s }).eq("empresa_id", empresaId)
+  let d: any = {}; try { d = JSON.parse(txt) } catch { /* ignora */ }
+  return { ok: true, serie_producao: d.serie_nfce_producao, proximo_producao: d.proximo_numero_nfce_producao, serie_homologacao: d.serie_nfce_homologacao, proximo_homologacao: d.proximo_numero_nfce_homologacao }
 }
 
 // ─────────────────────────────────────────────────────────────────────
