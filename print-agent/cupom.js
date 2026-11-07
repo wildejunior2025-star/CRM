@@ -355,7 +355,9 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
       // Letra de tamanho normal em negrito: a "altura dobrada" sem largura saia
       // alta e espremida e atrapalhava a leitura (Mickey Burguer, 22/10/2026).
       // O espaco entre as linhas e o que da respiro.
-      parts.push(BOLD(1), linha('   ' + (c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), FEED(1))
+      // v56 (07/11/2026): Restaurante do Irmao pediu complemento do MESMO tamanho
+      // do nome do item (largura e altura dobradas). A v55 so tinha igualado a obs.
+      parts.push(SIZE(0x11), BOLD(1), linha((c.qtdTotal ?? 1) + ' ' + c.nome), BOLD(0), SIZE(0), FEED(1))
     }
     // Observação no MESMO tamanho do nome do item (largura E altura dobradas +
     // negrito). Saía só com a altura dobrada e ficava menor que o nome — o dono
