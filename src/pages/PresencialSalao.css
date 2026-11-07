@@ -648,3 +648,40 @@ html[data-teclado='aberto'] .sal-overlay {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+/* ── CELULAR: rodapé recolhido + linha do item com o nome inteiro ──────────
+ * Conferindo o que lançou, o garçom via só uma janelinha de itens: Viagem,
+ * Recado, Subtotal e os 5 botões ocupavam mais da metade da tela. Agora o
+ * rodapé nasce recolhido (botão de enviar + uma alça com o total) e abre ao
+ * tocar na alça. No PC (1100px+) nada muda. */
+.sal-extra { display: contents; }
+.sal-rodape-alca { display: none; }
+
+@media (max-width: 1099px) {
+  .sal-rodape[data-recolhido] .sal-extra { display: none; }
+  .sal-rodape { padding-top: 10px; }
+
+  .sal-rodape-alca {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 14.5px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .sal-rodape-alca strong { font-size: 16px; }
+
+  /* Nome do item usa a linha INTEIRA; quantidade e preço vão pra baixo.
+   * Antes "Peixe Frito Porção (M)" quebrava em 4 linhas porque dividia a
+   * largura com o − 1 + e o preço. */
+  .sal-linha-item { flex-wrap: wrap; row-gap: 6px; }
+  .sal-linha-item > .sal-linha-nome { flex: 1 1 100% !important; }
+  .sal-linha-item > .sal-linha-nome + * { margin-left: auto; }
+}

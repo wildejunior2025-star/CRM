@@ -320,6 +320,7 @@ export default function PresencialSalao() {
   // Celular: a mesa mostra UMA coisa de cada vez — a comanda ou o cardápio.
   // No PC (1100px+) as duas colunas convivem e isto não muda nada.
   const [abaMesa, setAbaMesa] = useState('comanda')  // 'comanda' | 'add'
+  const [rodapeAberto, setRodapeAberto] = useState(false) // celular: rodapé (viagem/recado/conta/ações) recolhido por padrão
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
   // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
@@ -852,6 +853,8 @@ export default function PresencialSalao() {
   }, [abrirComandaId, comandas])
 
   const comandaSel = mesaSel ? comandaPorMesa[mesaSel.id] : null
+  // Mesa nova (ou outra) abre com o rodapé recolhido de novo.
+  useEffect(() => { setRodapeAberto(false) }, [mesaSel?.id])
   // Rascunho é por comanda e fica salvo no navegador (sobrevive a fechar sem querer).
   const rascunhoKey = comandaSel ? 'rasc_mesa_' + comandaSel.id : null
   useEffect(() => {
@@ -3403,8 +3406,8 @@ export default function PresencialSalao() {
                       : '⏳ preparando'
                     return (
                     <div key={grupo.chave} className="sal-item" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1 }}>
+                      <div className="sal-linha-item" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className="sal-linha-nome" style={{ flex: 1 }}>
                           <div className="sal-item-nome" style={{ fontSize: 15.5, fontWeight: 700 }}>{grupo.nome}</div>
                           <div className="sal-item-sub" style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span>{fmt(grupo.preco_unitario)} · {textoStatus}</span>
@@ -3488,8 +3491,8 @@ export default function PresencialSalao() {
                   </div>
                   {rascunho.map(r => (
                     <div key={r.linha ?? r.produto_id} style={{ padding: '5px 0' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="sal-linha-item" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className="sal-linha-nome" style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 15.5, fontWeight: 700 }}>{r.nome}</div>
                           {/* Mostra o preço QUE VAI SER COBRADO e, quando a faixa de
                               atacado pegou, risca o cheio e diz a partir de quanto —
@@ -3769,12 +3772,18 @@ export default function PresencialSalao() {
             </div>
 
             {/* rodapé — sempre à vista (ver .sal-rodape no PresencialSalao.css) */}
-            <div className="sal-rodape">
+            {/* No celular o rodapé nasce RECOLHIDO (só o botão de enviar e uma
+                alça com o total): o garçom que está conferindo o que lançou
+                precisa de tela pra LISTA, não pra viagem/recado/ações. Toca na
+                alça e abre tudo. Conta fechada (azul) fica sempre aberta: o aviso
+                dela não pode ficar escondido. No PC nada muda. */}
+            <div className="sal-rodape"
+              data-recolhido={!rodapeAberto && comandaSel.status !== 'aguardando_conferencia' ? '' : undefined}>
               {/* Recado da cozinha fica AQUI, coladinho no botão de enviar: a observação
                   só sai impressa se for escrita ANTES do envio, então ela não pode estar
                   perdida lá em cima, fora da vista de quem está lançando no celular. */}
               {comandaSel.status !== 'aguardando_conferencia' && (
-                <div className="sal-rodape-envio" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                <div className="sal-rodape-envio sal-extra" style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
                   <button type="button" onClick={alternarViagem} disabled={salvandoViagem}
                     title="Marca a comanda inteira como pedido para viagem — sai impresso na cozinha"
                     style={{
@@ -3813,6 +3822,15 @@ export default function PresencialSalao() {
                   {enviando ? 'Enviando...' : `🍳 Enviar para a cozinha · ${rascunho.reduce((s, r) => s + r.quantidade, 0)} item(ns) · ${fmt(subtotalRascunho)}`}
                 </button>
               )}
+              {comandaSel.status !== 'aguardando_conferencia' && (
+                <button type="button" className="sal-rodape-alca sal-so-mobile"
+                  onClick={() => setRodapeAberto(v => !v)}
+                  aria-expanded={rodapeAberto}>
+                  <span>{rodapeAberto ? '▼ Esconder' : '▲ Conta e mais'}</span>
+                  <strong>{fmt(taxaSel > 0 ? totalSel : subtotalSel)}</strong>
+                </button>
+              )}
+              <div className="sal-extra">
               <div className="sal-rodape-subtotal" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15.5, marginBottom: 4 }}>
                 <span>Subtotal</span><strong>{fmt(subtotalSel)}</strong>
               </div>
@@ -3970,6 +3988,7 @@ export default function PresencialSalao() {
                   )}
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>
