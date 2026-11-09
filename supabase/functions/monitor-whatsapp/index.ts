@@ -18,6 +18,11 @@
 // Só MUDANÇA de estado: caiu, e depois quando voltou. Servidor fora vira UMA
 // mensagem ("o Evolution caiu, N lojas mudas"), não uma por loja.
 //
+// E TAMBÉM A SURDEZ (09/11/2026)
+// Perguntar "está conectado?" não bastava. A CDBom passou 7 dias conectada,
+// mandando aviso de pedido e sem receber nada — e o vigia dizia "aberto" o
+// tempo todo. Agora ele também compara: vendeu e não ouviu ninguém = surda.
+//
 // Chamado pelo cron de 5 em 5 min (mig 0291). Deploy com --no-verify-jwt.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -35,7 +40,39 @@ const GRAPH_VERSION     = Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v21.0"
 const MODELO_ALERTA     = "alerta_plataforma"
 const MODELO_IDIOMA     = "pt_BR"
 
-type Estado = "aberto" | "desconectado" | "servidor_fora"
+type Estado = "aberto" | "desconectado" | "servidor_fora" | "surdo"
+
+// Horas sem receber nada que já contam como surdez.
+const HORAS_SURDO = 6
+
+/**
+ * "Conectada e surda": o ponto cego que deixou a CDBom 7 dias sem atender.
+ *
+ * Em 09/11/2026 a sessão dela aparecia "aberta", mandava aviso de pedido
+ * normalmente, e não recebia nada desde 02/11. O vigia só perguntava "está
+ * conectado?" — e estava. Perguntar isso não basta.
+ *
+ * A prova de que é defeito, e não loja parada, são os DOIS fatos juntos:
+ * nenhuma mensagem de cliente entrando E pedido saindo. Loja que vende mas
+ * não ouve está quebrada. Loja só quieta não é avisada, senão o alarme toca
+ * à toa em quem vende pouco.
+ */
+// deno-lint-ignore no-explicit-any
+async function surdezDaLoja(supabase: any, empresaId: string): Promise<string | null> {
+  const desde = new Date(Date.now() - HORAS_SURDO * 3600000).toISOString()
+
+  const { count: entradas } = await supabase.from("whatsapp_conversas")
+    .select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresaId).eq("role", "user").gte("created_at", desde)
+  if ((entradas ?? 0) > 0) return null
+
+  const { count: pedidos } = await supabase.from("pedidos_delivery")
+    .select("id", { count: "exact", head: true })
+    .eq("empresa_id", empresaId).gte("created_at", desde)
+  if ((pedidos ?? 0) === 0) return null
+
+  return `${pedidos} pedido(s) em ${HORAS_SURDO}h e nenhuma mensagem de cliente`
+}
 
 // A Meta entrega o celular BR sem o 9º dígito, mas pra ENVIAR costuma exigir.
 function numeroBr(n: string): string {
@@ -195,13 +232,21 @@ serve(async (req) => {
     const agora = new Date().toISOString()
     const resultado: Record<string, unknown>[] = []
     const caiu: string[] = []        // como aparece na mensagem (com o tempo parado)
+    const surdas: string[] = []      // conectadas, vendendo, e sem ouvir ninguém
     const caiuLojas: string[] = []   // só o nome, pra marcar o avisado_em
     const voltou: string[] = []
     let servidorFora = 0
 
     for (const alvo of alvos) {
-      const { estado, detalhe } = await estadoDaInstancia(alvo.instancia)
+      let { estado, detalhe } = await estadoDaInstancia(alvo.instancia)
       if (estado === "servidor_fora") servidorFora++
+
+      // Conectada não quer dizer escutando. Só a loja tem como ser surda: o
+      // número da própria FWC não tem pedido pra servir de prova.
+      if (estado === "aberto" && alvo.empresa_id) {
+        const surdez = await surdezDaLoja(supabase, alvo.empresa_id)
+        if (surdez) { estado = "surdo"; detalhe = surdez }
+      }
 
       const { data: antes } = await supabase.from("monitor_whatsapp")
         .select("estado, avisado_em, mudou_em").eq("instancia", alvo.instancia).maybeSingle()
@@ -226,7 +271,8 @@ serve(async (req) => {
         const desde = new Date(mudou ? agora : (antes?.mudou_em ?? agora)).getTime()
         const h = Math.floor((Date.now() - desde) / 3600000)
         const quanto = h < 1 ? "agora" : h < 24 ? `há ${h}h` : `há ${Math.floor(h / 24)} dia(s)`
-        caiu.push(`${alvo.loja} (${quanto})`)
+        if (estado === "surdo") surdas.push(`${alvo.loja} (${quanto}) — ${detalhe}`)
+        else caiu.push(`${alvo.loja} (${quanto})`)
         caiuLojas.push(alvo.loja)
       }
       if (mudou && estado === "aberto" && antes?.estado && antes.estado !== "desconhecido") voltou.push(alvo.loja)
@@ -236,6 +282,16 @@ serve(async (req) => {
     // Uma mensagem só. Servidor fora derruba todo mundo ao mesmo tempo: avisar
     // loja por loja seria o celular apitando dez vezes pelo mesmo problema.
     let texto = ""
+    // A surdez tem recado próprio: a tela diz "conectado" e o número manda
+    // aviso de pedido, então mandar "leia o QR" sem explicar parece engano.
+    const avisoSurdas = surdas.length
+      ? "🔇 *WhatsApp conectado mas SURDO*\n\n" +
+        surdas.map(l => `• ${l}`).join("\n") +
+        "\n\nEssa(s) loja(s) continua(m) ENVIANDO (o cliente recebe o aviso do pedido), " +
+        "mas nada do que o cliente escreve chega — o robô não tem como responder.\n" +
+        "👉 Precisa desvincular e ler o QR Code de novo, com a loja fechada."
+      : ""
+
     if (caiu.length && servidorFora >= alvos.length && alvos.length > 1) {
       texto = "🚨 *WhatsApp fora do ar*\n\n" +
         `O servidor (Evolution) não está respondendo — *${alvos.length} números* estão mudos, ` +
@@ -248,6 +304,7 @@ serve(async (req) => {
         "\n\nO servidor está de pé, mas esse(s) número(s) caiu(ram) — precisa ler o QR Code de novo " +
         "no Super ADM → WhatsApp."
     }
+    if (avisoSurdas) texto = texto ? `${texto}\n\n———\n\n${avisoSurdas}` : avisoSurdas
     if (voltou.length && !texto) {
       texto = "✅ *WhatsApp normalizado*\n\n" + voltou.map(l => `• ${l}`).join("\n") +
         "\n\nVoltou a enviar e receber."
@@ -266,7 +323,7 @@ serve(async (req) => {
       }
     }
 
-    return json({ ok: true, checadas: alvos.length, servidor_fora: servidorFora, caiu, voltou, envio, resultado })
+    return json({ ok: true, checadas: alvos.length, servidor_fora: servidorFora, caiu, surdas, voltou, envio, resultado })
   } catch (e) {
     console.error("[monitor] erro:", e)
     return json({ ok: false, erro: String(e).slice(0, 300) }, 500)
