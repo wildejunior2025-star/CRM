@@ -3636,6 +3636,31 @@ serve(async (req) => {
     const msg = payload.data
     const coordsMsg = coordsDaMensagem(msg)
     if (!msg) return new Response("ok", { headers: corsHeaders })
+    // ── Mensagem VELHA não é atendida ──────────────────────────────────────
+    // Quando o Evolution reinicia, ele ressincroniza a conversa e dispara
+    // messages.upsert de mensagens antigas. Sem essa trava o robô responde
+    // gente que falou dias atrás: em 19/08/2026, depois do restart, 360
+    // mensagens antigas viraram 73 respostas para 21 clientes da Zebu — o
+    // lojista viu como "disparo" pros clientes dele.
+    //
+    // ESTA TRAVA VEM ANTES DO GRUPO, e isso é de propósito (09/11/2026). Ela
+    // ficava DEPOIS do repasse pro estoque, então a ressincronização mandava
+    // centenas de mensagens velhas de grupo pra estoque-whatsapp e o Supabase
+    // começava a recusar: "[grupo] repasse estoque: Rate limit exceeded for
+    // function", dezenas por minuto. Mensagem velha não vira entrada de
+    // estoque nem atendimento — não precisa sair daqui.
+    {
+      const ts = msg.messageTimestamp
+      let seg = Number(typeof ts === "object" && ts !== null ? (ts.low ?? 0) : (ts ?? 0))
+      if (seg > 1e12) seg = seg / 1000            // veio em milissegundos
+      const idadeSeg = seg > 0 ? (Date.now() / 1000) - seg : 0
+      if (idadeSeg > 600) {
+        console.log("[webhook] mensagem antiga ignorada:", Math.round(idadeSeg / 60), "min",
+          payload.instance ?? "", msg.key?.remoteJid?.endsWith("@g.us") ? "(grupo)" : "")
+        return new Response("ok", { headers: corsHeaders })
+      }
+    }
+
     if (msg.key?.remoteJid?.endsWith("@g.us")) {
       // Grupo nunca é atendimento. Só o grupo de ENTRADA DE ESTOQUE que a loja ativou
       // faz alguma coisa, e quem decide isso é a função estoque-whatsapp.
@@ -3651,23 +3676,6 @@ serve(async (req) => {
 
     const instanceName: string = payload.instance ?? ""
     if (!instanceName) return new Response("ok", { headers: corsHeaders })
-
-    // ── Mensagem VELHA não é atendida ──────────────────────────────────────
-    // Quando o Evolution reinicia, ele ressincroniza a conversa e dispara
-    // messages.upsert de mensagens antigas. Sem essa trava o robô responde
-    // gente que falou dias atrás: em 19/08/2026, depois do restart, 360
-    // mensagens antigas viraram 73 respostas para 21 clientes da Zebu — o
-    // lojista viu como "disparo" pros clientes dele.
-    {
-      const ts = msg.messageTimestamp
-      let seg = Number(typeof ts === "object" && ts !== null ? (ts.low ?? 0) : (ts ?? 0))
-      if (seg > 1e12) seg = seg / 1000            // veio em milissegundos
-      const idadeSeg = seg > 0 ? (Date.now() / 1000) - seg : 0
-      if (idadeSeg > 600) {
-        console.log("[webhook] mensagem antiga ignorada:", Math.round(idadeSeg / 60), "min", instanceName)
-        return new Response("ok", { headers: corsHeaders })
-      }
-    }
 
     // ── A LOJA ASSUMIU A CONVERSA ──────────────────────────────────────────
     // Mensagem que saiu do número da loja. Até aqui isso era jogado fora, e o
