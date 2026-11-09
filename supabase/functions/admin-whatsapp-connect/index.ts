@@ -219,6 +219,71 @@ serve(async (req) => {
       return json({ ok: res.ok, status: res.status, webhookUrl, data })
     }
 
+    // ── Ajustes da instância (syncFullHistory e companhia) ──────────────────
+    //
+    // POR QUE ISSO EXISTE (09/11/2026): quatro instâncias (CDBom, Zebu, CL
+    // Pescados, DayCakes) só entregavam mensagem com 24 a 45 horas de atraso,
+    // sempre as mesmas, repetidas. O webhook recebia e jogava fora como
+    // "mensagem antiga". É a ressincronização de histórico do Baileys: com
+    // syncFullHistory ligado, cada reconexão despeja a conversa inteira na
+    // fila do webhook, e a fila nunca alcança o presente.
+    if (action === "check_settings" || action === "set_settings") {
+      let alvos: { instance: string; loja: string }[] = []
+      if (reqInstance) {
+        alvos = [{ instance: reqInstance, loja: "" }]
+      } else {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_config")
+          .select("instance_name, empresas(nome)")
+          .eq("ativo", true).not("instance_name", "is", null)
+        alvos = (data ?? [])
+          .filter((r: Record<string, unknown>) => String(r.instance_name ?? "").trim())
+          .map((r: Record<string, unknown>) => ({
+            instance: String(r.instance_name),
+            loja: String((r.empresas as Record<string, unknown>)?.nome ?? ""),
+          }))
+      }
+
+      const linhas = []
+      for (const alvo of alvos) {
+        const res = await fetch(`${EVOLUTION_API_URL}/settings/find/${alvo.instance}`, {
+          headers: { apikey: EVOLUTION_API_KEY },
+        }).catch(() => null)
+        const atual = (res ? await res.json().catch(() => ({})) : {}) as Record<string, unknown>
+        const linha: Record<string, unknown> = {
+          loja: alvo.loja, instancia: alvo.instance, http: res?.status ?? 0,
+          syncFullHistory: atual.syncFullHistory,
+          alwaysOnline: atual.alwaysOnline,
+          readMessages: atual.readMessages,
+          groupsIgnore: atual.groupsIgnore,
+          cru: res && !res.ok ? JSON.stringify(atual).slice(0, 200) : undefined,
+        }
+        if (action === "set_settings") {
+          // Manda o conjunto inteiro: o Evolution troca tudo, não só o campo
+          // enviado. O que não veio no body vira false/padrão.
+          const corpo = {
+            rejectCall: atual.rejectCall === true,
+            msgCall: String(atual.msgCall ?? ""),
+            groupsIgnore: atual.groupsIgnore === true,
+            alwaysOnline: atual.alwaysOnline === true,
+            readMessages: atual.readMessages === true,
+            readStatus: atual.readStatus === true,
+            syncFullHistory: false,
+          }
+          const put = await fetch(`${EVOLUTION_API_URL}/settings/set/${alvo.instance}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify(corpo),
+          }).catch(() => null)
+          linha.gravou = put?.ok ?? false
+          linha.gravou_http = put?.status ?? 0
+          linha.enviado = corpo
+        }
+        linhas.push(linha)
+      }
+      return json({ ok: true, acao: action, instancias: linhas })
+    }
+
     return json({ error: "action inválida" }, 400)
   } catch (err) {
     console.error("admin-whatsapp-connect error:", err)
