@@ -261,10 +261,16 @@ serve(async (req) => {
         if (action === "set_settings") {
           // Manda o conjunto inteiro: o Evolution troca tudo, não só o campo
           // enviado. O que não veio no body vira false/padrão.
+          // groupsIgnore pode vir no pedido. Serve pra calar o despejo de
+          // histórico de grupo que entope o webhook (09/11/2026): numa loja
+          // doente, 391 de 563 mensagens repetidas eram de grupo. Só mande
+          // true em loja SEM estoque_grupo_jid, senão o estoque para.
           const corpo = {
             rejectCall: atual.rejectCall === true,
             msgCall: String(atual.msgCall ?? ""),
-            groupsIgnore: atual.groupsIgnore === true,
+            groupsIgnore: typeof body.groupsIgnore === "boolean"
+              ? body.groupsIgnore
+              : atual.groupsIgnore === true,
             alwaysOnline: atual.alwaysOnline === true,
             readMessages: atual.readMessages === true,
             readStatus: atual.readStatus === true,
