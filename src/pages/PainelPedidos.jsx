@@ -10283,6 +10283,13 @@ export default function PainelPedidos() {
         const quando = new Date(c.preconta_pedida_em).getTime()
         if (!Number.isFinite(quando) || quando < abertoEmRef.current) continue
         if (precontaFeitaRef.current.get(c.id) === quando) continue
+        // Celular SEM impressora conectada não disputa a vez: se ganhasse, ninguém
+        // imprimia (DayCakes, 09/11/2026 — o 2º celular com o Painel aberto levava
+        // a vez e a pré-conta não saía). PC/tablet de mesa segue como antes.
+        if (aparelhoMovel()) {
+          if (Date.now() - quando > 180_000) continue   // pedido velho: não sai de surpresa depois que a impressora reconectar
+          if (!(await podeImprimirAqui())) continue
+        }
         precontaFeitaRef.current.set(c.id, quando)
         // O carimbo chega a TODO Painel aberto (PC, tablet, outra aba): a vez de
         // imprimir é dada no banco a UM só (mig 0441). Falha do banco = imprime
