@@ -2169,8 +2169,12 @@ export default function PresencialSalao() {
       formaPagamento: '', pagamentos: [],
     }
     // 1) Impressora aqui mesmo (térmica pareada neste aparelho, ou app FWC no PC).
+    // Celular/tablet NÃO tem o app FWC (é um programa de PC): tentar falar com ele
+    // só gasta tempo — no iPhone a tentativa na rede local pode ficar pendurada e
+    // o pedido pra loja nunca era gravado (DayCakes, 09/11/2026: do Android saía,
+    // do iPhone não). Celular vai direto pra Bluetooth e, se não houver, pede pra loja.
     const ok = await viaBluetooth('conta', dados)
-      || await imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp: ehCelular, origem: 'mesa' })
+      || (ehCelular ? false : await imprimirHtml(montarContaPresencialHtml(dados), empresaNome, { soApp: false, origem: 'mesa' }))
     if (ok) {
       setPreContaMsg('🧾 Pré-conta enviada pra impressora.')
       setTimeout(() => setPreContaMsg(''), 6000)
