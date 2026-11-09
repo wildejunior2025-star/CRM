@@ -1579,7 +1579,7 @@ export default function PresencialSalao() {
     // Sem Bluetooth: manda pelo app FWC do PC. Aqui a chamada é DIRETA (rota
     // manual do app) porque reimpressão é pedido explícito — o tempo real, que
     // é quem imprime sozinho, já passou faz tempo.
-    if (!ok) {
+    if (!ok && !ehCelular) {   // celular não tem o app FWC (é programa de PC)
       try {
         const mod = await import('../utils/imprimirCupom')
         if (await mod.appFwcDisponivel()) {
@@ -2107,7 +2107,14 @@ export default function PresencialSalao() {
   async function viaBluetooth(tipo, dados) {
     try {
       const mod = await import('../utils/imprimirBluetooth')
-      return await mod.imprimirMesaSeConectada(tipo, dados)
+      // Limite de 6s: celular que já foi pareado mas cuja térmica está ligada em
+      // OUTRO aparelho fica tentando conectar sem prazo (gatt.connect não tem
+      // timeout) — a tela ficava nos "..." e nada saía (DayCakes, 09/11/2026).
+      // Passou do prazo = "não saiu aqui" e segue pro pedido à estação da loja.
+      return await Promise.race([
+        mod.imprimirMesaSeConectada(tipo, dados),
+        new Promise(resolve => setTimeout(() => resolve(false), 6000)),
+      ])
     } catch { return false }   // sem Bluetooth neste aparelho
   }
 
