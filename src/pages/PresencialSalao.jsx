@@ -1594,10 +1594,26 @@ export default function PresencialSalao() {
         }
       } catch { /* sem app neste aparelho */ }
     }
+    // Nada saiu AQUI (sem térmica pareada, ou ela caiu): pede pra estação da loja —
+    // o celular/PC que está com a impressora e o Painel aberto. É o mesmo caminho
+    // da pré-conta. Antes só tentava neste aparelho e o garçom, que nunca tem a
+    // térmica, ficava sem saída (DayCakes, 09/11/2026).
+    let pedido = false
+    const ids = itens.map(i => i.id).filter(Boolean)
+    if (!ok && comandaSel?.id && ids.length) {
+      const { error } = await supabase.from('comandas')
+        .update({ reimpressao_pedida: { em: new Date().toISOString(), ids } })
+        .eq('id', comandaSel.id)
+      pedido = !error
+    }
     setReimprimindo(false)
     const filtro = ok === 'filtrado' ? motivoFiltro(itens) : null
-    setAvisoImpressao(filtro ? { itens, motivo: filtro, quando: Date.now() } : ok ? null : { itens, quando: Date.now() })
+    setAvisoImpressao(filtro ? { itens, motivo: filtro, quando: Date.now() } : (ok || pedido) ? null : { itens, quando: Date.now() })
     if (ok && !filtro) setPreContaMsg('🖨️ Comanda reimpressa.')
+    else if (pedido) {
+      setPreContaMsg('🖨️ Pedi na impressora da loja — o papel sai lá.')
+      setTimeout(() => setPreContaMsg(''), 6000)
+    }
   }
 
   // Envia o pedido montado pra cozinha: insere TODOS os itens de uma vez → sai numa

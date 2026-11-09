@@ -10319,6 +10319,16 @@ export default function PainelPedidos() {
         segundaViaFeitaRef.current.set(payload.new.id, quando)
         imprimirSegundaViaPedida(payload.new.id)
       })
+      // Reimpressão da comanda da cozinha pedida de outro aparelho (mig 0443).
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'comandas', filter: `empresa_id=eq.${empresa.id}` }, (payload) => {
+        const ped = payload.new?.reimpressao_pedida
+        if (!ped?.em || !Array.isArray(ped.ids) || !ped.ids.length) return
+        const quando = new Date(ped.em).getTime()
+        if (!Number.isFinite(quando) || quando < abertoEmRef.current) return
+        if (reimpressaoFeitaRef.current.get(payload.new.id) === quando) return
+        reimpressaoFeitaRef.current.set(payload.new.id, quando)
+        imprimirReimpressaoPedida(payload.new.id, ped)
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comanda_itens', filter: `empresa_id=eq.${empresa.id}` }, (payload) => {
         carregarComandas()
         if (payload.eventType === 'INSERT') agendarImpressaoMesa(payload.new)
@@ -10460,7 +10470,46 @@ export default function PainelPedidos() {
   // por carimbo) pra não repetir a cada recarga da lista, que roda de 30 em 30s.
   const precontaFeitaRef = useRef(new Map())
   const segundaViaFeitaRef = useRef(new Map())
+  const reimpressaoFeitaRef = useRef(new Map())
   const abertoEmRef = useRef(Date.now())
+
+  // Este aparelho tem COMO imprimir agora? (térmica Bluetooth conectada, ou app
+  // FWC no PC). A vez de imprimir é dada no banco a UM só — se quem ganhasse a
+  // vez fosse um aparelho sem impressora, o papel não sairia em lugar nenhum.
+  async function podeImprimirAqui() {
+    try {
+      const bt = await import('../utils/imprimirBluetooth')
+      if (bt.imprimeOrigem('mesa') && bt.estaConectada()) return true
+    } catch { /* sem Bluetooth */ }
+    try {
+      const mod = await import('../utils/imprimirCupom')
+      if (await mod.appFwcDisponivel()) return true
+    } catch { /* sem app */ }
+    return false
+  }
+
+  // Reimpressão da comanda pedida pelo garçom (mig 0443): imprime SÓ os itens
+  // que ele escolheu, mesmo que já tenham saído antes (é pedido explícito).
+  async function imprimirReimpressaoPedida(comandaId, ped) {
+    if (!(await podeImprimirAqui())) return
+    const { data: vez, error: erroVez } = await supabase.rpc('reservar_preconta',
+      { p_comanda: comandaId, p_carimbo: ped.em, p_quem: 'reimpressao' })
+    if (!erroVez && vez === false) return   // outro aparelho já está imprimindo
+    const { data: itens } = await supabase.from('comanda_itens')
+      .select('id, nome, quantidade, observacao, setor').in('id', ped.ids)
+    if (!itens?.length) return
+    const info = await infoComandaCozinha(comandaId)
+    const dados = {
+      numeroMesa: info.numero, rotulo: info.rotulo, nomeLoja: empresa?.nome,
+      area: info.area, atendente: info.atendente, pessoas: info.pessoas, rodape: info.rodape,
+      itens: itens.map(i => ({ nome: i.nome, quantidade: i.quantidade, observacao: i.observacao, setor: i.setor })),
+    }
+    if (await viaBluetooth('comanda', dados)) return
+    const paraPapel = dados.itens.filter(i => i.setor !== 'nenhum')
+    if (!paraPapel.length) return
+    // Sem `auto` e sem `ids`: o app imprime de novo (reimpressão manual).
+    await imprimirComandaMesaApp({ ...dados, itens: paraPapel, comandaId })
+  }
 
   // Segunda via de uma conta JÁ FECHADA, pedida por outro aparelho (mig 0333). A
   // comanda fechada não está na lista do painel: busca com os itens e imprime o
