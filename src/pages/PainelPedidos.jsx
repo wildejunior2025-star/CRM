@@ -4657,7 +4657,10 @@ function CardPedido({ pedido, onConfirmar, onRecusar, onExpirado, onAvancar, onE
         {/* Cancelar um pedido JÁ aceito (faltou produto, cliente desistiu, etc.).
             Não aparece no balcão (venda própria) nem em quem ainda está "A aceitar"
             (esse usa o botão Recusar acima). */}
-        {pedido.origem !== 'balcao' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(pedido.status) && (
+        {/* Pedido NOSSO (não é do iFood) também pode ser cancelado depois de entregue:
+            a loja lança errado, o cliente desiste, e antes ficava preso sem saída. */}
+        {((pedido.origem !== 'balcao' && ['confirmado', 'em_preparo', 'pronto', 'saiu_entrega'].includes(pedido.status))
+          || (pedido.status === 'entregue' && !pedido.ifood_order_id)) && (
           <button
             type="button"
             onClick={() => onRecusar(pedido)}
