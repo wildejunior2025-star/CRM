@@ -1189,6 +1189,13 @@ export default function PresencialSalao() {
   // Adicionar item agora vai pro RASCUNHO (não vai pra cozinha ainda). Só quando o
   // garçom clica "Enviar para a cozinha" é que os itens são gravados e impressos.
   // `semPergunta`: leitor de código de barras — no bipe não dá pra parar e perguntar recado.
+  // Recado só faz sentido onde alguém prepara: categoria de cozinha/churrasqueira.
+  // Bebida, bar, cigarro etc. (salão/nenhum) entram direto, sem a caixinha.
+  function categoriaPedeRecado(produto) {
+    const s = catInfo?.[produto?.categoria]?.setor
+    return s === 'cozinha' || s === 'churrasqueira'
+  }
+
   function addItem(produto, semPergunta = false) {
     if (!comandaSel) return
     if (comandaSel.status === 'aguardando_conferencia') { window.alert('Conta já fechada, aguardando o ADM liberar a mesa.'); return }
@@ -1197,8 +1204,7 @@ export default function PresencialSalao() {
     // Só no celular: abre a folha do recado. No computador segue direto pro rascunho.
     // Categoria que NÃO vai pra cozinha/papel (setor 'nenhum': bebida, bala, pote
     // de sorvete) não tem recado pra escrever: entra direto com um toque.
-    const semRecado = catInfo?.[produto.categoria]?.setor === 'nenhum'
-    if (ehCelular && !semPergunta && !semRecado) { setObsProduto(produto); return }
+    if (ehCelular && !semPergunta && categoriaPedeRecado(produto)) { setObsProduto(produto); return }
     adicionarSimples(produto, '')
   }
 
@@ -4315,7 +4321,7 @@ export default function PresencialSalao() {
           grupos={compMap[montando.produto_id] ?? []}
           semObrigatorios={semObrigatorios}
           onCancelar={() => setMontando(null)}
-          pedirRecado={ehCelular}
+          pedirRecado={ehCelular && categoriaPedeRecado(montando)}
           onConfirmar={(escolhas, qtdItem, recado) => addMontado(montando, escolhas, qtdItem, recado)}
         />
       )}
