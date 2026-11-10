@@ -277,10 +277,19 @@ export default function WhatsAppConfig() {
       }
     }, 4000)
 
-    // Renova o QR a cada 25s (QR codes do WhatsApp expiram em ~30s)
+    // Pega o QR NOVO a cada 40s — o WhatsApp troca de 45 em 45 segundos
+    // (`qrTimeout: 45_000` no Evolution), igual ao WhatsApp Web no computador:
+    // o desenho muda, a sessão continua a mesma.
+    //
+    // ATENÇÃO, FOI AQUI O ESTRAGO (consertado em 10/11/2026): este intervalo
+    // chamava 'connect', e 'connect' APAGA a instância e cria outra. A cada 25
+    // segundos a tela destruía a conexão que a loja estava tentando escanear —
+    // daí o "Gerando QR Code..." rodando pra sempre — e cada ciclo que falhava
+    // deixava uma instância órfã. Em uma manhã de pareamento da Zebu foram 20;
+    // o servidor chegou a 52 instâncias pra 8 lojas. 'qr_atual' só LÊ.
     qrRefRef.current = setInterval(async () => {
       const { data } = await supabase.functions.invoke('whatsapp-connect', {
-        body: { action: 'connect' },
+        body: { action: 'qr_atual' },
       })
       if (data?.connected) {
         stopPolling()
@@ -288,10 +297,27 @@ export default function WhatsAppConfig() {
         setConnPhone(data.phone)
         setQrCode(null)
         loadConfig()
-      } else if (data?.qrcode) {
-        setQrCode(data.qrcode)
+        return
       }
-    }, 25000)
+      // Passaram os 30 QR (~22 min) ou a instância morreu: é a ÚNICA hora em
+      // que recriar faz sentido. Um 'connect', uma vez, e volta a só ler.
+      if (data?.esgotou || data?.sumiu) {
+        const { data: novo } = await supabase.functions.invoke('whatsapp-connect', {
+          body: { action: 'connect' },
+        })
+        if (novo?.connected) {
+          stopPolling()
+          setConnStatus('connected')
+          setConnPhone(novo.phone)
+          setQrCode(null)
+          loadConfig()
+        } else if (novo?.qrcode) {
+          setQrCode(novo.qrcode)
+        }
+        return
+      }
+      if (data?.qrcode) setQrCode(data.qrcode)
+    }, 40000)
   }
 
   function stopPolling() {
@@ -305,7 +331,26 @@ export default function WhatsAppConfig() {
     }
   }
 
+  // Botão de atualizar o QR na mão. Tenta LER primeiro (igual ao intervalo):
+  // na maioria das vezes já tem QR novo esperando, e ler não derruba o
+  // pareamento em andamento. Só recria se a instância tiver morrido.
   async function refreshQr() {
+    const { data: atual } = await supabase.functions.invoke('whatsapp-connect', {
+      body: { action: 'qr_atual' },
+    })
+    if (atual?.connected) {
+      stopPolling()
+      setConnStatus('connected')
+      setConnPhone(atual.phone)
+      setQrCode(null)
+      loadConfig()
+      return
+    }
+    if (atual?.qrcode && !atual.esgotou && !atual.sumiu) {
+      setQrCode(atual.qrcode)
+      return
+    }
+
     const { data } = await supabase.functions.invoke('whatsapp-connect', {
       body: { action: 'connect' },
     })

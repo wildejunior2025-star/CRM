@@ -78,6 +78,64 @@ function toInstanceName(empresaId: string) {
   return "crm" + empresaId.replace(/-/g, "")
 }
 
+// Apaga uma instância do Evolution DE VERDADE e confirma que saiu.
+//
+// POR QUE EXISTE (10/11/2026): o "connect" fazia DELETE e, 1,5 s depois,
+// create com o mesmo nome. Quando o delete não tinha terminado, o create
+// falhava — e o código inventava um nome novo com sufixo de tempo, deixando a
+// anterior pendurada em "connecting" PARA SEMPRE. O servidor chegou a 52
+// instâncias para 8 lojas; só o pareamento da Zebu de uma manhã gerou 20.
+//
+// Logout antes do delete porque instância que já começou o handshake recusa o
+// delete enquanto o socket não cai. E CONFERE o resultado em vez de confiar:
+// delete que falha calado foi a causa de todo o entulho.
+async function apagarInstancia(apiBase: string, apiKey: string, nome: string) {
+  if (!nome) return true
+  await fetch(`${apiBase}/instance/logout/${nome}`, {
+    method: "DELETE", headers: { apikey: apiKey },
+  }).catch(() => null)
+
+  for (let tentativa = 0; tentativa < 4; tentativa++) {
+    await fetch(`${apiBase}/instance/delete/${nome}`, {
+      method: "DELETE", headers: { apikey: apiKey },
+    }).catch(() => null)
+    await new Promise((r) => setTimeout(r, 900))
+    const res = await fetch(`${apiBase}/instance/connectionState/${nome}`, {
+      headers: { apikey: apiKey },
+    }).catch(() => null)
+    // 404 = não existe mais, que é o que a gente quer.
+    if (!res || res.status === 404) return true
+  }
+  console.error("[limpeza] nao consegui apagar a instancia", nome)
+  return false
+}
+
+// Varre as instâncias órfãs DESTA loja: mesmo prefixo, nenhuma conexão viva.
+// QR que não virou conexão não serve pra nada, então some. Nunca encosta em
+// instância "open", que é loja atendendo cliente agora.
+async function limparOrfasDaLoja(
+  apiBase: string, apiKey: string, empresaId: string,
+) {
+  const prefixo = toInstanceName(empresaId)
+  const res = await fetch(`${apiBase}/instance/fetchInstances`, {
+    headers: { apikey: apiKey },
+  }).catch(() => null)
+  if (!res?.ok) return []
+  const corpo = await res.json().catch(() => [])
+  const lista = Array.isArray(corpo) ? corpo : (corpo?.instances ?? [])
+  const apagadas: string[] = []
+  for (const it of lista as Record<string, unknown>[]) {
+    const i = (it.instance ?? it) as Record<string, unknown>
+    const nome = String(i.instanceName ?? i.name ?? "")
+    const estado = String(i.connectionStatus ?? i.state ?? i.status ?? "")
+    if (!nome.startsWith(prefixo)) continue
+    if (estado === "open") continue
+    if (await apagarInstancia(apiBase, apiKey, nome)) apagadas.push(nome)
+  }
+  if (apagadas.length) console.log("[limpeza] orfas apagadas:", apagadas.join(", "))
+  return apagadas
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders })
@@ -283,13 +341,20 @@ serve(async (req) => {
           }
         }
 
-        // Instância existe mas não está conectada: deleta para recriar limpa
-        await fetch(`${apiBase}/instance/delete/${instanceName}`, {
-          method: "DELETE",
-          headers: { apikey: apiKey }
-        })
-        await new Promise(r => setTimeout(r, 1500))
+        // Instância existe mas não está conectada: apaga pra recriar limpa.
+        await apagarInstancia(apiBase, apiKey, instanceName)
       }
+
+      // Varre o resto do entulho desta loja antes de criar a nova. Toda
+      // instância com o prefixo da loja e sem conexão viva é QR que não foi
+      // escaneado — não serve pra nada e só atrapalha o create.
+      await limparOrfasDaLoja(apiBase, apiKey, empresaId)
+
+      // Volta pro nome limpo da loja. O nome só ganhava sufixo quando o create
+      // falhava, e aí nunca mais voltava: a Zebu estava em
+      // "...cc20xtdun9", quinto sufixo empilhado. Aqui a loja vai parear de
+      // novo de qualquer forma, então é o momento certo de desempilhar.
+      instanceName = toInstanceName(empresaId)
 
       // Cria instância do zero
       const createRes = await fetch(`${apiBase}/instance/create`, {
@@ -307,17 +372,33 @@ serve(async (req) => {
         const createData = await createRes.json()
         qrFromCreate = createData.qrcode?.base64 ?? createData.base64 ?? null
       } else {
-        // Create falhou (ex.: a instância fantasma ainda não terminou de apagar).
-        // Não aborta: apaga de novo, espera e tenta recriar uma vez.
+        // Create falhou (quase sempre: o nome ainda está ocupado no Evolution).
         console.error("[connect] create falhou:", createRes.status, await createRes.text().catch(() => ""))
-        // A instância antiga está travada no Evolution (ex.: número que estava
-        // ligado ao Facebook/Meta). Cria com um nome NOVO e passa a usar ele.
-        instanceName = toInstanceName(empresaId) + "x" + Date.now().toString(36).slice(-5)
-        const retryRes = await fetch(`${apiBase}/instance/create`, {
+
+        // ANTES este trecho inventava na hora um nome com sufixo de tempo. Era
+        // o que enchia o servidor de entulho: o nome mudava a cada tentativa e
+        // a instância velha ficava pra trás. Agora a primeira coisa é LIBERAR
+        // o nome certo, com confirmação, e tentar de novo nele.
+        await apagarInstancia(apiBase, apiKey, instanceName)
+        let retryRes = await fetch(`${apiBase}/instance/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: apiKey },
           body: JSON.stringify({ instanceName, integration: "WHATSAPP-BAILEYS", qrcode: true })
         })
+
+        // Só se o nome certo for impossível de liberar (acontece com número que
+        // ficou preso ao Facebook/Meta) é que cai no sufixo — última saída, e
+        // avisando no log, porque é ele que cria instância sobrando.
+        if (!retryRes.ok) {
+          console.error("[connect] nome", instanceName, "nao liberou; caindo pro sufixo")
+          instanceName = toInstanceName(empresaId) + "x" + Date.now().toString(36).slice(-5)
+          retryRes = await fetch(`${apiBase}/instance/create`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: apiKey },
+            body: JSON.stringify({ instanceName, integration: "WHATSAPP-BAILEYS", qrcode: true })
+          })
+        }
+
         if (retryRes.ok) {
           const retryData = await retryRes.json()
           qrFromCreate = retryData.qrcode?.base64 ?? retryData.base64 ?? null
@@ -385,6 +466,63 @@ serve(async (req) => {
     // ─────────────────────────────────────────
     // DISCONNECT
     // ─────────────────────────────────────────
+    // QR ATUAL — só lê, não destrói nada.
+    //
+    // POR QUE EXISTE (10/11/2026): a tela renovava o QR de 25 em 25 segundos
+    // chamando "connect", e "connect" APAGA a instância e cria outra. Resultado:
+    // a conexão era destruída antes de a loja conseguir escanear (daí o
+    // "Gerando QR Code..." que rodava sem parar) e cada ciclo que falhava
+    // deixava uma instância órfã no servidor.
+    //
+    // Não precisa recriar nada pra ter QR novo: o Evolution passa
+    // `qrTimeout: 45_000` pro Baileys, então o WhatsApp manda um QR novo a cada
+    // 45 segundos NA MESMA instância — igual ao WhatsApp Web, que troca o
+    // desenho e mantém a sessão. É isso que esta ação devolve.
+    //
+    // Depois de 30 QR (QRCODE_LIMIT), ou seja ~22 minutos, o Evolution desiste:
+    // estado "refused" e sessão encerrada. Aí devolve esgotou=true e a tela
+    // pede pra gerar de novo — essa é a única hora em que recriar faz sentido.
+    if (action === "qr_atual") {
+      const stateRes = await fetch(`${apiBase}/instance/connectionState/${instanceName}`, {
+        headers: { apikey: apiKey },
+      }).catch(() => null)
+
+      // Instância não existe mais: a tela precisa chamar "connect" uma vez.
+      if (!stateRes || stateRes.status === 404) {
+        return new Response(JSON.stringify({ connected: false, sumiu: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+
+      const stateData = await stateRes.json().catch(() => ({}))
+      const estado = stateData?.instance?.state ?? stateData?.state ?? ""
+      const phone = stateData?.instance?.ownerJid?.replace(/@s\.whatsapp\.net$/, "") ?? null
+
+      // Mesmo cuidado do resto do arquivo: "open" sem número é fantasma.
+      if (estado === "open" && phone) {
+        return new Response(JSON.stringify({ connected: true, phone }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+
+      if (estado === "refused") {
+        return new Response(JSON.stringify({ connected: false, esgotou: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        })
+      }
+
+      const qrRes = await fetch(`${apiBase}/instance/connect/${instanceName}`, {
+        headers: { apikey: apiKey },
+      }).catch(() => null)
+      const qrData = qrRes?.ok ? await qrRes.json().catch(() => ({})) : {}
+      const qr = qrData?.base64 ?? qrData?.qrcode?.base64 ?? null
+
+      return new Response(
+        JSON.stringify({ connected: false, qrcode: qr, esgotou: false }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      )
+    }
+
     if (action === "disconnect") {
       await fetch(`${apiBase}/instance/logout/${instanceName}`, {
         method: "DELETE",
