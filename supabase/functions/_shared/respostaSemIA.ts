@@ -1099,7 +1099,17 @@ export function faseDoPedido(status: string, retirada: boolean, entregador: stri
   switch (status) {
     case "aguardando": return "chegou aqui e está esperando a loja confirmar"
     case "confirmado": return "está confirmado e em preparo"
-    case "pronto": return retirada ? "está pronto, pode vir buscar" : "está pronto e já vai sair pra entrega"
+    // ENTREGA não promete mais "já vai sair" (11/11/2026). O #1763 da CDBom:
+    // o robô disse "está pronto e já vai sair pra entrega" e o pedido nem
+    // pronto estava. O status "pronto" do gestor não é confiável pra isso —
+    // tanto que o aviso automático de entrega SÓ sai no despacho
+    // (whatsapp-pedido-notify, case "saiu_entrega"), nunca no "pronto".
+    // Então aqui também não se anuncia: promete só o que o sistema cumpre.
+    // RETIRADA continua igual, porque ali o "pronto" JÁ dispara o aviso
+    // "pode vir buscar" de verdade (ehProntoParaRetirar).
+    case "pronto": return retirada
+      ? "está pronto, pode vir buscar"
+      : "está em andamento aqui — a gente te avisa assim que sair pra entrega"
     case "saiu_entrega": return entregador ? `saiu pra entrega com ${entregador}` : "saiu pra entrega"
     case "entregue": return retirada ? "está marcado aqui como retirado" : "está marcado aqui como entregue"
     case "cancelado": return "aparece aqui como cancelado"
