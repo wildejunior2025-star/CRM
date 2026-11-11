@@ -560,6 +560,14 @@ export default function MinhaLoja({ secao = 'loja' }) {
     setSalvando(true)
     setErro(null)
     setSucesso(false)
+    // Saindo do "um dia por vez" pro clássico: o caixa que ficou parado aberto
+    // (as vendas de semanas apontando pra ele) é só marcado como fechado — nada é
+    // apagado — pra o clássico começar limpo no "Abrir caixa". Os dias já
+    // conferidos continuam guardados e aparecem na tela do Caixa.
+    if (empresa.caixa_por_dia && !caixaPorDia) {
+      const { error: errEnc } = await supabase.rpc('caixa_encerrar_abertos_ao_ir_pro_classico')
+      if (errEnc) { setSalvando(false); setErro(errEnc.message); return }
+    }
     // .select() de volta: sem ele, um update barrado pela RLS não dá erro —
     // afeta 0 linhas e a tela dizia "Salvo!" com nada gravado.
     const { data, error } = await supabase

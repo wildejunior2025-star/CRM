@@ -103,6 +103,12 @@ export default function Caixa() {
   const [diaRow, setDiaRow] = useState(null)        // fechamento deste dia
   const [diaVersao, setDiaVersao] = useState(0)     // sobe pra recarregar
   const [diasSemana, setDiasSemana] = useState(null) // historico no modo-dia
+  // Os dois históricos convivem: no modo-dia aparecem também os caixas abertos
+  // na mão (`caixasDaSemanaNoDia`); no clássico, também os dias já conferidos
+  // (`diasConferidos`). Só leitura — trocar a chave em Minha Loja não esconde
+  // nada do que a loja já fechou.
+  const [caixasDaSemanaNoDia, setCaixasDaSemanaNoDia] = useState([])
+  const [diasConferidos, setDiasConferidos] = useState([])
 
   const [resumosSemana, setResumosSemana] = useState(null)
   const [semanaOffset, setSemanaOffset] = useState(0)   // 0 = esta semana
@@ -561,8 +567,34 @@ export default function Caixa() {
           dias.push({ data: d, resumo: Array.isArray(r) ? (r[0] ?? null) : r, fech: porData[d] ?? null })
         }
         setDiasSemana(dias.reverse())
+        // Caixas abertos na mão nesta semana (loja que já usou o clássico).
+        // Só os FECHADOS: o que ficou aberto no modo-dia é sobra do caixa antigo
+        // e já está somado nos dias acima.
+        const { data: cx } = await supabase.from('caixas').select('*')
+          .eq('status', 'fechado')
+          .gte('aberto_em', inicio.toISOString()).lt('aberto_em', fim.toISOString())
+          .order('aberto_em', { ascending: false })
+        if (!vivo) return
+        setCaixasDaSemanaNoDia(cx ?? [])
         setCarregandoHist(false)
         return
+      }
+
+      // Dias já conferidos no modo "um dia por vez" (a loja pode ter usado antes).
+      {
+        const iniY = inicio.toLocaleDateString('sv-SE')
+        const fimY = addDia(fim.toLocaleDateString('sv-SE'), -1)
+        const { data: fechs } = await supabase.from('caixa_dia').select('*')
+          .gte('data', iniY).lte('data', fimY).not('fechado_em', 'is', null)
+          .order('data', { ascending: false })
+        if (!vivo) return
+        const conf = []
+        for (const f of (fechs ?? [])) {
+          const { data: r } = await supabase.rpc('caixa_resumo_do_dia', { p_data: f.data })
+          if (!vivo) return
+          conf.push({ data: f.data, resumo: Array.isArray(r) ? (r[0] ?? null) : r, fech: f })
+        }
+        setDiasConferidos(conf)
       }
 
       const { data, error: err } = await supabase
@@ -1791,6 +1823,85 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
           </table>
         )}
       </div>
+      )}
+
+      {/* OS DOIS HISTÓRICOS JUNTOS. A chave "um dia por vez" é só jeito de operar:
+          o que a loja já fechou do outro jeito continua aparecendo aqui, só leitura. */}
+      {!porDia && diasConferidos.length > 0 && (
+        <>
+          <h3 className="caixa-table-title" style={{ fontSize: 15, marginTop: 18 }}>
+            Dias conferidos (modo “um dia por vez”)
+          </h3>
+          <div className="data-table caixa-hist">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dia</th>
+                  <th className="caixa-amount-col">Faturamento</th>
+                  <th className="caixa-amount-col">Contado em dinheiro</th>
+                  <th className="caixa-amount-col">Diferença</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diasConferidos.map(({ data, resumo: r, fech }) => {
+                  const dif = (fech?.contado_dinheiro != null && fech?.esperado_dinheiro != null)
+                    ? Number(fech.contado_dinheiro) - Number(fech.esperado_dinheiro) : null
+                  return (
+                    <tr key={data}>
+                      <td data-label="Dia">
+                        <strong>{ddmmDeYMD(data)}</strong>{' '}
+                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                          {new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short' })}
+                        </span>
+                      </td>
+                      <td data-label="Faturamento" className="caixa-amount-col">R$ {faturamentoDe(r).toFixed(2)}</td>
+                      <td data-label="Contado em dinheiro" className="caixa-amount-col">
+                        {fech?.contado_dinheiro != null ? 'R$ ' + Number(fech.contado_dinheiro).toFixed(2) : '-'}
+                      </td>
+                      <td data-label="Diferença" className="caixa-amount-col">
+                        {dif === null ? '-' : `R$ ${dif.toFixed(2)}`}
+                      </td>
+                      <td data-label="Situação"><span className="badge badge-success">Conferido</span></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {porDia && caixasDaSemanaNoDia.length > 0 && (
+        <>
+          <h3 className="caixa-table-title" style={{ fontSize: 15, marginTop: 18 }}>
+            Caixas abertos e fechados na mão (modo clássico)
+          </h3>
+          <div className="data-table caixa-hist">
+            <table>
+              <thead>
+                <tr>
+                  <th>Abertura</th>
+                  <th>Fechamento</th>
+                  <th className="caixa-amount-col">Valor abertura</th>
+                  <th className="caixa-amount-col">Valor fechamento</th>
+                </tr>
+              </thead>
+              <tbody>
+                {caixasDaSemanaNoDia.map(c => (
+                  <tr key={c.id}>
+                    <td data-label="Abertura">{new Date(c.aberto_em).toLocaleString('pt-BR')}</td>
+                    <td data-label="Fechamento">{c.fechado_em ? new Date(c.fechado_em).toLocaleString('pt-BR') : '-'}</td>
+                    <td data-label="Valor abertura" className="caixa-amount-col">R$ {Number(c.valor_abertura || 0).toFixed(2)}</td>
+                    <td data-label="Valor fechamento" className="caixa-amount-col">
+                      {c.valor_fechamento_informado != null ? `R$ ${Number(c.valor_fechamento_informado).toFixed(2)}` : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* Total da semana — embaixo da tabela, que é onde a pergunta aparece.
