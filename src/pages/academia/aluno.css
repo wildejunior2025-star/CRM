@@ -431,3 +431,13 @@
 .al-sem-app { background: #fff3e0; color: #7a4800; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 3px; }
 .al-sem-app strong { font-size: 16px; }
 .al-sem-app span { font-size: 14px; line-height: 1.45; }
+
+/* Contato e senha do aluno, na área do professor */
+.al-contato { background: var(--al-carta); border: 1px solid var(--al-linha); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.al-contato-linha { display: flex; flex-direction: column; gap: 2px; }
+.al-contato-linha small { color: var(--al-apagado); font-size: 13px; }
+.al-contato-linha strong { font-size: 22px; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.al-contato-botoes { display: flex; gap: 8px; }
+.al-contato-botoes .al-botao { flex: 1; padding: 11px 10px; font-size: 15px; }
+.al-contato-dica { color: var(--al-apagado); font-size: 13px; line-height: 1.45; }
+.al-recado { background: var(--al-verde-fundo); color: var(--al-verde); border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }

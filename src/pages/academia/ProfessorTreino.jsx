@@ -33,6 +33,8 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
   const [modelos, setModelos] = useState(null)   // null = nao abriu a tela
   const [salvandoModelo, setSalvandoModelo] = useState(false)
   const [inicioCiclo, setInicioCiclo] = useState(aluno.microciclo_inicio || null)
+  const [contato, setContato] = useState(null)   // { final, tem_conta, entra_app }
+  const [recado, setRecado] = useState(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -67,6 +69,13 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
   }, [aluno.id, profile.empresa_id])
 
   useEffect(() => { carregar() }, [carregar])
+
+  // Só os 4 últimos do celular. O instrutor confere com o aluno na frente dele
+  // ("termina em 2505?") sem ficar com a lista de telefones da academia.
+  useEffect(() => {
+    supabase.rpc('academia_contato_do_aluno', { p_aluno: aluno.id })
+      .then(({ data }) => { if (data?.ok) setContato(data) })
+  }, [aluno.id])
 
   const treino = treinos.find(t => t.letra === letra)
   const lista = treino ? (itens[treino.id] || []) : []
@@ -255,6 +264,47 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
       setErro('Nao deu pra salvar: ' + err.message)
     }
     setSalvando(false)
+  }
+
+  // ── Contato e senha do aluno ──────────────────────────────────────────
+  //
+  // O "não consigo entrar no app" aparece aqui, com o aluno na frente dele.
+  // Mandar voltar na recepção por causa disso é perder o aluno no caminho.
+  async function trocarTelefone() {
+    const novo = window.prompt(
+      'Peça o número ao aluno e digite com DDD.'
+      + '\nEle vira o jeito de entrar no app:')
+    if (novo === null) return
+    setErro(null)
+    setRecado(null)
+    const { data, error } = await supabase.rpc('academia_trocar_telefone_aluno', {
+      p_aluno: aluno.id, p_telefone: novo,
+    })
+    if (error) return setErro(error.message)
+    if (!data?.ok) return setErro(data?.erro || 'Não deu pra trocar.')
+    const { data: c } = await supabase.rpc('academia_contato_do_aluno', { p_aluno: aluno.id })
+    if (c?.ok) setContato(c)
+    // Só promete a senha nova quando ela realmente acompanhou: quem já entrou
+    // no app tem senha própria, e o gatilho não mexe nela.
+    setRecado(data.senha_acompanhou
+      ? `Pronto. O número agora termina em ${data.final}, e é essa a senha dele no app.`
+      : `Pronto, número trocado. A senha do app continua a que ele já usava — se tiver esquecido, toque em "Redefinir a senha".`)
+  }
+
+  async function redefinirSenha() {
+    const nova = window.prompt(
+      'Senha nova do aluno — 4 números.'
+      + '\nEle usa pra entrar no app, com o telefone dele:',
+      contato?.final || '')
+    if (nova === null) return
+    setErro(null)
+    setRecado(null)
+    const { data, error } = await supabase.rpc('academia_redefinir_senha_aluno', {
+      p_aluno: aluno.id, p_senha: nova,
+    })
+    if (error) return setErro(error.message)
+    if (!data?.ok) return setErro(data?.erro || 'Não deu pra redefinir.')
+    setRecado('Senha trocada. Diga os 4 números pro aluno e peça pra ele entrar agora.')
   }
 
   // ── Modelos de treino ─────────────────────────────────────────────────
@@ -690,6 +740,35 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
           </span>
         </div>
       )}
+
+      {/* Contato e senha do app. O instrutor resolve o "não consigo entrar"
+          aqui mesmo, com o aluno na frente dele, sem mandar voltar na
+          recepção — e sem ficar com a lista de telefones da academia: o
+          número vem mascarado do servidor, ele nunca recebe o inteiro. */}
+      {contato && (
+        <div className="al-contato">
+          <span className="al-contato-linha">
+            <small>Celular do aluno</small>
+            <strong>{contato.mascara || 'não tem no cadastro'}</strong>
+          </span>
+          <span className="al-contato-botoes">
+            <button className="al-botao secundario" onClick={trocarTelefone}>
+              {contato.mascara ? 'Trocar o número' : 'Pôr o número'}
+            </button>
+            {contato.tem_conta && (
+              <button className="al-botao secundario" onClick={redefinirSenha}>
+                Redefinir a senha
+              </button>
+            )}
+          </span>
+          <small className="al-contato-dica">
+            Confira com o aluno se o fim do número é esse. É com ele que o aluno
+            entra no app.
+          </small>
+        </div>
+      )}
+
+      {recado && <div className="al-recado">{recado}</div>}
 
       {(aluno.diabetes || aluno.hipertensao || aluno.cardiopata || aluno.saude_outra) && (
         <div className="al-alerta-saude">
