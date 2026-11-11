@@ -1011,7 +1011,11 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       // faturamento. Não entra em nenhum "esperado" porque não é dinheiro que
       // caiu em lugar nenhum — o custo dele aparece no Despesas & Lucro.
       Number(r.recebimentos_cashback || 0) +
-      Number(r.vendas_fiado || 0)
+      Number(r.vendas_fiado || 0) -
+      // Fiado ANTIGO que o cliente pagou hoje: o dinheiro está dentro de
+      // dinheiro/PIX/cartão acima, mas a venda já foi contada no dia em que
+      // fechou no fiado (vendas_fiado). Contar de novo duplicava o faturamento.
+      Number(r.recebimentos_fiado || 0)
     : 0)
 
   const faturamentoTotal = faturamentoDe(resumo)
@@ -1050,7 +1054,8 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
       sangrias: soma('total_sangrias'),
       suprimentos: soma('total_suprimentos'),
       cartaoLiquido: rs.reduce((t, r) => t + cartaoLiquidoDe(r), 0),
-      total: dinheiro + pix + cartao + vale + transferencia + cashback + fiado + ifood + online + outros,
+      // menos o fiado antigo recebido: já foi contado como venda no dia que fiou
+      total: dinheiro + pix + cartao + vale + transferencia + cashback + fiado + ifood + online + outros - soma('recebimentos_fiado'),
     }
   })()
 
@@ -1368,7 +1373,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                       .join(' · ')}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>
-                    já está somado nos recebimentos acima · não é venda de hoje
+                    já está somado nos recebimentos acima · não é venda de hoje · fica fora do faturamento (a venda já foi contada quando fiou)
                   </div>
                 </div>
               )}
@@ -1588,7 +1593,7 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                   ? Number(c.valor_abertura_pix || 0) + pixDe(r) + Number(r.total_suprimentos_pix || 0) - Number(r.total_sangrias_pix || 0)
                   : 0
                 const fatTot = r && r !== 'loading'
-                  ? dinheiroDe(r) + pixDe(r) + cartaoDe(r) + valeDe(r) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0) + foraDaLojaDe(r) + Number(r.delivery_outros || 0)
+                  ? dinheiroDe(r) + pixDe(r) + cartaoDe(r) + valeDe(r) + Number(r.recebimentos_transferencia || 0) + Number(r.vendas_fiado || 0) + foraDaLojaDe(r) + Number(r.delivery_outros || 0) - Number(r.recebimentos_fiado || 0)
                   : 0
                 const dif = (r && r !== 'loading' && c.valor_fechamento_informado != null) ? Number(c.valor_fechamento_informado) - espDin : null
                 const difPix = (r && r !== 'loading' && c.valor_fechamento_pix != null) ? Number(c.valor_fechamento_pix) - espPix : null

@@ -1,0 +1,9 @@
+-- Pedido pago com SALDO do cliente (conta pré-paga) não é venda nova no caixa:
+-- o dinheiro já entrou (e foi contado) no DEPÓSITO do saldo. Antes caía no balde
+-- 'outros' ("Forma não reconhecida") e entrava no faturamento de novo = duplicava.
+-- Agora vai pro balde 'saldo', que nenhuma soma do caixa usa. Só muda a classificação;
+-- não mexe em pedido, pagamento nem extrato do cliente.
+-- (Aplicada via MCP em 11/11/2026. Mudança única nas duas definições abaixo:
+--  linha  WHEN f.forma = 'saldo' THEN 'saldo'  antes do ELSE 'outros'.)
+-- View caixa_delivery_partes e função caixa_partes_delivery_do_caixa: ver 0390
+-- e a definição ao vivo; ambas ganharam apenas essa linha no CASE do bucket.
