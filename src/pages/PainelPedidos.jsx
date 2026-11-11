@@ -11331,7 +11331,18 @@ export default function PainelPedidos() {
           {temBackupSuperAdmin && (
             <button type="button" className="pp-back-link" title="Trocar de loja"
               style={{ background: '#f59e0b', color: '#1a1200', borderColor: '#f59e0b', fontWeight: 800 }}
-              onClick={async () => { if (await voltarSuperAdmin()) window.location.href = '/escolher-loja' }}>
+              onClick={async () => {
+                if (!(await voltarSuperAdmin())) return
+                // Carregar /escolher-loja "do zero" passava pelo service worker velho e
+                // dava ERR_FAILED (só Ctrl+Shift+R, que o ignora, abria). Solta ele e o
+                // cache antes de navegar; ele se registra de novo ao carregar a tela.
+                try {
+                  const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []
+                  await Promise.all(regs.map(r => r.unregister().catch(() => false)))
+                  for (const nome of await caches.keys()) await caches.delete(nome)
+                } catch { /* segue mesmo assim */ }
+                window.location.href = '/escolher-loja'
+              }}>
               <span>Trocar de loja</span>
             </button>
           )}
