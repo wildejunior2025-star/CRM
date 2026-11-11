@@ -49,12 +49,24 @@ export default function EscolherLoja() {
       return
     }
 
+    // Entrar na loja é uma navegação "do zero" pra /painel. Passando pelo service
+    // worker velho ela dava ERR_FAILED / tela travada (só Ctrl+Shift+R abria). Solta
+    // o service worker e o cache antes; ele se registra de novo ao carregar.
+    async function soltarServiceWorker() {
+      try {
+        const regs = await navigator.serviceWorker?.getRegistrations?.() ?? []
+        await Promise.all(regs.map(r => r.unregister().catch(() => false)))
+        for (const nome of await caches.keys()) await caches.delete(nome)
+      } catch { /* segue mesmo assim */ }
+    }
+
     let tokenHash = null
     try { tokenHash = new URL(data.link).searchParams.get('token') } catch { /* link inesperado */ }
     if (tokenHash) {
       const { error: vErr } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: tokenHash })
-      if (!vErr) { window.location.href = '/painel'; return }
+      if (!vErr) { await soltarServiceWorker(); window.location.href = '/painel'; return }
     }
+    await soltarServiceWorker()
     window.location.href = data.link
   }
 
