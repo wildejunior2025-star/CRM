@@ -320,7 +320,7 @@ export default function PresencialSalao() {
   // Celular: a mesa mostra UMA coisa de cada vez — a comanda ou o cardápio.
   // No PC (1100px+) as duas colunas convivem e isto não muda nada.
   const [abaMesa, setAbaMesa] = useState('comanda')  // 'comanda' | 'add'
-  const [rodapeAberto, setRodapeAberto] = useState(false) // celular: rodapé (viagem/recado/conta/ações) recolhido por padrão
+  const [rodapeAberto, setRodapeAberto] = useState(true) // celular: rodapé (viagem/recado/conta/ações) ABERTO por padrão; quem precisa de espaço toca em "Esconder"
   const [modoPag, setModoPag] = useState('unico')   // 'unico' | 'dividir'
   // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
   // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
@@ -861,8 +861,8 @@ export default function PresencialSalao() {
   }, [abrirComandaId, comandas])
 
   const comandaSel = mesaSel ? comandaPorMesa[mesaSel.id] : null
-  // Mesa nova (ou outra) abre com o rodapé recolhido de novo.
-  useEffect(() => { setRodapeAberto(false) }, [mesaSel?.id])
+  // Mesa nova (ou outra) abre com o rodapé aberto de novo.
+  useEffect(() => { setRodapeAberto(true) }, [mesaSel?.id])
   // Rascunho é por comanda e fica salvo no navegador (sobrevive a fechar sem querer).
   const rascunhoKey = comandaSel ? 'rasc_mesa_' + comandaSel.id : null
   useEffect(() => {
