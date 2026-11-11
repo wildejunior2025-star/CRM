@@ -109,6 +109,7 @@ export default function Caixa() {
   // nada do que a loja já fechou.
   const [caixasDaSemanaNoDia, setCaixasDaSemanaNoDia] = useState([])
   const [diasConferidos, setDiasConferidos] = useState([])
+  const [diaConfAberto, setDiaConfAberto] = useState(null)   // 'YYYY-MM-DD' aberto na lista do clássico
 
   const [resumosSemana, setResumosSemana] = useState(null)
   const [semanaOffset, setSemanaOffset] = useState(0)   // 0 = esta semana
@@ -1847,8 +1848,11 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                 {diasConferidos.map(({ data, resumo: r, fech }) => {
                   const dif = (fech?.contado_dinheiro != null && fech?.esperado_dinheiro != null)
                     ? Number(fech.contado_dinheiro) - Number(fech.esperado_dinheiro) : null
+                  const aberto = diaConfAberto === data
                   return (
-                    <tr key={data}>
+                    <Fragment key={data}>
+                    <tr onClick={() => setDiaConfAberto(aberto ? null : data)} style={{ cursor: 'pointer' }}
+                      title="Toque para ver o detalhamento por forma de pagamento">
                       <td data-label="Dia">
                         <strong>{ddmmDeYMD(data)}</strong>{' '}
                         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
@@ -1862,8 +1866,48 @@ O que foi contado nesse dia é apagado e os valores voltam a ser calculados ao v
                       <td data-label="Diferença" className="caixa-amount-col">
                         {dif === null ? '-' : `R$ ${dif.toFixed(2)}`}
                       </td>
-                      <td data-label="Situação"><span className="badge badge-success">Conferido</span></td>
+                      <td data-label="Situação">
+                        <span className="badge badge-success">Conferido</span>
+                        <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 12 }}>{aberto ? '▲' : '▼'}</span>
+                      </td>
                     </tr>
+                    {aberto && (
+                      <tr>
+                        <td colSpan={5} style={{ background: 'var(--surface-hover)', padding: '12px 16px' }}>
+                          {!r ? (
+                            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Sem movimento neste dia.</span>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                              {[
+                                ['💰 Faturamento total', faturamentoDe(r)],
+                                ['💵 Recebido em dinheiro', dinheiroDe(r)],
+                                ['📱 Recebido em PIX', pixDe(r)],
+                                ['💳 Recebido em cartão', cartaoDe(r)],
+                                (creditoDe(r) > 0 ? ['↳ crédito', creditoDe(r)] : null),
+                                (debitoDe(r) > 0 ? ['↳ débito', debitoDe(r)] : null),
+                                (valeDe(r) > 0 ? ['🍽️ Recebido em vales', valeDe(r)] : null),
+                                (Number(r.delivery_ifood) > 0 ? ['🛵 iFood (pago no app)', r.delivery_ifood] : null),
+                                (Number(r.delivery_online) > 0 ? ['🌐 Pago online (Mercado Pago)', r.delivery_online] : null),
+                                (Number(r.delivery_outros) > 0 ? ['⚠️ Forma não reconhecida', r.delivery_outros] : null),
+                                (Number(r.recebimentos_transferencia) > 0 ? ['🔁 Transferência', r.recebimentos_transferencia] : null),
+                                ['🧾 Vendas no fiado', r.vendas_fiado],
+                                (Number(r.recebimentos_fiado) > 0 ? ['🤝 Fiado antigo recebido', r.recebimentos_fiado] : null),
+                                ['➖ Sangrias', r.total_sangrias],
+                                ['➕ Suprimentos', r.total_suprimentos],
+                                (fech?.esperado_dinheiro != null ? ['🪙 Esperado em dinheiro', fech.esperado_dinheiro] : null),
+                                (fech?.contado_dinheiro != null ? ['💵 Contado em dinheiro', fech.contado_dinheiro] : null),
+                              ].filter(Boolean).map(([lb, v]) => (
+                                <div key={lb} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px' }}>
+                                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{lb}</div>
+                                  <div style={{ fontSize: 16, fontWeight: 800 }}>R$ {Number(v || 0).toFixed(2)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   )
                 })}
               </tbody>
