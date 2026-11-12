@@ -123,6 +123,9 @@ export default function SuperAdminEmpresas() {
   // Modal de funcionalidades (módulos) liga/desliga por loja
   const [modulosModal, setModulosModal] = useState(null) // { id, nome }
   const [modulosForm, setModulosForm]   = useState({})   // { [key]: bool }
+  // Serviço extra, DESLIGADO por padrão (mig 0449). Fica fora de MODULOS porque lá
+  // "ausente = liberado" e aqui é o contrário: só roda onde alguém ligou.
+  const [encomendaForm, setEncomendaForm] = useState(false)
   const [savingModulos, setSavingModulos] = useState(false)
 
   // Mensalidade nova (mig 0263)
@@ -221,6 +224,7 @@ export default function SuperAdminEmpresas() {
       form[m.key] = v === false ? false : v === BLOQUEADO ? BLOQUEADO : true
     }
     setModulosForm(form)
+    setEncomendaForm(emp?.encomenda_ativa === true)
     setModulosModal({ id: emp.id, nome: emp.nome })
   }
 
@@ -229,11 +233,12 @@ export default function SuperAdminEmpresas() {
     setError(null)
     const { error } = await supabase
       .from('empresas')
-      .update({ modulos: modulosForm })
+      .update({ modulos: modulosForm, encomenda_ativa: encomendaForm })
       .eq('id', modulosModal.id)
     setSavingModulos(false)
     if (error) { setError(error.message); return }
-    setEmpresas(prev => prev.map(e => e.id === modulosModal.id ? { ...e, modulos: modulosForm } : e))
+    setEmpresas(prev => prev.map(e => e.id === modulosModal.id
+      ? { ...e, modulos: modulosForm, encomenda_ativa: encomendaForm } : e))
     setModulosModal(null)
   }
 
@@ -935,6 +940,30 @@ export default function SuperAdminEmpresas() {
                 )
               })}
             </div>
+
+            <p style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              Serviços extras (desligados por padrão)
+            </p>
+            <label
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                padding: '10px 6px', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
+                marginBottom: 20, cursor: 'pointer',
+              }}
+            >
+              <span style={{ flex: 1 }}>
+                <span style={{ display: 'block', fontWeight: 600, color: 'var(--text)', fontSize: 14 }}>Vendo sob encomenda</span>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12, marginTop: 2 }}>
+                  Cliente escolhe a data num calendário com vagas por dia (confeitaria, eventos). Só liga pra quem vende assim.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={encomendaForm}
+                onChange={(e) => setEncomendaForm(e.target.checked)}
+                style={{ width: 20, height: 20, flexShrink: 0 }}
+              />
+            </label>
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={() => setModulosModal(null)} disabled={savingModulos}>Cancelar</button>
