@@ -334,6 +334,39 @@ async function gravarAvaliacao(
     .eq("id", id)
 }
 
+/**
+ * Guarda o recado que veio DEPOIS da nota no comentário da avaliação.
+ *
+ * Mesmo caminho do `gravarAvaliacao`: casa pelo número do pedido, o mais novo,
+ * e só escreve em cima de comentário vazio — quem já falou duas vezes não tem
+ * a primeira apagada.
+ */
+async function gravarComentario(
+  supabase: Sb, empresaId: string, numero: number, texto: string,
+): Promise<void> {
+  if (!numero || !texto.trim()) return
+  const { data } = await supabase.from("pedidos_delivery")
+    .select("id").eq("empresa_id", empresaId).eq("numero_pedido", numero)
+    .is("avaliacao_comentario", null)
+    .gte("created_at", new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString())
+    .order("created_at", { ascending: false }).limit(1)
+  const id = (data as Array<Record<string, unknown>> | null)?.[0]?.id
+  if (!id) return
+  await supabase.from("pedidos_delivery")
+    .update({ avaliacao_comentario: texto.trim().slice(0, 500) })
+    .eq("id", id)
+}
+
+// O que o cliente escreve junto da nota. Elogio recebe agradecimento; crítica
+// chama gente, igual nota baixa — texto automático não resolve comida ruim.
+const RECADO_ELOGIO =
+  /\b(muito bom|bom demais|bem bom|otim\w+|excelente|delici\w+|maravilh\w+|perfeit\w+|adorei|amei|gostei|gostoso|gostosa|sabor\w+|parabens|nota 10|top|melhor|recomendo|impecavel|caprich\w+|arrasou|show)\b/
+// Só palavra que é reclamação em qualquer leitura. "Frio", "pouco" e "pequeno"
+// ficaram de fora de propósito: numa sorveteria "bem frio" é elogio, e "um
+// pouco" sozinho não quer dizer nada.
+const RECADO_CRITICA =
+  /\b(ruim|pessim\w+|horriv\w+|demorou|demorad\w+|atras\w+|errad\w+|faltou|faltand\w+|salgad\w+|sem gosto|sem sabor|azed\w+|estragad\w+|nao gostei|nao chegou|cru|crua|reclam\w+)\b/
+
 const MARCA_FECHADA = "a gente tá fechado"
 // O começo da resposta de horário com a loja aberta. Serve pra reconhecer que o
 // robô acabou de dizer isso — ver o passo 3a.
@@ -1189,11 +1222,20 @@ async function pedidoEmAndamento(
     if (!p) return null
     const status = String(p.status ?? "")
     const minutos = Number(p.minutos ?? 99999)
+    // Quanto tempo desde o AVISO do status atual (mig 0446). Pro "entregue" é
+    // o minuto em que o cliente soube — e em que o robô pediu a nota.
+    const minutosStatus = Number(p.minutos_status ?? minutos)
     if (status === "cancelado") return null
     // Entregue ainda conta por uma hora: "obrigado, chegou certinho" não é
     // cliente novo batendo na porta. Passou disso, ele pode muito bem estar
     // voltando pra pedir de novo — e aí o link é bem-vindo.
-    if (status === "entregue") return minutos <= 60 ? p : null
+    //
+    // A hora conta DA ENTREGA, não de quando ele pediu (12/11/2026). Com
+    // `minutos` (que conta do created_at), quentinha feita 14:50 e entregue
+    // 16:12 já estava "velha" de 91 minutos quando o cliente respondeu a nota
+    // às 16:22 — e levava a saudação com o cardápio em cima do elogio. Agv
+    // Grill #39; 118 vezes em 14 dias somando CDBom, Agv e Zebu.
+    if (status === "entregue") return minutosStatus <= 60 ? p : null
     // Pedido que ficou aberto de ontem não cala o robô pra sempre. O varredor
     // das 6h fecha sozinho; isto aqui é a mesma régua, por segurança.
     return minutos <= 360 ? p : null
@@ -1381,6 +1423,47 @@ export async function responderSemIA({
           `Poxa, obrigado por contar. 🙏 Nota ${nota} não é o que a gente queria pra você.${NL}` +
           "Já chamei alguém da loja pra falar com você e entender o que deu errado.",
         )
+      }
+    }
+
+    // 00b) O RECADO QUE VEM JUNTO DA NOTA.
+    //
+    //      O robô agradeceu a nota e o cliente completou: "Muito bom a comida"
+    //      (Agv Grill #39, 11/11/2026, 8 segundos depois do agradecimento).
+    //      Isso não é assunto novo — é o resto da resposta à pergunta que a
+    //      LOJA fez ("como foi sua experiência?"). Escorregava até a primeira
+    //      fala e o cliente que acabou de almoçar levava o cardápio de volta.
+    //
+    //      O texto vira o COMENTÁRIO da avaliação, que é onde ele serve: fica
+    //      do lado da nota, e a loja lê. Crítica não recebe agradecimento e
+    //      ponto final: chama gente, igual nota baixa.
+    //
+    //      Pergunta ("?") não entra aqui: "tem sobremesa?" depois da nota é
+    //      pergunta de verdade e segue o fluxo normal.
+    const agradeceuNota = /pela nota|obrigado por contar/.test(String(recentes[0]?.content ?? ""))
+    if (agradeceuNota && !mensagem.includes("?") && t.length <= 140) {
+      const critica = RECADO_CRITICA.test(t)
+      if (critica || RECADO_ELOGIO.test(t)) {
+        // O número sai do próprio pedido de nota, que ainda está aqui nas
+        // últimas falas — sem ida nova ao banco pra descobrir qual pedido era.
+        const pedidoDaNota = Number(
+          /Pedido #(\d+)/.exec(
+            String(recentes.find((m: Record<string, unknown>) =>
+              String(m.content ?? "").includes(MARCA_AVALIACAO))?.content ?? ""),
+          )?.[1] ?? 0,
+        )
+        await gravarComentario(supabase, empresaId, pedidoDaNota, mensagem)
+        // Quem escreve "muito bom" e "tava otimo" em duas mensagens não leva
+        // dois agradecimentos — o comentário já está guardado, o robô cala.
+        if (!(await reservarAviso(supabase, empresaId, phone, "recado", 60))) return false
+        if (critica) {
+          await abrirChamado(supabase, empresaId, phone, `recado na avaliação: ${mensagem}`)
+          return await responder(
+            `Obrigado por falar, isso ajuda a gente a melhorar. 🙏${NL}` +
+            "Já chamei alguém da loja pra te responder.",
+          )
+        }
+        return await responder("Que bom ler isso! 🙏 Vou passar pra equipe aqui.")
       }
     }
 
