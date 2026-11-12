@@ -936,6 +936,14 @@ function TabelaPedidos({ pedidos, taxaPlataforma, ifoodSaldos = {}, onRowClick, 
   )
 }
 
+// Lê um parâmetro da URL só se tiver o formato esperado (lixo na URL vira vazio).
+function paramDaUrl(nome, formato) {
+  try {
+    const v = new URLSearchParams(window.location.search).get(nome) || ''
+    return formato.test(v) ? v : ''
+  } catch { return '' }
+}
+
 export default function PedidosDelivery() {
   const { empresa } = useAuth()
   const [pedidos, setPedidos] = useState([])
@@ -946,8 +954,11 @@ export default function PedidosDelivery() {
   const [config] = useState(lerConfig) // so leitura: quem edita e o gestor
   const [viewMode, setViewMode] = useState(lerViewMode)
   // Nasce SEM filtro de data (mostra tudo). A pessoa escolhe o período se quiser.
-  const [dataInicio, setDataInicio] = useState('')
-  const [dataFim, setDataFim] = useState('')
+  // Exceção: a tela Avaliações abre o pedido por aqui (?busca=N&dia=aaaa-mm-dd).
+  // O dia entra porque sem período a lista só carrega os últimos 100 pedidos —
+  // pedido de duas semanas atrás não seria achado pela busca.
+  const [dataInicio, setDataInicio] = useState(() => paramDaUrl('dia', /^\d{4}-\d{2}-\d{2}$/))
+  const [dataFim, setDataFim] = useState(() => paramDaUrl('dia', /^\d{4}-\d{2}-\d{2}$/))
   // Paginação: 10 por página (a pessoa pode estender pra 30) + navegação.
   const [porPagina, setPorPagina] = useState(10)
   const [pagina, setPagina] = useState(1)
@@ -958,7 +969,7 @@ export default function PedidosDelivery() {
   const [entregadores, setEntregadores] = useState({})
   const [ifoodSaldos, setIfoodSaldos] = useState({})
   const [filtroOrigem, setFiltroOrigem] = useState('todos')
-  const [busca, setBusca] = useState('')
+  const [busca, setBusca] = useState(() => paramDaUrl('busca', /^[\w.-]{1,20}$/))
 
   // Mantém o drawer sincronizado quando o pedido é atualizado via Realtime
   useEffect(() => {

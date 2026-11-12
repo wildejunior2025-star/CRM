@@ -330,7 +330,11 @@ async function gravarAvaliacao(
   const id = (data as Array<Record<string, unknown>> | null)?.[0]?.id
   if (!id) return
   await supabase.from("pedidos_delivery")
-    .update({ avaliacao_nota: nota, avaliacao_at: new Date().toISOString() })
+    .update({
+      avaliacao_nota: nota,
+      avaliacao_at: new Date().toISOString(),
+      avaliacao_origem: "whatsapp", // tela Avaliações (mig 0448)
+    })
     .eq("id", id)
 }
 

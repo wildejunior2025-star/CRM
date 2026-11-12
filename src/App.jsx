@@ -220,6 +220,7 @@ const CadastroAdmin = lazy(() => import('./pages/CadastroAdmin'))
 const CadastroVendedor = lazy(() => import('./pages/CadastroVendedor'))
 const MinhaLoja = lazy(() => import('./pages/MinhaLoja'))
 const PedidosDelivery = lazy(() => import('./pages/PedidosDelivery'))
+const Avaliacoes = lazy(() => import('./pages/Avaliacoes'))
 const PainelPedidos = lazy(() => import('./pages/PainelPedidos'))
 const PainelEntregador = lazy(() => import('./pages/PainelEntregador'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
@@ -506,6 +507,10 @@ export default function App() {
             <Route
               path="pedidos-delivery"
               element={<ProtectedRoute roles={['admin', 'vendedor']} modulo="delivery"><PedidosDelivery /></ProtectedRoute>}
+            />
+            <Route
+              path="avaliacoes"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><Avaliacoes /></ProtectedRoute>}
             />
             <Route
               path="whatsapp"

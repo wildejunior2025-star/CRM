@@ -211,7 +211,14 @@ export default function WhatsAppConversas() {
 
   const [conversas, setConversas] = useState([]) // [{chave, phone, phones, ultima, quando, total, nome, pausado}]
   const [loading, setLoading] = useState(true)
-  const [busca, setBusca] = useState('')
+  // A tela Avaliações chega aqui com ?tel=<8 últimos dígitos> e a lista já nasce
+  // filtrada no cliente da nota.
+  const [busca, setBusca] = useState(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get('tel') || ''
+      return /^\d{8}$/.test(t) ? t : ''
+    } catch { return '' }
+  })
   const [soPausados, setSoPausados] = useState(false)
   const [busy, setBusy] = useState(null)
   const [aberta, setAberta] = useState(null)   // conversa aberta na tela

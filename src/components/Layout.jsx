@@ -96,6 +96,8 @@ const links = [
       { to: '/mensalidade', label: 'Minha mensalidade', roles: ['admin'] },
     ],
   },
+  // Notas dos clientes (mig 0448). Só o dono: tem telefone de cliente na tela.
+  { to: '/avaliacoes', label: 'Avaliações', roles: ['admin'], mod: 'delivery' },
   { group: 'Automação' },
   {
     to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin', 'vendedor'], mod: 'whatsapp',
