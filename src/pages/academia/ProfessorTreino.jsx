@@ -26,17 +26,39 @@ function Prescricao({ item, letra, onFechar, onSalvar, onEspalhar }) {
   const [indo, setIndo] = useState(false)
   const set = (k, v) => setCampos(c => ({ ...c, [k]: v }))
 
+  // Vazio quer dizer "volta a seguir as 8 semanas". É o que o professor
+  // precisa quando espalhou um método pra semana toda e depois quer outro
+  // método na perna: ele limpa aqui e manda limpar nos outros.
+  const vazio = !campos.series && !campos.repeticoes.trim()
+    && !campos.descanso_seg && !campos.metodo.trim()
+  const tinha = item.series || item.repeticoes || item.descanso_seg || item.metodo
+
   async function salvar() {
     setIndo(true)
     await onSalvar(campos)
     setIndo(false)
   }
 
+  // Apagar com o teclado do celular, letra por letra, é o que ele não
+  // conseguiu fazer. Um toque e o exercício volta ao normal.
+  async function tirar() {
+    const limpo = { series: '', repeticoes: '', descanso_seg: '', metodo: '' }
+    setCampos(limpo)
+    setIndo(true)
+    await onSalvar(limpo)
+    setIndo(false)
+  }
+
   async function copiar(alcance) {
     const onde = alcance === 'treino' ? `os outros exercícios do treino ${letra}` : 'TODOS os treinos da semana'
-    if (!window.confirm(`Copiar esta prescrição para ${onde}?
+    const pergunta = vazio
+      ? `Tirar a prescrição de ${onde}?
 
-O que já estiver escrito neles vai ser substituído.`)) return
+Eles voltam a seguir as 8 semanas.`
+      : `Copiar esta prescrição para ${onde}?
+
+O que já estiver escrito neles vai ser substituído.`
+    if (!window.confirm(pergunta)) return
     setIndo(true)
     await onEspalhar(campos, alcance)
     setIndo(false)
@@ -50,8 +72,14 @@ O que já estiver escrito neles vai ser substituído.`)) return
             onChange={e => set('series', e.target.value.replace(/\D/g, ''))} placeholder="2" />
         </label>
         <label className="al-campo">Repetições
-          <input value={campos.repeticoes} onChange={e => set('repeticoes', e.target.value)}
-            placeholder="16 + 8 pesado" />
+          <span className="al-campo-caixa">
+            <input value={campos.repeticoes} onChange={e => set('repeticoes', e.target.value)}
+              placeholder="16 + 8 pesado" />
+            {campos.repeticoes && (
+              <button type="button" className="al-campo-x" aria-label="Apagar as repetições"
+                onClick={() => set('repeticoes', '')}>✕</button>
+            )}
+          </span>
         </label>
         <label className="al-campo">Descanso
           <input inputMode="numeric" value={campos.descanso_seg}
@@ -59,14 +87,29 @@ O que já estiver escrito neles vai ser substituído.`)) return
         </label>
       </div>
 
+      {/* Era um campo com lista do navegador (datalist). No celular a listinha
+          cobria o campo e ele não conseguia apagar o que tinha escrito. Agora
+          é campo normal, com o ✕ pra limpar e os métodos de sempre em botão. */}
       <label className="al-campo">Método / forma de execução
-        <input list={`metodos-${item.id}`} value={campos.metodo}
-          onChange={e => set('metodo', e.target.value)}
-          placeholder="Progressão dupla invertida, bi-set, drop-set..." />
-        <datalist id={`metodos-${item.id}`}>
-          {METODOS.map(m => <option key={m} value={m} />)}
-        </datalist>
+        <span className="al-campo-caixa">
+          <input value={campos.metodo}
+            onChange={e => set('metodo', e.target.value)}
+            placeholder="Progressão dupla invertida, bi-set, drop-set..." />
+          {campos.metodo && (
+            <button type="button" className="al-campo-x" aria-label="Apagar o método"
+              onClick={() => set('metodo', '')}>✕</button>
+          )}
+        </span>
       </label>
+      <div className="al-metodos">
+        {METODOS.map(m => (
+          <button key={m} type="button"
+            className={`al-metodo${campos.metodo === m ? ' escolhido' : ''}`}
+            onClick={() => set('metodo', campos.metodo === m ? '' : m)}>
+            {m}
+          </button>
+        ))}
+      </div>
 
       <p className="al-prescricao-dica">
         Deixe vazio pra seguir as 8 semanas. Exemplo de progressão: séries <b>2</b>,
@@ -82,15 +125,23 @@ O que já estiver escrito neles vai ser substituído.`)) return
       </div>
 
       {/* Escrever a mesma coisa em 7 exercícios é o que faz o professor
-          desistir e voltar pro papel. Escreve uma vez e espalha. */}
+          desistir e voltar pro papel. Escreve uma vez e espalha. Com os
+          campos vazios, os mesmos botões TIRAM a prescrição dos outros. */}
       <div className="al-prescricao-copiar">
+        {tinha && (
+          <button className="al-botao texto" disabled={indo} onClick={tirar}>
+            🧹 Tirar a prescrição deste exercício
+          </button>
+        )}
         <button className="al-botao texto" disabled={indo}
           onClick={() => copiar('treino')}>
-          ⧉ Usar isto nos outros do treino {letra}
+          {vazio
+            ? `🧹 Tirar a prescrição dos outros do treino ${letra}`
+            : `⧉ Usar isto nos outros do treino ${letra}`}
         </button>
         <button className="al-botao texto" disabled={indo}
           onClick={() => copiar('todos')}>
-          ⧉ Usar isto na semana inteira
+          {vazio ? '🧹 Tirar a prescrição da semana inteira' : '⧉ Usar isto na semana inteira'}
         </button>
       </div>
     </div>
@@ -289,9 +340,11 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
       ]),
     ))
     setPrescrevendo(null)
-    setRecado(alcance === 'treino'
-      ? `Pronto. Os ${ids.length} exercícios do treino ${item.letra || letra} ficaram com essa prescrição.`
-      : `Pronto. Os ${ids.length} exercícios da semana ficaram com essa prescrição.`)
+    const onde = alcance === 'treino' ? `do treino ${item.letra || letra}` : 'da semana'
+    const nada = !limpo.series && !limpo.repeticoes && !limpo.descanso_seg && !limpo.metodo
+    setRecado(nada
+      ? `Pronto. Os ${ids.length} exercícios ${onde} voltaram a seguir as 8 semanas.`
+      : `Pronto. Os ${ids.length} exercícios ${onde} ficaram com essa prescrição.`)
   }
 
   async function remover(item) {

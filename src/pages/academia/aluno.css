@@ -453,3 +453,23 @@
 .al-prescricao-botoes .al-botao { flex: 1; padding: 10px; font-size: 15px; }
 .al-prescricao-copiar { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--al-linha); padding-top: 8px; }
 .al-prescricao-copiar .al-botao { text-align: left; padding: 8px 0; font-size: 14px; }
+
+/* O ✕ dentro do campo: apagar o que está escrito com um toque. Apagar letra
+   por letra no teclado do celular foi exatamente onde o professor travou. */
+.al-campo-caixa { position: relative; display: block; }
+.al-campo-caixa input { width: 100%; padding-right: 38px; }
+.al-campo-x {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 30px; height: 30px; border: 0; border-radius: 50%;
+  background: var(--al-linha); color: var(--al-apagado);
+  font-size: 13px; line-height: 1; cursor: pointer;
+}
+.al-campo-x:active { background: var(--al-roxo); color: #fff; }
+
+/* Os métodos de sempre em botão: toca pra pôr, toca de novo pra tirar. */
+.al-metodos { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 2px; }
+.al-metodo {
+  border: 1px solid var(--al-linha); background: #fff; color: var(--al-apagado);
+  border-radius: 999px; padding: 6px 11px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.al-metodo.escolhido { background: var(--al-roxo); border-color: var(--al-roxo); color: #fff; font-weight: 700; }
