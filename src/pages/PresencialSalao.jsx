@@ -325,6 +325,10 @@ export default function PresencialSalao() {
   // PIX online da mesa (mig 0193): a loja com Mercado Pago conectado cobra o QR
   // na tela e quem fecha a conta é o MP, quando o dinheiro cai.
   const [mpConectado, setMpConectado] = useState(false)
+  // Cobrança na maquininha Point (mig 0447): as maquininhas ativas da loja. A
+  // cobrança dela mora na mesma lista dos PIX (pixPendentes), marcada canal 'maquininha'.
+  const [maquininhas, setMaquininhas] = useState([])     // [{ id, apelido, terminal_id }]
+  const [escolhendoMaq, setEscolhendoMaq] = useState(false)
   // Os PIX esperando pagamento, de TODAS as mesas. É isto que deixa o garçom
   // gerar o QR, mostrar e ir embora atender outra mesa: a cobrança não vive numa
   // tela aberta, vive na mesa.
@@ -484,7 +488,7 @@ export default function PresencialSalao() {
       // aparecer pro atendente ("PIX 1 pago, falta o outro") -- senao ele nao
       // sabe o que ainda tem pra receber.
       supabase.from('comanda_pix_cobrancas')
-        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte')
+        .select('id, comanda_id, valor, qr_code, qr_base64, expira_em, status, parte, canal, forma, maquininha_id')
         .eq('empresa_id', empresaId).in('status', ['pendente', 'pago']),
     ])
     // Sai do "Carregando salão..." mesmo quando a leitura for descartada abaixo:
@@ -510,7 +514,7 @@ export default function PresencialSalao() {
   // Quase nunca muda: cardápio, complementos, categorias, funcionários, clientes.
   const loadCatalogo = useCallback(async () => {
     if (!empresaId) return
-    const [emp, mp, ps, gs, cat, cg, cl] = await Promise.all([
+    const [emp, mp, ps, gs, cat, cg, cl, mq] = await Promise.all([
       supabase.from('empresas').select('taxa_servico_pct, nome, presencial_sem_obrigatorios, presencial_sem_cozinha, comanda_balcao_ativa, formas_pagamento, garcom_apaga_enviado, vendedor_edita_preco').eq('id', empresaId).single(),
       // Pergunta "tem MP ligado?" pela funcao, e nao pela tabela: mercadopago_contas
       // guarda o token da loja e nao e (nem deve ser) legivel pelo navegador (mig 0194).
@@ -532,6 +536,8 @@ export default function PresencialSalao() {
         .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, preco_adicional, ordem, disponivel))'),
       // Clientes: usados só no fiado (quem fica devendo).
       supabase.from('clientes').select('id, nome, telefone').eq('empresa_id', empresaId).order('nome').limit(1000),
+      // Maquininhas que a loja ligou (Loja → Pagamento). Sem nenhuma, o botão não aparece.
+      supabase.from('maquininhas').select('id, apelido, terminal_id').eq('empresa_id', empresaId).eq('ativa', true).order('created_at'),
     ])
     if (emp.data) {
       setTaxaPct(Number(emp.data.taxa_servico_pct ?? 0))
@@ -547,6 +553,7 @@ export default function PresencialSalao() {
     }
     // Só quem conectou o Mercado Pago vê o botão de PIX online (mig 0193).
     setMpConectado(mp.data === true)
+    setMaquininhas(mq.data ?? [])
     // Cada produto escolhe se vende no salão/balcão (mig 0384).
     setProdutosTodos((ps.data ?? []).filter(p => p.vende_salao !== false))
     setGarcons(Object.fromEntries((gs.data ?? []).map(p => [p.id, p.nome])))
@@ -2584,10 +2591,67 @@ export default function PresencialSalao() {
     }
   }
 
+  // ── Cobrar na maquininha (mig 0447) ─────────────────────────────────────
+  // Manda a conta inteira pra Point da loja. Quem fecha a mesa é o aviso do
+  // Mercado Pago (ou o "conferir" de 15 em 15 s lá embaixo), nunca esta tela.
+  async function cobrarNaMaquininha(maquininhaId) {
+    if (!comandaSel || !maquininhaId) return
+    setPixMsg('')
+    setEscolhendoMaq(false)
+    setPixGerando(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('comanda-maquininha', {
+        body: {
+          acao: 'criar',
+          comanda_id: comandaSel.id,
+          maquininha_id: maquininhaId,
+          aplicar_taxa: aplicarTaxa,
+          criada_por: user?.id ?? null,
+          cliente_id: clienteSel?.id ?? comandaSel.cliente_id ?? null,
+        },
+      })
+      const motivo = data?.error ?? (error ? (await error.context?.json?.().catch(() => null))?.error : null)
+      if (motivo) { setPixMsg(`⚠️ ${motivo}`); return }
+      if (error || !data?.cobranca_id) { setPixMsg('⚠️ Não consegui mandar pra maquininha. Tente de novo.'); return }
+      setFechando(false)
+      // Recarrega ANTES de abrir: o QR/aviso em tela cheia se fecha sozinho quando
+      // a cobrança não está na lista da mesa, e ela só entra na lista aqui.
+      await loadMesas()
+      setPixAmpliado({ ...data, canal: 'maquininha' })
+    } catch {
+      setPixMsg('⚠️ Não consegui mandar pra maquininha. Tente de novo.')
+    } finally {
+      setPixGerando(false)
+    }
+  }
+
   // O cliente desistiu do PIX: cancela no MP também, senão o QR continua vivo e
   // alguém paga meia hora depois, sem conta aberta pra receber.
+  // Serve também pra cobrança da maquininha: tira o valor da tela dela.
   async function cancelarPixOnline(cobrancaId) {
     if (!cobrancaId) return
+    const cob = pixPendentes.find(x => x.id === cobrancaId)
+    if (cob?.canal === 'maquininha') {
+      const ok = await confirmar({
+        titulo: 'Cancelar a cobrança da maquininha?',
+        texto: 'O valor sai da tela da maquininha. Se o cliente já estiver passando o cartão, espere terminar.',
+        textoOk: 'Sim, cancelar',
+        textoCancelar: 'Deixa na maquininha',
+        icone: '💳',
+      })
+      if (!ok) return
+      const { data, error } = await supabase.functions.invoke('comanda-maquininha', { body: { acao: 'cancelar', cobranca_id: cobrancaId } })
+        .catch(() => ({ data: null, error: true }))
+      const motivo = data?.error ?? (error?.context ? (await error.context.json?.().catch(() => null))?.error : null)
+      if (motivo) {
+        setAvisoPix({ tipo: 'alerta', valor: Number(cob.valor), titulo: 'Não cancelou', texto: motivo })
+      } else if (data?.status === 'pago') {
+        setAvisoPix({ tipo: 'pago', valor: Number(cob.valor), titulo: 'Já tinha sido pago', texto: 'O cliente pagou antes do cancelamento. A conta fechou.' })
+      }
+      setPixAmpliado(null)
+      await loadMesas()
+      return
+    }
     const ok = await confirmar({
       titulo: 'Cancelar o PIX desta mesa?',
       texto: 'O QR para de valer na hora. Se o cliente já leu o código, avise antes de cancelar.',
@@ -2605,7 +2669,7 @@ export default function PresencialSalao() {
 
   // A conta de uma mesa que fechou sozinha (o PIX caiu com o garçom longe daqui).
   // Recebe a comanda de fora porque nesse momento ela já não é a mesa aberta.
-  async function imprimirContaDoPix(comanda) {
+  async function imprimirContaDoPix(comanda, forma = 'pix') {
     if (!comanda) return
     if (!contaSaiSozinha) return                         // a loja desligou a conta automática
     if (papelImpressora() === 'cozinha') return          // a da cozinha não tira conta
@@ -2618,7 +2682,7 @@ export default function PresencialSalao() {
       numeroMesa: mesa?.numero,
       rotulo: mesa ? null : rotuloComanda(comanda),
       itens, subtotal, taxa, total: subtotal + taxa,
-      formaPagamento: 'pix', pagamentos: [],
+      formaPagamento: forma, pagamentos: [],
       empresa: { nome: empresaNome },
     }
     if (await viaBluetooth('conta', dados)) return
@@ -2656,10 +2720,23 @@ export default function PresencialSalao() {
       // No máximo 3 por rodada: 10 mesas esperando não viram 10 chamadas de uma vez.
       for (const pix of aConferir.slice(0, 3)) {
         if (pixJaAnunciados.current.has(pix.id)) continue
-        const { data } = await supabase.functions.invoke('comanda-pix', {
+        const ehMaq = pix.canal === 'maquininha'
+        const { data } = await supabase.functions.invoke(ehMaq ? 'comanda-maquininha' : 'comanda-pix', {
           body: { acao: 'conferir', cobranca_id: pix.id },
         }).catch(() => ({ data: null }))
         if (!vivo) return
+        // Maquininha recusou / expirou / cancelaram nela: a mesa segue aberta e o
+        // garçom precisa saber JÁ, porque o cliente está ali com o cartão na mão.
+        if (ehMaq && (data?.status === 'expirado' || data?.status === 'cancelado')) {
+          pixJaAnunciados.current.add(pix.id)
+          setPixAmpliado(a => (a?.cobranca_id === pix.id ? null : a))
+          setAvisoPix({
+            tipo: 'alerta', valor: Number(pix.valor), titulo: 'Maquininha não aprovou',
+            texto: `${data?.motivo ?? 'Não aprovado.'} A mesa continua aberta: cobre de novo ou receba de outro jeito.`,
+          })
+          await loadMesas()
+          continue
+        }
         // 'liquidado' é o mesmo dinheiro: o webhook confirmou entre uma volta e
         // outra. Aqui só chega cobrança que estava PENDENTE quando a tela
         // carregou, então nos dois casos a notícia é nova.
@@ -2690,11 +2767,12 @@ export default function PresencialSalao() {
           }
 
           if (fechou) {
-            await imprimirContaDoPix(c).catch(() => { /* best-effort */ })
+            await imprimirContaDoPix(c, ehMaq ? 'cartao' : 'pix').catch(() => { /* best-effort */ })
             if (comandaSel?.id === pix.comanda_id) { setFechando(false); setMesaSel(null) }
             await loadMesas()
             setAvisoPix({
               tipo: 'pago', valor: Number(pix.valor),
+              ...(ehMaq ? { titulo: 'Maquininha aprovou' } : {}),
               texto: 'A conta fechou sozinha e a mesa já está livre.',
             })
           } else {
@@ -3188,12 +3266,15 @@ export default function PresencialSalao() {
                   }}>🔔{prontos}</span>
                 )}
                 {/* Mesa esperando PIX: quem passar pelo quadro já sabe, sem abrir. */}
-                {c && pixPendentes.some(x => x.comanda_id === c.id) && (
-                  <span style={{
-                    position: 'absolute', top: 4, left: 4, fontSize: 9, fontWeight: 800,
-                    background: '#16a34a', color: '#fff', borderRadius: 999, padding: '1px 5px',
-                  }}>⚡PIX</span>
-                )}
+                {c && pixPendentes.some(x => x.comanda_id === c.id) && (() => {
+                  const naMaq = pixPendentes.some(x => x.comanda_id === c.id && x.canal === 'maquininha' && x.status !== 'pago')
+                  return (
+                    <span style={{
+                      position: 'absolute', top: 4, left: 4, fontSize: 9, fontWeight: 800,
+                      background: naMaq ? '#0284c7' : '#16a34a', color: '#fff', borderRadius: 999, padding: '1px 5px',
+                    }}>{naMaq ? '💳MAQ' : '⚡PIX'}</span>
+                  )
+                })()}
                 <div style={{ fontSize: 14.5, fontWeight: 800, lineHeight: 1.1 }}>{mesa.is_balcao ? '🛎️ Balcão' : `Mesa ${mesa.numero}`}</div>
                 <div style={{ fontSize: 9.5, marginTop: 2, color: cor.border, fontWeight: 700 }}>{cor.label}</div>
                 {c?.para_viagem && (
@@ -3399,10 +3480,31 @@ export default function PresencialSalao() {
               {pixJaPago > 0 && pixAbertos.length > 0 && (
                 <div style={{ marginBottom: 8, padding: '8px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700,
                   border: '1px solid #22c55e', background: 'rgba(34,197,94,.12)', color: '#16a34a' }}>
-                  ✅ Já caiu {fmt(pixJaPago)} em PIX nesta mesa — falta o resto pra fechar.
+                  ✅ Já caiu {fmt(pixJaPago)} nesta mesa — falta o resto pra fechar.
                 </div>
               )}
-              {pixAbertos.map(pixDaMesa => (
+              {/* Cobrança na maquininha (mig 0447): não tem QR pra mostrar — o valor
+                  está na tela da Point. Aqui só o aviso e o botão de cancelar. */}
+              {pixAbertos.filter(x => x.canal === 'maquininha').map(cob => {
+                const maq = maquininhas.find(m => m.id === cob.maquininha_id)
+                return (
+                  <div key={cob.id} style={{ marginBottom: 12, padding: 12, borderRadius: 12,
+                    border: '1.5px solid #0ea5e9', background: 'rgba(14,165,233,.10)' }}>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>
+                      💳 {fmt(Number(cob.valor))} esperando na maquininha{maq?.apelido ? ` "${maq.apelido}"` : ''}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 2 }}>
+                      O cliente passa o cartão (ou paga o QR) na própria maquininha. Quando aprovar, a conta fecha sozinha e a mesa fica livre.
+                    </div>
+                    <button type="button" onClick={() => cancelarPixOnline(cob.id)}
+                      style={{ marginTop: 7, fontSize: 12, fontWeight: 700, padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                        border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+                      Cancelar cobrança da maquininha
+                    </button>
+                  </div>
+                )
+              })}
+              {pixAbertos.filter(x => x.canal !== 'maquininha').map(pixDaMesa => (
                 <div key={pixDaMesa.id} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: 10,
                   borderRadius: 12, border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)' }}>
                   {pixDaMesa.qr_base64 && (
@@ -4645,11 +4747,43 @@ export default function PresencialSalao() {
                     Fica fora da fileira das outras formas de propósito: as de cima o
                     atendente MARCA (ele viu o dinheiro); esta COBRA de verdade e a
                     conta fecha sozinha quando o MP confirma. */}
-                {mpConectado && pixDaMesa && modoPag === 'unico' && (
+                {pixDaMesa && modoPag === 'unico' && (
                   <div style={{ flex: '1 1 100%', padding: '9px 12px', borderRadius: 10, fontSize: 12.5, lineHeight: 1.45,
                     border: '1.5px solid #22c55e', background: 'rgba(34,197,94,.10)', color: 'var(--text)' }}>
-                    ⚡ Esta mesa já tem um <strong>PIX de {fmt(Number(pixDaMesa.valor))}</strong> esperando.
-                    Feche esta janela e o QR está na comanda. Se receber por aqui, cancele o PIX antes.
+                    {pixDaMesa.canal === 'maquininha' ? (
+                      <>💳 Esta mesa já está esperando <strong>{fmt(Number(pixDaMesa.valor))} na maquininha</strong>.
+                      Se receber por aqui, cancele a cobrança da maquininha antes (está na comanda).</>
+                    ) : (
+                      <>⚡ Esta mesa já tem um <strong>PIX de {fmt(Number(pixDaMesa.valor))}</strong> esperando.
+                      Feche esta janela e o QR está na comanda. Se receber por aqui, cancele o PIX antes.</>
+                    )}
+                  </div>
+                )}
+                {/* MAQUININHA (mig 0447) — manda a conta pra Point da loja. Igual ao
+                    PIX online: COBRA de verdade, e a mesa fecha sozinha quando o
+                    Mercado Pago avisa que aprovou. O cliente escolhe débito,
+                    crédito ou QR na própria maquininha. */}
+                {maquininhas.length > 0 && !pixDaMesa && (
+                  <button type="button"
+                    onClick={() => (maquininhas.length === 1 ? cobrarNaMaquininha(maquininhas[0].id) : setEscolhendoMaq(v => !v))}
+                    disabled={pixGerando || cashbackAplicado > 0 || faltaSel <= 0}
+                    style={{ flex: '1 1 100%', padding: '11px 0', borderRadius: 10, fontWeight: 800, fontSize: 13,
+                      cursor: (pixGerando || cashbackAplicado > 0) ? 'not-allowed' : 'pointer',
+                      border: '1.5px solid #0ea5e9', background: 'rgba(14,165,233,.12)', color: 'var(--text)',
+                      opacity: (pixGerando || cashbackAplicado > 0 || faltaSel <= 0) ? .5 : 1 }}>
+                    {pixGerando ? '💳 Mandando pra maquininha...' : `💳 Cobrar na maquininha · ${fmt(faltaSel)}`}
+                  </button>
+                )}
+                {maquininhas.length > 1 && !pixDaMesa && escolhendoMaq && !pixGerando && (
+                  <div style={{ flex: '1 1 100%', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1 1 100%', fontSize: 12, color: 'var(--text-muted)' }}>Qual maquininha?</div>
+                    {maquininhas.map((m, idx) => (
+                      <button key={m.id} type="button" onClick={() => cobrarNaMaquininha(m.id)}
+                        style={{ flex: '1 1 calc(50% - 3px)', padding: '9px 0', borderRadius: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13,
+                          border: '1.5px solid #0ea5e9', background: 'transparent', color: 'var(--text)' }}>
+                        {m.apelido || `Maquininha ${idx + 1}`}
+                      </button>
+                    ))}
                   </div>
                 )}
                 {/* Chamado com () de propósito: `onClick={cobrarPixOnline}` passaria o
@@ -4673,9 +4807,9 @@ export default function PresencialSalao() {
                       : `⚡ PIX online · cobrar ${fmt(faltaSel)} no QR`}
                   </button>
                 )}
-                {mpConectado && !pixDaMesa && cashbackAplicado > 0 && (
+                {(mpConectado || maquininhas.length > 0) && !pixDaMesa && cashbackAplicado > 0 && (
                   <div style={{ flex: '1 1 100%', fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                    Com crédito abatido o PIX online não vale — receba pelas formas de cima.
+                    Com crédito abatido o PIX online e a maquininha não valem — receba pelas formas de cima.
                   </div>
                 )}
                 {pixMsg && (
@@ -4723,8 +4857,10 @@ export default function PresencialSalao() {
                       // Casa pelo número da parte; o valor só serve pras cobranças
                       // antigas (sem parte gravada), senão duas partes iguais
                       // apontariam pro mesmo QR.
-                      const jaTem = pixDaMesaTodos.find(x => x.parte === i)
-                        ?? pixDaMesaTodos.find(x => x.parte == null && Math.abs(Number(x.valor) - alvo) < 0.005)
+                      // Só os QR: cobrança da maquininha (mig 0447) não é "o QR desta parte".
+                      const soPix = pixDaMesaTodos.filter(x => x.canal !== 'maquininha')
+                      const jaTem = soPix.find(x => x.parte === i)
+                        ?? soPix.find(x => x.parte == null && Math.abs(Number(x.valor) - alvo) < 0.005)
                       if (jaTem?.status === 'pago') {
                         return (
                           <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, fontWeight: 700,
@@ -5006,7 +5142,41 @@ export default function PresencialSalao() {
         </div>
       )}
 
-      {pixAmpliado && (
+      {/* Cobrança mandada pra maquininha (mig 0447): não tem QR, é só esperar. */}
+      {pixAmpliado?.canal === 'maquininha' && (
+        <div onClick={() => setPixAmpliado(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 1200,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 340, background: 'var(--bg)', borderRadius: 16,
+              border: '1px solid var(--border)', padding: 20, textAlign: 'center' }}>
+            <div style={{ fontSize: 40, lineHeight: 1 }}>💳</div>
+            <div style={{ fontWeight: 800, fontSize: 17, marginTop: 6 }}>Mandei pra maquininha</div>
+            <div style={{ fontSize: 26, fontWeight: 900, color: 'var(--primary)', margin: '6px 0 2px' }}>
+              {fmt(Number(pixAmpliado.valor))}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+              Leve a maquininha{pixAmpliado.maquininha && !/^[A-Z_]+__/.test(pixAmpliado.maquininha) ? ` "${pixAmpliado.maquininha}"` : ''} até o cliente.
+              Ele escolhe débito, crédito ou QR e paga ali. Quando aprovar, a conta fecha sozinha.
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.45 }}>
+              Pode fechar esta tela e continuar trabalhando: a cobrança fica na mesa.
+            </div>
+            <button type="button" onClick={() => setPixAmpliado(null)}
+              style={{ width: '100%', marginTop: 14, padding: '11px 0', borderRadius: 10, cursor: 'pointer',
+                border: 'none', background: 'var(--primary)', color: '#fff', fontWeight: 800 }}>
+              Ok
+            </button>
+            <button type="button" onClick={() => cancelarPixOnline(pixAmpliado.cobranca_id)}
+              style={{ width: '100%', marginTop: 8, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: 13 }}>
+              Cancelar a cobrança
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pixAmpliado && pixAmpliado.canal !== 'maquininha' && (
         <div onClick={() => setPixAmpliado(null)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 1200,
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>

@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabaseClient'
 import { FORMAS_PAGAMENTO, FORMAS_CARTAO, ICONE_PAGAMENTO, formasAtivas } from '../lib/constants'
 import { gerarSlug, erroDoSlug } from '../lib/slugLoja'
+import CardMaquininha from '../components/CardMaquininha'
 
 // "2,5" → 2.5, e nunca fora de 0–100 (taxa de maquineta não passa disso).
 const pctNum = (s) => Math.min(100, Math.max(0, Number(String(s ?? '').replace(',', '.')) || 0))
@@ -1226,6 +1227,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
             </button>
           )}
         </div>
+
+        <CardMaquininha empresa={empresa} refreshProfile={refreshProfile} />
 
         <div className="card" style={{ marginBottom: 16 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX (chave manual)</h2>

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { tokenPoint, lerOrder, aplicarOrder } from '../_shared/mpPoint.ts'
 
 const MP_ACCESS_TOKEN   = Deno.env.get('MP_ACCESS_TOKEN')!
 const MP_CLIENT_ID      = Deno.env.get('MP_CLIENT_ID') ?? '736904729861760'
@@ -67,6 +68,25 @@ async function tokenDoPagamento(sb: SB, paymentId: string): Promise<string> {
 Deno.serve(async (req) => {
   try {
     const body = await req.json()
+
+    // ── MAQUININHA (mig 0447): aviso "Order (Mercado Pago)" do app FWC Inter
+    // Maquininha. Não confia no corpo do aviso: lê a order de novo no MP com o
+    // token da loja dona da cobrança, e só então fecha a mesa. ──
+    if (body.type === 'order' || String(body.action ?? '').startsWith('order.')) {
+      const orderId = String(body.data?.id ?? '')
+      if (!orderId) return new Response('ok', { status: 200 })
+      const sbo = createClient(SUPABASE_URL, SUPABASE_KEY)
+      const { data: cob } = await sbo.from('comanda_pix_cobrancas')
+        .select('id, empresa_id, status, mp_order_id').eq('mp_order_id', orderId).maybeSingle()
+      if (!cob) { console.log('[point] order sem cobrança:', orderId); return new Response('ok', { status: 200 }) }
+      const token = await tokenPoint(sbo, cob.empresa_id)
+      if (!token) { console.error('[point] loja sem token:', cob.empresa_id); return new Response('ok', { status: 200 }) }
+      const { ok, order } = await lerOrder(token, orderId)
+      if (!ok) { console.error('[point] não li a order', orderId); return new Response('ok', { status: 200 }) }
+      const res = await aplicarOrder(sbo, cob, order)
+      console.log('[point] order', orderId, '→', res.status)
+      return new Response('ok', { status: 200 })
+    }
 
     if (body.type !== 'payment') return new Response('ok', { status: 200 })
 

@@ -8,6 +8,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const CLIENT_ID     = Deno.env.get('MP_CLIENT_ID') ?? '736904729861760'
 const CLIENT_SECRET = Deno.env.get('MP_CLIENT_SECRET') ?? ''
+
+// Segundo app (mig 0447): "FWC Inter Maquininha", produto Point Platform. O app
+// do PIX é de pagamentos online e o MP não deixa ele mexer em maquininha. A loja
+// conecta os dois separadamente; o `state` lembra qual dos dois era.
+const POINT_CLIENT_ID     = Deno.env.get('MP_POINT_CLIENT_ID') ?? '7353053578830333'
+const POINT_CLIENT_SECRET = Deno.env.get('MP_POINT_CLIENT_SECRET') ?? ''
+const credDo = (app: string) => app === 'point'
+  ? { id: POINT_CLIENT_ID, secret: POINT_CLIENT_SECRET }
+  : { id: CLIENT_ID, secret: CLIENT_SECRET }
 const REDIRECT_URI  = 'https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/mercadopago-oauth'
 const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -40,23 +49,40 @@ Deno.serve(async (req) => {
       .from('mercadopago_oauth_state').select('*').eq('state', state).maybeSingle()
     const back = st?.return_url || FALLBACK_BACK
     if (!st) return redirect(`${FALLBACK_BACK}?mp=erro`)
+    const app = st.app === 'point' ? 'point' : 'pix'
+    const cred = credDo(app)
+    const flag = app === 'point' ? 'mp_point' : 'mp'
 
     const tokenRes = await fetch('https://api.mercadopago.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_id: CLIENT_ID, client_secret: CLIENT_SECRET,
+        client_id: cred.id, client_secret: cred.secret,
         code, grant_type: 'authorization_code', redirect_uri: REDIRECT_URI,
       }),
     })
     const tk = await tokenRes.json()
     if (!tokenRes.ok || !tk.access_token) {
-      console.error('MP oauth token error:', JSON.stringify(tk))
+      console.error('MP oauth token error:', app, JSON.stringify(tk))
       await admin.from('mercadopago_oauth_state').delete().eq('state', state)
-      return redirect(`${back}?mp=erro`)
+      return redirect(`${back}?${flag}=erro`)
     }
 
     const expiresAt = new Date(Date.now() + Number(tk.expires_in ?? 15552000) * 1000).toISOString()
+
+    if (app === 'point') {
+      await admin.from('mercadopago_point_contas').upsert({
+        empresa_id:    st.empresa_id,
+        mp_user_id:    String(tk.user_id ?? ''),
+        access_token:  tk.access_token,
+        refresh_token: tk.refresh_token ?? null,
+        expires_at:    expiresAt,
+        updated_at:    new Date().toISOString(),
+      }, { onConflict: 'empresa_id' })
+      await admin.from('empresas').update({ mp_point_conectado: true }).eq('id', st.empresa_id)
+      await admin.from('mercadopago_oauth_state').delete().eq('state', state)
+      return redirect(`${back}?mp_point=ok`)
+    }
     await admin.from('mercadopago_contas').upsert({
       empresa_id:    st.empresa_id,
       mp_user_id:    String(tk.user_id ?? ''),
@@ -88,10 +114,11 @@ Deno.serve(async (req) => {
 
     const newState  = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '')
     const returnUrl = url.searchParams.get('return_url') || FALLBACK_BACK
-    await admin.from('mercadopago_oauth_state').insert({ state: newState, empresa_id: empresaId, return_url: returnUrl })
+    const app = url.searchParams.get('app') === 'point' ? 'point' : 'pix'
+    await admin.from('mercadopago_oauth_state').insert({ state: newState, empresa_id: empresaId, return_url: returnUrl, app })
 
     const authUrl = 'https://auth.mercadopago.com.br/authorization'
-      + `?client_id=${CLIENT_ID}`
+      + `?client_id=${credDo(app).id}`
       + '&response_type=code&platform_id=mp'
       + `&state=${newState}`
       + `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`
@@ -110,6 +137,11 @@ Deno.serve(async (req) => {
     const empresaId = profile?.empresa_id
     if (!empresaId) return json({ error: 'Empresa não encontrada' }, 400)
 
+    if (url.searchParams.get('app') === 'point') {
+      await admin.from('mercadopago_point_contas').delete().eq('empresa_id', empresaId)
+      await admin.from('empresas').update({ mp_point_conectado: false }).eq('id', empresaId)
+      return json({ ok: true }, 200)
+    }
     await admin.from('mercadopago_contas').delete().eq('empresa_id', empresaId)
     await admin.from('empresas').update({ mp_conectado: false, mp_seller_id: null }).eq('id', empresaId)
     return json({ ok: true }, 200)

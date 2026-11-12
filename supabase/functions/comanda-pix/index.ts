@@ -112,8 +112,8 @@ Deno.serve(async (req) => {
     // quem fecha a conta é a RPC, com o MP tendo dito 'approved'.
     if (acao === 'conferir') {
       const { data: cob } = await sbUser.from('comanda_pix_cobrancas')
-        .select('id, empresa_id, mp_payment_id, status, comanda_id').eq('id', body.cobranca_id).maybeSingle()
-      if (!cob) return json({ error: 'Cobrança não encontrada.' }, 404)
+        .select('id, empresa_id, mp_payment_id, status, comanda_id, canal').eq('id', body.cobranca_id).maybeSingle()
+      if (!cob || cob.canal === 'maquininha') return json({ error: 'Cobrança não encontrada.' }, 404)
       // 'liquidado' = já estava pago ANTES desta pergunta, e não acabou de cair.
       // A diferença existe por causa de tela velha: aba aberta desde antes da
       // atualização ficava anunciando "PIX recebido!" de 15 em 15 segundos por
@@ -141,8 +141,8 @@ Deno.serve(async (req) => {
     // ── Cancelar: o cliente desistiu do PIX e vai pagar de outro jeito ──────
     if (acao === 'cancelar') {
       const { data: cob } = await sbUser.from('comanda_pix_cobrancas')
-        .select('id, empresa_id, mp_payment_id, status').eq('id', body.cobranca_id).maybeSingle()
-      if (!cob) return json({ error: 'Cobrança não encontrada.' }, 404)
+        .select('id, empresa_id, mp_payment_id, status, canal').eq('id', body.cobranca_id).maybeSingle()
+      if (!cob || cob.canal === 'maquininha') return json({ error: 'Cobrança não encontrada.' }, 404)
       if (cob.status === 'pago') return json({ status: 'pago' })
 
       // Cancela também no MP: QR vivo é QR que alguém ainda pode pagar depois,
@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
     // o seu QR (mig 0195), então o que limita não é "um por mesa" — é a soma não
     // passar do total. Cobrar a mais é a loja devolvendo dinheiro depois.
     const { data: jaTem } = await sb.from('comanda_pix_cobrancas')
-      .select('id, valor, qr_code, qr_base64, expira_em, status, parte')
+      .select('id, valor, qr_code, qr_base64, expira_em, status, parte, canal')
       .eq('comanda_id', comandaId).in('status', ['pendente', 'pago'])
     const jaCobrado = (jaTem ?? []).reduce((soma: number, c: { valor: number }) => soma + Number(c.valor ?? 0), 0)
 
@@ -215,8 +215,8 @@ Deno.serve(async (req) => {
     // são DUAS cobranças legítimas de mesmo valor, e só se reaproveita o QR da
     // MESMA parte. Sem isso a segunda metade recebia o QR da primeira.
     const parte = Number.isInteger(body?.parte) ? body.parte as number : null
-    const igual = (jaTem ?? []).find((c: { status: string; valor: number; parte: number | null }) =>
-      c.status === 'pendente'
+    const igual = (jaTem ?? []).find((c: { status: string; valor: number; parte: number | null; canal?: string }) =>
+      c.status === 'pendente' && (c.canal ?? 'pix') === 'pix'
       && Math.abs(Number(c.valor) - valorCobrar) < 0.005
       && (parte === null ? (c.parte ?? null) === null : c.parte === parte))
     if (igual) {
