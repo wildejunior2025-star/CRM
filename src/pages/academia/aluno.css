@@ -441,3 +441,13 @@
 .al-contato-botoes .al-botao { flex: 1; padding: 11px 10px; font-size: 15px; }
 .al-contato-dica { color: var(--al-apagado); font-size: 13px; line-height: 1.45; }
 .al-recado { background: var(--al-verde-fundo); color: var(--al-verde); border-radius: 14px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }
+
+/* Prescrição por exercício (progressão, bi-set, drop-set...) */
+.al-receita { color: var(--al-roxo); font-weight: 700; }
+.al-prescricao-abre { background: none; border: 0; padding: 2px 0; font: inherit; font-size: 14px; color: var(--al-roxo); font-weight: 700; text-align: left; cursor: pointer; }
+.al-prescricao { background: var(--al-roxo-claro); border-radius: 14px; padding: 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.al-prescricao-grade { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 8px; }
+.al-prescricao-dica { margin: 0; font-size: 13px; line-height: 1.5; color: var(--al-apagado); }
+.al-prescricao-dica b { color: var(--al-texto); }
+.al-prescricao-botoes { display: flex; gap: 8px; }
+.al-prescricao-botoes .al-botao { flex: 1; padding: 10px; font-size: 15px; }

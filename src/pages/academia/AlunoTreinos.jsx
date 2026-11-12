@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual } from '../../lib/microciclo'
 import { ehHoje, diaDeHoje } from '../../lib/diaSemana'
 import { buscaNoYoutube } from '../../lib/videoExercicio'
+import { receita } from '../../lib/prescricao'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
 // de cada exercício — é por ele que o aluno acha o aparelho na academia.
@@ -125,7 +126,7 @@ export default function AlunoTreinos({ aluno }) {
     setUltimas(u => ({ ...u, [item.id]: { carga: limpo, data: new Date().toISOString().slice(0, 10) } }))
     setEditando(null)
     setCarga('')
-    comecarDescanso(60)
+    comecarDescanso(item.descanso_seg || 60)
   }
 
   if (treinos === null) return <p className="al-vazio">Carregando...</p>
@@ -217,6 +218,10 @@ export default function AlunoTreinos({ aluno }) {
                       {i.maquina ? `máquina ${i.maquina}` : 'peso livre'}
                       {i.observacao ? ` · ${i.observacao}` : ''}
                     </small>
+                    {/* Quando o professor prescreveu ESTE exercício, manda ele:
+                        é o caso da progressão, do bi-set, do drop-set. Sem
+                        prescrição, vale o quadro das 8 semanas lá em cima. */}
+                    {receita(i) && <small className="al-receita">{receita(i)}</small>}
                     {videos[i.exercicio_id] ? (
                       <a className="al-video" href={videos[i.exercicio_id]} target="_blank" rel="noreferrer">
                         ▶ ver como faz

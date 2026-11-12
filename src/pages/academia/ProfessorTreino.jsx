@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabaseClient'
 import { semanaAtual, hojeIso } from '../../lib/microciclo'
 import { curto } from '../../lib/diaSemana'
 import { linkDoVideo } from '../../lib/videoExercicio'
+import { receita, METODOS } from '../../lib/prescricao'
 import { useAuth } from '../../hooks/useAuth'
 
 // O professor monta o treino do aluno pelo celular, do mesmo jeito que fazia
@@ -12,6 +13,66 @@ import { useAuth } from '../../hooks/useAuth'
 const LETRAS = ['A', 'B', 'C', 'D', 'E', 'F']
 const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const VARIACOES = ['', 'H', 'UNI', 'ABERTO', 'CROSS']
+
+// O quadro de prescrever um exercício. Fica dentro da linha dele, aberto só
+// quando o professor toca — a lista continua curta pra quem não usa.
+function Prescricao({ item, onFechar, onSalvar }) {
+  const [campos, setCampos] = useState({
+    series: item.series ?? '',
+    repeticoes: item.repeticoes ?? '',
+    descanso_seg: item.descanso_seg ?? '',
+    metodo: item.metodo ?? '',
+  })
+  const [indo, setIndo] = useState(false)
+  const set = (k, v) => setCampos(c => ({ ...c, [k]: v }))
+
+  async function salvar() {
+    setIndo(true)
+    await onSalvar(campos)
+    setIndo(false)
+  }
+
+  return (
+    <div className="al-prescricao">
+      <div className="al-prescricao-grade">
+        <label className="al-campo">Séries
+          <input inputMode="numeric" value={campos.series}
+            onChange={e => set('series', e.target.value.replace(/\D/g, ''))} placeholder="2" />
+        </label>
+        <label className="al-campo">Repetições
+          <input value={campos.repeticoes} onChange={e => set('repeticoes', e.target.value)}
+            placeholder="16 + 8 pesado" />
+        </label>
+        <label className="al-campo">Descanso
+          <input inputMode="numeric" value={campos.descanso_seg}
+            onChange={e => set('descanso_seg', e.target.value.replace(/\D/g, ''))} placeholder="20" />
+        </label>
+      </div>
+
+      <label className="al-campo">Método
+        <input list={`metodos-${item.id}`} value={campos.metodo}
+          onChange={e => set('metodo', e.target.value)}
+          placeholder="Progressão, bi-set, drop-set..." />
+        <datalist id={`metodos-${item.id}`}>
+          {METODOS.map(m => <option key={m} value={m} />)}
+        </datalist>
+      </label>
+
+      <p className="al-prescricao-dica">
+        Deixe vazio pra seguir as 8 semanas. Exemplo de progressão: séries <b>2</b>,
+        repetições <b>16 + 8 pesado</b>, descanso <b>20</b>, método <b>Progressão</b> —
+        o aluno lê "2x 16 + 8 pesado · descanso 20s · Progressão".
+      </p>
+
+      <div className="al-prescricao-botoes">
+        <button className="al-botao secundario" onClick={onFechar}>Fechar</button>
+        <button className="al-botao" disabled={indo} onClick={salvar}>
+          {indo ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function ProfessorTreino({ aluno, app, onVoltar }) {
   const { profile } = useAuth()
@@ -35,6 +96,7 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
   const [inicioCiclo, setInicioCiclo] = useState(aluno.microciclo_inicio || null)
   const [contato, setContato] = useState(null)   // { final, tem_conta, entra_app }
   const [recado, setRecado] = useState(null)
+  const [prescrevendo, setPrescrevendo] = useState(null)  // item com o quadro aberto
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState(null)
 
@@ -157,6 +219,26 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
     const ex = exercicios.find(e => e.id === item.exercicio_id)
     if (!ex) return setErro('Este exercício foi apagado da lista da academia.')
     await mudarVideo(ex)
+  }
+
+  // Prescrição DESTE exercício. Até aqui as séries e repetições vinham das 8
+  // semanas e valiam pro treino inteiro — não dava pra escrever o que o
+  // professor faz na prática, tipo "2x16, descansa 20s e emenda 8 pesado".
+  // Quem fica em branco continua seguindo o microciclo, que é a maioria.
+  async function salvarPrescricao(item, campos) {
+    const limpo = {
+      series: campos.series === '' ? null : Number(campos.series),
+      repeticoes: campos.repeticoes.trim() || null,
+      descanso_seg: campos.descanso_seg === '' ? null : Number(campos.descanso_seg),
+      metodo: campos.metodo.trim() || null,
+    }
+    const { error } = await supabase.from('academia_treino_itens').update(limpo).eq('id', item.id)
+    if (error) return setErro(error.message)
+    setItens(todos => {
+      const lista = (todos[item.treino_id] || []).map(x => (x.id === item.id ? { ...x, ...limpo } : x))
+      return { ...todos, [item.treino_id]: lista }
+    })
+    setPrescrevendo(null)
   }
 
   async function remover(item) {
@@ -845,6 +927,16 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
                       {videoDe(i) ? 'trocar vídeo' : 'prender um vídeo'}
                     </button>
                   </span>
+                  <button className="al-prescricao-abre" onClick={() => setPrescrevendo(i)}>
+                    {receita(i) || '✎ séries, repetições e método'}
+                  </button>
+                  {prescrevendo?.id === i.id && (
+                    <Prescricao
+                      item={i}
+                      onFechar={() => setPrescrevendo(null)}
+                      onSalvar={campos => salvarPrescricao(i, campos)}
+                    />
+                  )}
                 </span>
                 <select value={i.variacao || ''} onChange={e => mudarVariacao(i, e.target.value)}>
                   {VARIACOES.map(v => <option key={v} value={v}>{v || '—'}</option>)}
