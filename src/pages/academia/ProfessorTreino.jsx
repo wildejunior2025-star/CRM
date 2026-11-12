@@ -16,7 +16,7 @@ const VARIACOES = ['', 'H', 'UNI', 'ABERTO', 'CROSS']
 
 // O quadro de prescrever um exercício. Fica dentro da linha dele, aberto só
 // quando o professor toca — a lista continua curta pra quem não usa.
-function Prescricao({ item, onFechar, onSalvar }) {
+function Prescricao({ item, letra, onFechar, onSalvar, onEspalhar }) {
   const [campos, setCampos] = useState({
     series: item.series ?? '',
     repeticoes: item.repeticoes ?? '',
@@ -29,6 +29,16 @@ function Prescricao({ item, onFechar, onSalvar }) {
   async function salvar() {
     setIndo(true)
     await onSalvar(campos)
+    setIndo(false)
+  }
+
+  async function copiar(alcance) {
+    const onde = alcance === 'treino' ? `os outros exercícios do treino ${letra}` : 'TODOS os treinos da semana'
+    if (!window.confirm(`Copiar esta prescrição para ${onde}?
+
+O que já estiver escrito neles vai ser substituído.`)) return
+    setIndo(true)
+    await onEspalhar(campos, alcance)
     setIndo(false)
   }
 
@@ -49,10 +59,10 @@ function Prescricao({ item, onFechar, onSalvar }) {
         </label>
       </div>
 
-      <label className="al-campo">Método
+      <label className="al-campo">Método / forma de execução
         <input list={`metodos-${item.id}`} value={campos.metodo}
           onChange={e => set('metodo', e.target.value)}
-          placeholder="Progressão, bi-set, drop-set..." />
+          placeholder="Progressão dupla invertida, bi-set, drop-set..." />
         <datalist id={`metodos-${item.id}`}>
           {METODOS.map(m => <option key={m} value={m} />)}
         </datalist>
@@ -68,6 +78,19 @@ function Prescricao({ item, onFechar, onSalvar }) {
         <button className="al-botao secundario" onClick={onFechar}>Fechar</button>
         <button className="al-botao" disabled={indo} onClick={salvar}>
           {indo ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+
+      {/* Escrever a mesma coisa em 7 exercícios é o que faz o professor
+          desistir e voltar pro papel. Escreve uma vez e espalha. */}
+      <div className="al-prescricao-copiar">
+        <button className="al-botao texto" disabled={indo}
+          onClick={() => copiar('treino')}>
+          ⧉ Usar isto nos outros do treino {letra}
+        </button>
+        <button className="al-botao texto" disabled={indo}
+          onClick={() => copiar('todos')}>
+          ⧉ Usar isto na semana inteira
         </button>
       </div>
     </div>
@@ -239,6 +262,36 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
       return { ...todos, [item.treino_id]: lista }
     })
     setPrescrevendo(null)
+  }
+
+  // Espalha a prescrição: nos outros exercícios deste treino, ou na semana
+  // inteira. Escrever o mesmo texto 7 vezes é o que faz o professor desistir
+  // e voltar pro papel — foi o que ele pediu depois de mostrar o app dele.
+  async function espalharPrescricao(item, campos, alcance) {
+    const limpo = {
+      series: campos.series === '' ? null : Number(campos.series),
+      repeticoes: campos.repeticoes.trim() || null,
+      descanso_seg: campos.descanso_seg === '' ? null : Number(campos.descanso_seg),
+      metodo: campos.metodo.trim() || null,
+    }
+    const alvos = alcance === 'treino'
+      ? (itens[item.treino_id] || [])
+      : Object.values(itens).flat()
+    const ids = alvos.map(x => x.id)
+    if (!ids.length) return
+
+    const { error } = await supabase.from('academia_treino_itens').update(limpo).in('id', ids)
+    if (error) return setErro(error.message)
+
+    setItens(todos => Object.fromEntries(
+      Object.entries(todos).map(([tid, lista]) => [
+        tid, lista.map(x => (ids.includes(x.id) ? { ...x, ...limpo } : x)),
+      ]),
+    ))
+    setPrescrevendo(null)
+    setRecado(alcance === 'treino'
+      ? `Pronto. Os ${ids.length} exercícios do treino ${item.letra || letra} ficaram com essa prescrição.`
+      : `Pronto. Os ${ids.length} exercícios da semana ficaram com essa prescrição.`)
   }
 
   async function remover(item) {
@@ -933,8 +986,10 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
                   {prescrevendo?.id === i.id && (
                     <Prescricao
                       item={i}
+                      letra={letra}
                       onFechar={() => setPrescrevendo(null)}
                       onSalvar={campos => salvarPrescricao(i, campos)}
+                      onEspalhar={(campos, alcance) => espalharPrescricao(i, campos, alcance)}
                     />
                   )}
                 </span>

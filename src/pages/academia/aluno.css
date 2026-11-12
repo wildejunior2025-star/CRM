@@ -451,3 +451,5 @@
 .al-prescricao-dica b { color: var(--al-texto); }
 .al-prescricao-botoes { display: flex; gap: 8px; }
 .al-prescricao-botoes .al-botao { flex: 1; padding: 10px; font-size: 15px; }
+.al-prescricao-copiar { display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--al-linha); padding-top: 8px; }
+.al-prescricao-copiar .al-botao { text-align: left; padding: 8px 0; font-size: 14px; }
