@@ -187,11 +187,16 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
     e.preventDefault()
     setPensando(true)
     setErro(null)
+    // O que ele escolheu vale pra ficha também: da próxima vez já vem certo,
+    // na recepção e em qualquer treino.
+    if (ia.sexo && ia.sexo !== aluno.sexo) {
+      await supabase.from('academia_alunos').update({ sexo: ia.sexo }).eq('id', aluno.id)
+    }
     const { data, error } = await supabase.functions.invoke('montar-treino', {
       body: {
         exercicios: exercicios.map(x => ({ id: x.id, nome: x.nome, grupo: x.grupo, maquina: x.maquina })),
         aluno: {
-          nome: aluno.nome, objetivo: aluno.objetivo, sexo: aluno.sexo,
+          nome: aluno.nome, objetivo: aluno.objetivo, sexo: ia.sexo || aluno.sexo,
           diabetes: aluno.diabetes, hipertensao: aluno.hipertensao,
           cardiopata: aluno.cardiopata, saude_outra: aluno.saude_outra,
         },
@@ -414,6 +419,17 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
         </header>
 
         <section className="al-bloco">
+          {/* A IA montava o mesmo treino pra homem e pra mulher: o sexo estava
+              na ficha, mas a tela do professor nem buscava esse campo, e em
+              173 dos 476 alunos ele esta vazio. Agora ele escolhe aqui, com o
+              aluno na frente, e o que escolher fica gravado na ficha. */}
+          <label className="al-campo">Treino para
+            <select value={ia.sexo} onChange={e => setIa({ ...ia, sexo: e.target.value })}>
+              <option value="">Não informar</option>
+              <option value="F">Mulher</option>
+              <option value="M">Homem</option>
+            </select>
+          </label>
           <label className="al-campo">Objetivo
             <select value={ia.objetivo} onChange={e => setIa({ ...ia, objetivo: e.target.value })}>
               <option>Emagrecer</option>
@@ -847,7 +863,7 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
         </button>
         <button
           className="al-botao secundario"
-          onClick={() => setIa({ objetivo: aluno.objetivo || 'Condicionamento geral', nivel: 'Iniciante', dias: 3, restricoes: '' })}
+          onClick={() => setIa({ objetivo: aluno.objetivo || 'Condicionamento geral', nivel: 'Iniciante', dias: 3, restricoes: '', sexo: aluno.sexo || '' })}
         >
           ✨ Montar tudo com IA
         </button>

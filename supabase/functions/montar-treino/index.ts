@@ -52,12 +52,17 @@ Deno.serve(async (req) => {
       pedido.restricoes,
     ].filter(Boolean).join(", ")
 
+    // O professor escolhe na hora pra quem e o treino; a ficha e so o padrao.
+    // Sem isso a IA montava o mesmo treino pra todo mundo, porque em boa parte
+    // dos cadastros o campo esta vazio.
+    const sexo = pedido.sexo || aluno.sexo || null
+
     const prompt = `Você é um professor de educação física montando o RASCUNHO de um treino de musculação.
 
 ALUNO
 Nome: ${aluno.nome ?? "—"}
 Idade: ${aluno.idade ?? "não informada"}
-Sexo: ${aluno.sexo === "F" ? "feminino" : aluno.sexo === "M" ? "masculino" : "não informado"}
+Sexo: ${sexo === "F" ? "feminino" : sexo === "M" ? "masculino" : "não informado"}
 Objetivo: ${pedido.objetivo ?? aluno.objetivo ?? "condicionamento geral"}
 Nível: ${pedido.nivel ?? "iniciante"}
 Dias por semana: ${pedido.dias ?? 3}
@@ -74,7 +79,12 @@ REGRAS
 5. Respeite as restrições de saúde; se houver, evite exercícios de risco e diga por quê em "observacao".
 5b. "variacao" só aceita: vazio, H (halteres), UNI (unilateral), ABERTO (pegada) ou CROSS. Dica de
    execução vai em "obs", curta (até 40 caracteres).
-6. Monte o microciclo de 8 semanas variando séries e repetições conforme o objetivo
+6. Leve o sexo em conta na ESCOLHA e na ORDEM dos exercícios, do jeito que um professor
+   faz na prática: com mulher, costuma entrar mais volume de membros inferiores e glúteo,
+   e o superior fica mais leve; com homem, mais volume de peito, costas e ombro. Isso é
+   ponto de partida, não regra: o OBJETIVO e as restrições mandam mais. Se o sexo não foi
+   informado, monte equilibrado.
+7. Monte o microciclo de 8 semanas variando séries e repetições conforme o objetivo
    (ex.: iniciante 3x12-15; hipertrofia 3-4x8-12; força 4x6-10), e marque "aumentar_peso": true
    nas semanas em que a carga deve subir. Sistema pode ser "Série única" ou "Bissérie".
 
