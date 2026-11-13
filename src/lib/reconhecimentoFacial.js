@@ -24,6 +24,14 @@ export const MARGEM_MINIMA = 0.05
 
 let carregando = null
 
+// O navegador deste aparelho tem placa de vídeo pra usar?
+function temPlacaDeVideo() {
+  try {
+    const c = document.createElement('canvas')
+    return !!(c.getContext('webgl2') || c.getContext('webgl'))
+  } catch { return false }
+}
+
 function carregarScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script')
@@ -67,6 +75,20 @@ export function carregarFaceApi(aviso = () => {}) {
       // calado. Melhor cair pro modo lento do que não funcionar.
       if (!faceapi.tf.getBackend()) {
         try { await faceapi.tf.setBackend('cpu') } catch { /* segue */ }
+      }
+      // Mas se ele caiu no processador tendo placa de vídeo, é um aluno
+      // parado na porta por nada: no processador cada leitura passa de meio
+      // segundo, na placa fica na casa dos 60 ms. Isso acontece quando o
+      // Chrome liga sem aceleração (acontece em PC de loja, depois de
+      // atualização de driver). Tenta voltar pra placa uma vez.
+      if (faceapi.tf.getBackend() === 'cpu' && temPlacaDeVideo()) {
+        aviso('Ligando a placa de vídeo...')
+        try {
+          await faceapi.tf.setBackend('webgl')
+          await comPrazo(faceapi.tf.ready(), 10, 'ligando a placa de vídeo')
+        } catch {
+          try { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready() } catch { /* segue */ }
+        }
       }
 
       const modelos = [
