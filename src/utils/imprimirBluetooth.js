@@ -162,6 +162,31 @@ async function acharCaracteristica(server) {
   return null
 }
 
+// ESQUECER A IMPRESSORA NESTE APARELHO (Saidera, 13/11/2026).
+//
+// Térmica BLE aceita UM celular por vez. Todo aparelho que já se conectou fica
+// religando sozinho pra sempre (vigia de 20s + religada ao voltar pra tela), e
+// os celulares da loja passavam a noite tomando a impressora um do outro: ela
+// conectava e caía "do nada", e o outro via "Connection attempt failed". Não
+// havia como um celular largar a impressora de vez — só limpando o navegador.
+export async function esquecerImpressora() {
+  try { localStorage.removeItem(LS_DEV) } catch { /* ok */ }
+  clearTimeout(_religarTimer); _religarTimer = null
+  const dev = _device
+  _device = null; _car = null
+  try { dev?.gatt?.disconnect() } catch { /* ok */ }
+  // Chrome: tira também a permissão do site, senão getDevices() a devolveria.
+  try { await dev?.forget?.() } catch { /* ok */ }
+  try {
+    for (const d of (await navigator.bluetooth?.getDevices?.()) ?? []) {
+      try { d.gatt?.disconnect() } catch { /* ok */ }
+      try { await d.forget?.() } catch { /* ok */ }
+    }
+  } catch { /* ok */ }
+  soltarTela()
+  marcarEstado()
+}
+
 // Precisa ser chamada a partir de um clique (gesto do usuário).
 export async function conectarImpressoraCelular() {
   if (!suporta()) throw new Error('Este navegador não tem Bluetooth. Abra pelo Chrome no Android ou pelo app FWC Gestor.')
@@ -184,6 +209,8 @@ export async function conectarImpressoraCelular() {
 export async function reconectarSilencioso() {
   if (!suporta()) return false
   if (estaConectada()) return true
+  // Celular que "esqueceu" a impressora não religa sozinho (só pelo botão Conectar).
+  if (!temImpressoraConhecida()) return false
   try {
     if (_device?.gatt) {
       ouvirQueda(_device)

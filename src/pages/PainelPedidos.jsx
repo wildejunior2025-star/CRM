@@ -3406,7 +3406,19 @@ function ImpressoraCelularPanel({ empresa }) {
     tentar()
     document.addEventListener('visibilitychange', tentar)
     window.addEventListener('focus', tentar)
-    return () => { vivo = false; document.removeEventListener('visibilitychange', tentar); window.removeEventListener('focus', tentar) }
+    // O selo "conectada" só era conferido ao abrir a tela: a impressora religava
+    // sozinha por trás (vigia do módulo, ou na hora de imprimir) e a tela seguia
+    // dizendo "Conectar impressora" com o papel saindo (Saidera, 13/11/2026).
+    // Olha o estado de verdade a cada 2s — só leitura, não tenta conectar.
+    let mod = null
+    import('../utils/imprimirBluetooth').then(m => { mod = m }).catch(() => {})
+    const olhar = setInterval(() => {
+      if (!vivo || !mod) return
+      const c = mod.estaConectada()
+      setConectada(c)
+      if (c) setNome(mod.nomeImpressora())
+    }, 2000)
+    return () => { vivo = false; clearInterval(olhar); document.removeEventListener('visibilitychange', tentar); window.removeEventListener('focus', tentar) }
   }, [])
 
   async function rodar(fn, okTxt) {
@@ -3444,6 +3456,19 @@ function ImpressoraCelularPanel({ empresa }) {
 
   const conectar = () => rodar(m => m.conectarImpressoraCelular(), 'Conectada! Agora use o botão 📱🖨️ nos pedidos.')
   const testar = () => rodar(m => m.imprimirTesteCelular(empresa || {}), 'Enviei um cupom de teste!')
+  // Larga a impressora de vez: este celular para de religar sozinho e deixa a
+  // térmica livre pro aparelho que é a estação da loja.
+  async function esquecer() {
+    if (!window.confirm('Este celular vai largar a impressora e parar de se conectar nela sozinho. Continuar?')) return
+    setBusy(true); setMsg(null)
+    try {
+      const m = await import('../utils/imprimirBluetooth')
+      await m.esquecerImpressora()
+      setConectada(false); setNome(null)
+      setMsg({ ok: true, txt: 'Pronto: este celular largou a impressora.' })
+    } catch (e) { setMsg({ ok: false, txt: e?.message || 'Falhou' }) }
+    finally { setBusy(false) }
+  }
 
   const btn = (bg, outline) => ({ padding: '10px 14px', borderRadius: 8, border: outline ? '1px solid #2563eb' : 'none', cursor: busy ? 'wait' : 'pointer', background: bg, color: outline ? '#2563eb' : '#fff', fontWeight: 800, fontSize: 13, opacity: (busy || semBt) ? .6 : 1 })
   return (
@@ -3462,6 +3487,15 @@ function ImpressoraCelularPanel({ empresa }) {
         <button type="button" disabled={busy || semBt} onClick={conectar} style={btn('#2563eb', false)}>{busy ? '…' : (conectada ? 'Reconectar' : 'Conectar impressora')}</button>
         <button type="button" disabled={busy || semBt} onClick={testar} style={btn('transparent', true)}>Imprimir teste</button>
       </div>
+      {!semBt && (
+        <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+          A impressora só aceita <b>um celular por vez</b>. Este celular não é o da impressora?{' '}
+          <button type="button" disabled={busy} onClick={esquecer}
+            style={{ background: 'none', border: 'none', padding: 0, color: '#dc2626', fontWeight: 800, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
+            Esquecer impressora neste celular
+          </button>
+        </div>
+      )}
       {nome && <div style={{ fontSize: 12, color: 'var(--text)' }}>Impressora: <b>{nome}</b></div>}
       {conectada && (
         <div style={{ fontSize: 12, lineHeight: 1.5, color: '#a16207', background: 'rgba(234,179,8,.10)', border: '1px solid #eab308', borderRadius: 8, padding: '9px 11px' }}>
