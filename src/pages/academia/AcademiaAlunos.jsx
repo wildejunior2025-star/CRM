@@ -553,6 +553,8 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   // com 12 alunos. Entao agora a tela AVISA e deixa contar de hoje.
   const [contarDeHoje, setContarDeHoje] = useState(false)
   const [jaPagouHoje, setJaPagouHoje] = useState(null)
+  // Destrava a segunda mensalidade do mesmo dia.
+  const [outroPagamento, setOutroPagamento] = useState(false)
 
   const num = t => Number(String(t).replace(',', '.')) || 0
   const totalDividido = num(valor) + num(valor2)
@@ -595,6 +597,9 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
   async function confirmar(e) {
     e.preventDefault()
     if (gravando.current) return
+    if (jaPagouHoje && !outroPagamento) {
+      return setErro('Esta pessoa já pagou hoje. Se for outro pagamento mesmo, marque a caixinha acima.')
+    }
     const v1 = num(valor)
     const v2 = num(valor2)
     if (!v1 || v1 <= 0) return setErro('Coloque o valor que o aluno pagou.')
@@ -636,24 +641,48 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
             : <>Vence {aluno.vencimento ? dataBr(aluno.vencimento) : 'sem data'} → passa a vencer <b>{dataBr(novoVencimento)}</b></>}
         </p>
 
-        {/* Ja recebemos dessa pessoa hoje: quase sempre e o segundo clique. */}
+        {/* Ja recebemos dessa pessoa hoje: quase sempre e o segundo clique.
+            Era so um aviso e dava pra confirmar por cima — e foi o que
+            aconteceu. Agora tranca: so destrava quem marcar que e outro
+            pagamento mesmo. */}
         {jaPagouHoje && (
           <div className="ac-erro">
             Já foi recebido {dinheiro(jaPagouHoje.valor)} desta pessoa hoje, às{' '}
             {new Date(jaPagouHoje.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
-            Se for o mesmo pagamento, feche esta tela — confirmar de novo soma mais um mês.
+            Se for o mesmo pagamento, <b>feche esta tela</b> — confirmar de novo soma mais um mês.
+            <label className="ac-check" style={{ marginTop: 8 }}>
+              <input type="checkbox" checked={outroPagamento}
+                onChange={e => setOutroPagamento(e.target.checked)} />
+              É outro pagamento, pode somar mais um mês
+            </label>
           </div>
         )}
 
-        {/* Ainda nao venceu: avisa, porque somar em cima de data empurrada na
-            mao joga o aluno dois meses pra frente sem ninguem notar. */}
-        {aindaTemPrazo && !jaPagouHoje && (
+        {/* Pagou antes de vencer. Era uma caixinha escrita "perde os dias que
+            faltam", que ninguem sabia se marcava ou nao. Agora sao as duas
+            contas lado a lado, cada uma mostrando em que dia o aluno fica —
+            quem recebe escolhe vendo o resultado. */}
+        {aindaTemPrazo && (
           <div className="ac-aviso">
-            Essa pessoa ainda tem <b>{diasQueFaltam} dias</b> pagos (até {dataBr(aluno.vencimento)}).
-            <label className="ac-check" style={{ marginTop: 8 }}>
-              <input type="checkbox" checked={contarDeHoje} onChange={e => setContarDeHoje(e.target.checked)} />
-              Contar a partir de hoje (perde os dias que faltam)
-            </label>
+            Pagou adiantado: ainda faltam <b>{diasQueFaltam} dias</b> (vence {dataBr(aluno.vencimento)}).
+            <div className="ac-escolha">
+              <label className={`ac-opcao${contarDeHoje ? '' : ' marcada'}`}>
+                <input type="radio" name="contagem" checked={!contarDeHoje}
+                  onChange={() => setContarDeHoje(false)} />
+                <span>
+                  <b>Somar no vencimento</b>
+                  <small>Não perde os dias — vence {dataBr(somarMeses(aluno.vencimento, meses, data))}</small>
+                </span>
+              </label>
+              <label className={`ac-opcao${contarDeHoje ? ' marcada' : ''}`}>
+                <input type="radio" name="contagem" checked={contarDeHoje}
+                  onChange={() => setContarDeHoje(true)} />
+                <span>
+                  <b>Contar de hoje</b>
+                  <small>Perde os {diasQueFaltam} dias — vence {dataBr(somarMeses(null, meses, data))}</small>
+                </span>
+              </label>
+            </div>
           </div>
         )}
 
@@ -708,7 +737,9 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
           <button type="button" className="btn btn-secondary" onClick={() => onFechar(false)} disabled={salvando}>
             {primeira ? 'Não pagou ainda' : 'Cancelar'}
           </button>
-          <button className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando...' : 'Confirmar pagamento'}</button>
+          <button className="btn btn-primary" disabled={salvando || (!!jaPagouHoje && !outroPagamento)}>
+            {salvando ? 'Salvando...' : 'Confirmar pagamento'}
+          </button>
         </div>
       </form>
     </div>
