@@ -1619,7 +1619,7 @@ export default function DeliveryLoja() {
         ) : categorias.length === 0 && semCategoria.length === 0 ? (
           <div className="dloja-empty">
             <IconImage />
-            <p>{filtroEstoqueBaixo ? 'Nenhum produto com estoque baixo.' : 'Nenhum produto disponível para delivery.'}</p>
+            <p>{cardapioVazioEnc ? '👆 Escolha uma das opções acima para ver o cardápio.' : filtroEstoqueBaixo ? 'Nenhum produto com estoque baixo.' : 'Nenhum produto disponível para delivery.'}</p>
             {filtroEstoqueBaixo && (
               <button className="dloja-cat-nav-btn" style={{ marginTop: 12 }} onClick={() => setFiltroEstoqueBaixo(false)}>
                 Ver todos
