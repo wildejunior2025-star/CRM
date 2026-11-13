@@ -971,11 +971,33 @@ export default function DeliveryLoja() {
   // Loja de encomenda (mig 0452) FECHADA: o link só mostra o que se pode
   // encomendar. Lanche/pastel fora do horário é vitrine de coisa que ninguém
   // consegue pedir. Só vale com a chave ligada; nas outras lojas nada muda.
-  const foraDoHorarioSoEnc = encomendaLigada && !lojaAberta
+  // Dois botões no topo (Pedir agora / Encomendar para uma data): cada um mostra
+  // só o seu grupo. Loja fechada vai direto pra encomenda. A última escolha do
+  // cliente fica guardada neste aparelho, só como conveniência.
+  const chaveModoEnc = 'dloja_modo_enc_' + (loja?.id ?? '')
+  const [modoEncEscolhido, setModoEncEscolhido] = useState(null)
+  useEffect(() => {
+    if (!loja?.id) return
+    try {
+      const v = localStorage.getItem(chaveModoEnc)
+      if (v === 'agora' || v === 'encomenda') setModoEncEscolhido(v)
+    } catch { /* sem armazenamento: segue o padrão */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loja?.id])
+  const modoEnc = !lojaAberta ? 'encomenda' : (modoEncEscolhido || 'agora')
+  const escolherModoEnc = (m) => {
+    setModoEncEscolhido(m)
+    setCatAberta(null)
+    try { localStorage.setItem(chaveModoEnc, m) } catch { /* ok */ }
+  }
+  const foraDoHorarioSoEnc = encomendaLigada && modoEnc === 'encomenda'
+  const soLanche = encomendaLigada && modoEnc === 'agora'
   const produtosFiltrados = useMemo(() => (filtroEstoqueBaixo
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)
-    : produtos).filter(p => !foraDoHorarioSoEnc || p.sob_encomenda === true),
-  [produtos, filtroEstoqueBaixo, foraDoHorarioSoEnc])
+    : produtos)
+    .filter(p => !foraDoHorarioSoEnc || p.sob_encomenda === true)
+    .filter(p => !soLanche || p.sob_encomenda !== true),
+  [produtos, filtroEstoqueBaixo, foraDoHorarioSoEnc, soLanche])
 
   // Agrupa por categoria UMA vez. Antes cada categoria varria a lista inteira
   // (`filter` dentro do `map`): no depósito eram 19 categorias × 4 mil itens =
@@ -1040,6 +1062,8 @@ export default function DeliveryLoja() {
   // clicou no link DAQUELE item, então a tela do produto já vem aberta — rolar
   // até o card e deixar ele clicar de novo é um passo a mais à toa.
   function irParaProduto(p, abrirSempre = false) {
+    // Produto de encomenda pedido por link/atalho: troca pro grupo certo.
+    if (p?.sob_encomenda === true && encomendaLigada) setModoEncEscolhido('encomenda')
     if (!p) return
     // Rola até o card antes de abrir: quando o cliente fechar a tela, ele cai
     // no produto dentro do cardápio e não lá no topo.
@@ -1425,6 +1449,24 @@ export default function DeliveryLoja() {
           )}
         </div>
       </div>
+
+      {encomendaLigada && (
+        <div className="dloja-modo-enc" role="tablist" aria-label="Tipo de pedido">
+          <button type="button" role="tab" aria-selected={modoEnc === 'agora'}
+            className={'dloja-modo-enc-btn' + (modoEnc === 'agora' ? ' ativo' : '')}
+            disabled={!lojaAberta}
+            onClick={() => escolherModoEnc('agora')}>
+            <span className="dloja-modo-enc-titulo">🛵 Pedir agora</span>
+            <small>{lojaAberta ? 'Lanches e bebidas' : 'Fechado no momento'}</small>
+          </button>
+          <button type="button" role="tab" aria-selected={modoEnc === 'encomenda'}
+            className={'dloja-modo-enc-btn' + (modoEnc === 'encomenda' ? ' ativo' : '')}
+            onClick={() => escolherModoEnc('encomenda')}>
+            <span className="dloja-modo-enc-titulo">🎂 Encomendar</span>
+            <small>Bolos, doces e kits para uma data</small>
+          </button>
+        </div>
+      )}
 
       {/* ── Barra de categorias (some durante a busca) ── */}
       {!buscaTrim && (
