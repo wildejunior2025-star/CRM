@@ -26,8 +26,8 @@ let carregando = null
 
 // Qual placa de vídeo o navegador está usando de verdade. Em PC de loja o
 // Chrome às vezes diz "webgl" mas por baixo é o SwiftShader, que é a placa
-// imitada no processador — e aí cada leitura passa de meio segundo. O nome
-// aparece no diagnóstico da recepção, pra dar pra saber sem ir até lá.
+// imitada no processador — e aí cada leitura passa de meio segundo. Só
+// aparece no diagnóstico do canto da tela; não muda nada no reconhecimento.
 export function placaDeVideo() {
   try {
     const c = document.createElement('canvas')
@@ -83,14 +83,6 @@ export function carregarFaceApi(aviso = () => {}) {
       if (!faceapi.tf.getBackend()) {
         try { await faceapi.tf.setBackend('cpu') } catch { /* segue */ }
       }
-      // TIRADO em 13/11/2026, no mesmo dia em que entrou. A ideia era: se o
-      // aparelho caiu no processador tendo placa de vídeo, forçar a placa,
-      // que é ~10x mais rápida. O problema é que quando o tensorflow NÃO
-      // escolhe a placa sozinho é porque ela não serve pra ele — e forçar
-      // deixa a conta rodando num lugar quebrado, que não dá erro: devolve
-      // número sem sentido. O resultado é a câmera não reconhecer NINGUÉM,
-      // que foi o que aconteceu no celular. Quem escolhe o motor é o
-      // tensorflow; a gente só mostra qual foi, no diagnóstico.
 
       const modelos = [
         ['Baixando o detector (2 de 4)...', faceapi.nets.tinyFaceDetector, 'baixando o detector'],
@@ -216,23 +208,6 @@ function distancia(a, b) {
     soma += d * d
   }
   return Math.sqrt(soma)
-}
-
-// As 4 fotos do cadastro têm que ser do MESMO rosto.
-//
-// 13/11/2026: 11 alunos tinham no cadastro uma foto que não era a cara
-// deles — a 0,5 ou mais de todas as outras do próprio cadastro. Acontece
-// quando alguém passa atrás na hora da captura, ou quando a primeira sai
-// antes da pessoa se ajeitar. E foto errada no cadastro é um ímã: leitura
-// ruim de qualquer um pode cair perto dela, e a catraca abre no nome de
-// quem não está ali. Foi o que aconteceu com o "eduardo".
-//
-// Fotos do mesmo rosto, tiradas seguidas, ficam entre 0,10 e 0,25. Então
-// 0,4 já é folga grande: quem não tem NENHUMA companheira dentro disso não
-// é a mesma pessoa e não entra.
-export function amostrasQueCombinam(lista, limite = 0.4) {
-  if (lista.length < 2) return lista
-  return lista.filter((a, i) => lista.some((b, j) => j !== i && distancia(a, b) <= limite))
 }
 
 // As leituras que ficam guardadas no aluno são SÓ as do cadastro. Até
