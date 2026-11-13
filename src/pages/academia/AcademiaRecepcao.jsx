@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual, acharRostos,
+  GIRO_LADO,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -285,6 +286,17 @@ export default function AcademiaRecepcao() {
         }
         triagem = false
         setAjuste(null)
+
+        // Rosto virado nao vale como leitura. O cadastro ja recusa amostra de
+        // lado pelo mesmo motivo: de lado a digital do rosto sai torta e pode
+        // cair perto de qualquer um. Foi o que liberou a pessoa errada em
+        // 13/11. Aqui nao zera o contador — so nao conta, e tenta de novo.
+        if (Math.abs(r.giro) > GIRO_LADO) {
+          setAjuste('Olhe pra câmera')
+          await esperar(0)
+          continue
+        }
+
         const achado = acharAluno(r.descritor, alunosRef.current)
         if (achado) {
           setDiag(d => ({ ...d, dist: achado.distancia, margem: achado.margem }))
