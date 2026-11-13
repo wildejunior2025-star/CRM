@@ -84,6 +84,9 @@
 .cp2-periodo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .cp2-chip { padding: 7px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; }
 .cp2-chip.ativo { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cp2-periodo-custom { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: -4px 0 14px; font-size: 13px; color: var(--text-muted); }
+.cp2-periodo-custom label { display: inline-flex; align-items: center; gap: 6px; }
+.cp2-periodo-custom input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card, transparent); color: var(--text); font: inherit; }
 .cp2-periodo-total { margin-left: auto; font-size: 14px; color: var(--text-muted); }
 .cp2-periodo-total strong { color: var(--text); font-size: 17px; }
 

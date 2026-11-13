@@ -91,7 +91,10 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
   const [erro, setErro] = useState(null)
   const [aviso, setAviso] = useState(null)
   const [aba, setAba] = useState('pagar')               // 'pagar' | 'receber' | 'pago'
-  const [periodo, setPeriodo] = useState('mes')         // só na aba "Já pago"
+  const [periodo, setPeriodo] = useState('mes')         // só na aba "Já pago": hoje | mes | mes_passado | custom | tudo
+  // Período personalizado (aba "Já pago"): do dia `de` ao dia `ate`, inclusive.
+  const [de, setDe] = useState('')
+  const [ate, setAte] = useState('')
   const [catAberta, setCatAberta] = useState(null)      // categoria aberta na aba "Já pago"
   const [form, setForm] = useState(null)
   const [baixaDe, setBaixaDe] = useState(null)
@@ -108,12 +111,17 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
     setTimeout(() => setAviso((a) => (a && a.texto === texto ? null : a)), 5000)
   }, [])
 
+  // Quitadas vêm só dos últimos 180 dias; um período personalizado que começa
+  // antes disso puxa mais histórico (senão a lista viria incompleta sem aviso).
+  const corteBase = somaDias(ymd(new Date()), -180)
+  const corteCarga = periodo === 'custom' && /^\d{4}-\d{2}-\d{2}$/.test(de) && de < corteBase ? de : corteBase
+
   const carregar = useCallback(async () => {
     if (!empresaId) return
     setErro(null)
     try {
-      // Abertas: todas. Quitadas: só dos últimos 180 dias.
-      const corte = somaDias(ymd(new Date()), -180)
+      // Abertas: todas. Quitadas: só dos últimos 180 dias (ou desde o início do período personalizado).
+      const corte = corteCarga
       const dados = await fetchAll(() => supabase.from('contas_financeiras').select('*')
         .eq('empresa_id', empresaId)
         .or(`status.eq.aberta,vencimento.gte.${corte}`)
@@ -149,7 +157,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
     } finally {
       setCarregando(false)
     }
-  }, [empresaId])
+  }, [empresaId, corteCarga])
 
   useEffect(() => { carregar() }, [carregar])
   useEffect(() => {
@@ -197,9 +205,11 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
   // ── aba "Já pago": pra onde foi o dinheiro ──
   const pago = useMemo(() => {
     // 'hoje' (AGV, 28/10/2026): o dono queria ver só o que saiu no dia, não o mês inteiro.
+    const dia = (c) => String(c.pago_em || c.vencimento || '').slice(0, 10)
     const dentro = (c) => (periodo === 'tudo' ? true
-      : periodo === 'hoje' ? (c.pago_em || c.vencimento) === hoje
-        : doMes(c, periodo === 'mes' ? mesAtual : mesPassado))
+      : periodo === 'hoje' ? dia(c) === hoje
+        : periodo === 'custom' ? (!de || dia(c) >= de) && (!ate || dia(c) <= ate)
+          : doMes(c, periodo === 'mes' ? mesAtual : mesPassado))
     const lista = [...contas, ...sangrias].filter((c) => c.tipo === 'pagar' && Number(c.valor_pago) > 0 && dentro(c))
       .sort((a, b) => (b.pago_em || b.vencimento).localeCompare(a.pago_em || a.vencimento))
     // Cada conta soma pelo que foi PAGO e, se foi uma nota quebrada por categoria, pelo rateio dela.
@@ -222,7 +232,7 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
       return { ...f, cats: cs, valor: cs.reduce((s, g) => s + g.valor, 0) }
     }).filter((f) => f.cats.length).sort((a, b) => b.valor - a.valor)
     return { lista, total, familias }
-  }, [contas, sangrias, periodo, hoje, mesAtual, mesPassado])
+  }, [contas, sangrias, periodo, hoje, mesAtual, mesPassado, de, ate])
 
   const sugestoes = useMemo(() => {
     const pessoas = { pagar: new Set(), receber: new Set() }
@@ -387,11 +397,22 @@ export default function ContasPagarReceberV2({ empresaId, onAbrirFiado, onTelaAn
               {aba === 'pago' && (
                 <>
                   <div className="cp2-periodo">
-                    {[['hoje', 'Hoje'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['tudo', 'Tudo']].map(([id, lb]) => (
-                      <button key={id} type="button" className={`cp2-chip ${periodo === id ? 'ativo' : ''}`} onClick={() => { setPeriodo(id); setCatAberta(null) }}>{lb}</button>
+                    {[['hoje', 'Hoje'], ['mes', 'Este mês'], ['mes_passado', 'Mês passado'], ['custom', 'Personalizado'], ['tudo', 'Tudo']].map(([id, lb]) => (
+                      <button key={id} type="button" className={`cp2-chip ${periodo === id ? 'ativo' : ''}`}
+                        onClick={() => {
+                          setPeriodo(id); setCatAberta(null)
+                          // Abre já com o mês corrente marcado, pra não aparecer em branco.
+                          if (id === 'custom' && !de && !ate) { setDe(`${mesAtual}-01`); setAte(hoje) }
+                        }}>{lb}</button>
                     ))}
                     <span className="cp2-periodo-total">Total <strong>{brl(pago.total)}</strong></span>
                   </div>
+                  {periodo === 'custom' && (
+                    <div className="cp2-periodo-custom">
+                      <label>De <input type="date" value={de} max={ate || undefined} onChange={(e) => setDe(e.target.value)} /></label>
+                      <label>Até <input type="date" value={ate} min={de || undefined} onChange={(e) => setAte(e.target.value)} /></label>
+                    </div>
+                  )}
 
                   {pago.familias.length === 0 ? (
                     <div className="card cpr-vazio cpr-vazio-pequeno">
