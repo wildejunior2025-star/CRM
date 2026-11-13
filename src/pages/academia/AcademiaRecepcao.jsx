@@ -251,8 +251,12 @@ export default function AcademiaRecepcao() {
           desconhecidas++
           if (desconhecidas === DESCONHECIDO_LEITURAS && Date.now() > cartaoAte) {
             cartaoAtualId = null
+            // Sem som aqui, de proposito. Rosto desconhecido e quase sempre
+            // quem passou na frente da camera sem querer entrar: visita,
+            // entregador, o proprio aluno de costas. O bipe grave de barrado
+            // tocava a toa e assustava quem nem estava usando a catraca. O
+            // aviso continua na tela, que e pra recepcao ver.
             mostrar({ desconhecido: true })
-            bipe('nao')
           }
         }
         // Já reconheceu alguém e está só confirmando? Emenda a próxima
