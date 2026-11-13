@@ -1052,7 +1052,7 @@ export default function DeliveryPedido() {
                 </h2>
                 {ehDividido(pedido) && (
                   <p className="dpd-pix-aviso" style={{ marginTop: 0 }}>
-                    O resto você paga na entrega:{' '}
+                    O resto você paga {retirada ? 'na retirada' : 'na entrega'}:{' '}
                     {partesPagamento(pedido).filter(x => x.forma !== 'pix')
                       .map(x => `R$ ${fmt(x.valor)} no ${nomeForma(x.forma)}`).join(' + ')}.
                   </p>

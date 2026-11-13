@@ -3304,7 +3304,7 @@ export default function DeliveryCheckout() {
                     )}
                     {dividindo && formasEscolhidas.includes('pix') && (
                       <div style={{ marginTop: 6, fontSize: 12.5, opacity: .85, lineHeight: 1.5 }}>
-                        Você paga a parte do PIX agora, pelo QR. O resto é na entrega.
+                        Você paga a parte do PIX agora, pelo QR. O resto é {tipo === 'retirada' ? 'na retirada' : 'na entrega'}.
                       </div>
                     )}
                   </div>
