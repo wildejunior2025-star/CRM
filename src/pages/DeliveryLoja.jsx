@@ -239,6 +239,9 @@ export default function DeliveryLoja() {
   // Itens/sabores que saíram da sacola porque a loja pausou depois que o
   // cliente montou. Vira aviso na tela — não pode sumir calado.
   const [sacolaAjustada, setSacolaAjustada] = useState(null)
+  // Aviso de encomenda (mig 0452): lanche e encomenda não vão no mesmo pedido.
+  // Só existe em loja com a chave "Vendo sob encomenda" ligada.
+  const [avisoEnc, setAvisoEnc] = useState('')
   const [tentativa, setTentativa] = useState(0)
   const drawerRef = useRef(null)
   const [filtroEstoqueBaixo, setFiltroEstoqueBaixo] = useState(false)
@@ -376,7 +379,7 @@ export default function DeliveryLoja() {
       // fetchAll pagina: loja de deposito passa de 4 mil itens e o PostgREST corta
       // em 1000 por request — sem isso a vitrine perdia produto sem avisar ninguem.
       const produtosData = await lerOuFalhar(() => fetchAll(() => supabase.from('produtos')
-        .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo, destaque')
+        .select('id, nome, descricao, preco:preco_venda, preco_promocional, faixas_preco, foto_url, categoria, ordem, disponivel_delivery, estoque_minimo, destaque, qtd_minima')
         .eq('empresa_id', lojaData.id)
         .eq('ativo', true)
         .eq('disponivel_delivery', true)
@@ -446,7 +449,7 @@ export default function DeliveryLoja() {
       // Ordem personalizada + horário de disponibilidade das categorias
       const { data: catData } = await supabase
         .from('categorias')
-        .select('nome, ordem, hora_inicio, hora_fim, dias_semana, oculta_online, faixas_preco')
+        .select('nome, ordem, hora_inicio, hora_fim, dias_semana, oculta_online, faixas_preco, sob_encomenda')
         .eq('empresa_id', lojaData.id)
       // Categoria "só no salão" (mig 0328): não vai pra Loja Online.
       const ocultas = new Set((catData ?? []).filter(c => c.oculta_online).map(c => c.nome))
@@ -456,6 +459,12 @@ export default function DeliveryLoja() {
       const faixasCat = mapaFaixasCategoria(catData)
       setCatsFaixa(faixasCat)
       if (faixasCat.size) produtosFinal = produtosFinal.map(p => comFaixaDaCategoria(p, faixasCat))
+      // Encomenda (mig 0452): marca o produto que vende por data. Loja sem a
+      // chave ligada não marca nada, e o cardápio segue idêntico.
+      if (lojaData.encomenda_ativa) {
+        const encCats = new Set((catData ?? []).filter(c => c.sob_encomenda).map(c => c.nome))
+        if (encCats.size) produtosFinal = produtosFinal.map(p => (encCats.has(p.categoria) ? { ...p, sob_encomenda: true } : p))
+      }
       const ordemMap = {}
       const horarioMap = {}
       const diasMap = {}
@@ -648,8 +657,35 @@ export default function DeliveryLoja() {
     return () => document.removeEventListener('keydown', onKey)
   }, [drawerOpen])
 
+  // ── Encomenda (mig 0452) ─────────────────────────────────────────────────
+  // Tudo daqui só age em loja com a chave "Vendo sob encomenda" ligada; nas
+  // outras `encomendaLigada` é falso e as funções abaixo não mudam nada.
+  const encomendaLigada = !!loja?.encomenda_ativa
+  const prodDoItem = (item) => produtos.find(p => String(p.id) === String(item?.id))
+  // Mínimo de unidades do produto (1 = sem mínimo).
+  const minimoDoProduto = (prod) => (encomendaLigada ? Math.max(1, Number(prod?.qtd_minima) || 1) : 1)
+  // Lanche e encomenda não vão no mesmo pedido: a encomenda tem data e entrada
+  // pelo PIX, o lanche sai na hora. Avisa e não deixa misturar.
+  function conflitoEncomenda(prod) {
+    if (!encomendaLigada) return false
+    const ja = Object.values(carrinho)
+    if (!ja.length) return false
+    const encNovo = prod?.sob_encomenda === true
+    if (!ja.some(i => (prodDoItem(i)?.sob_encomenda === true) !== encNovo)) return false
+    setAvisoEnc(encNovo
+      ? 'Encomenda (bolos, doces, kits...) é pedida separada do lanche. Finalize o pedido da sua sacola e depois faça a encomenda.'
+      : 'Sua sacola tem uma encomenda (bolos, doces, kits...). Ela é pedida separada do lanche: finalize a encomenda primeiro e depois peça o lanche.')
+    return true
+  }
+  useEffect(() => {
+    if (!avisoEnc) return
+    const t = setTimeout(() => setAvisoEnc(''), 7000)
+    return () => clearTimeout(t)
+  }, [avisoEnc])
+
   // Produto simples (sem complementos) — chave = id do produto
   function addOne(prod) {
+    if (conflitoEncomenda(prod)) return
     const key = String(prod.id)
     adicionarAoCarrinho(prod, prod.preco)
     // Degrau 2: botou na sacola. É o degrau que separa "não gostou do
@@ -657,7 +693,8 @@ export default function DeliveryLoja() {
     // lugar nenhum, porque a sacola vive dentro do celular do cliente.
     marcarEtapa(loja?.id, 'sacola', prod.preco)
     setCarrinho(prev => {
-      const qtd = (prev[key]?.quantidade ?? 0) + 1
+      // Produto com mínimo (ex.: 20 trufas) entra já com o mínimo.
+      const qtd = prev[key] ? prev[key].quantidade + 1 : minimoDoProduto(prod)
       return {
         ...prev,
         [key]: {
@@ -675,12 +712,14 @@ export default function DeliveryLoja() {
 
   // Abrir a tela de complementos conta como "viu o produto" no funil da Meta
   function abrirProduto(prod) {
+    if (conflitoEncomenda(prod)) return
     verProduto(prod)
     setOptProduto(prod)
   }
 
   // Produto com complementos — chave = id + opções escolhidas (combos distintos = linhas distintas)
   function addCombo(prod, selecoes, precoUnit, qtdItem = 1, observacao = '') {
+    if (!refazendo && conflitoEncomenda(prod)) return
     // A chave leva a QUANTIDADE junto: sem isso "500 uva" e "100 uva" cairiam na
     // mesma linha do carrinho e uma apagaria a outra.
     const key = selecoes.length
@@ -799,7 +838,7 @@ export default function DeliveryLoja() {
       if (!item || qtdTravada(item)) return prev
       const next = { ...prev }
       if (qtd <= 0) delete next[key]
-      else next[key] = comPrecoDaFaixa(item, qtd)
+      else next[key] = comPrecoDaFaixa(item, Math.max(qtd, minimoDoProduto(prodDoItem(item))))
       return next
     })
   }
@@ -809,7 +848,10 @@ export default function DeliveryLoja() {
   // e já com o preço da faixa, sem passar pelo preço de unidade.
   function definirQtdProduto(prod, n) {
     const key = String(prod.id)
-    const qtd = Math.max(0, Math.floor(Number(n) || 0))
+    // Com mínimo (ex.: 20 trufas) a quantidade digitada nunca fica abaixo dele.
+    const bruta = Math.max(0, Math.floor(Number(n) || 0))
+    const qtd = bruta > 0 ? Math.max(bruta, minimoDoProduto(prod)) : 0
+    if (qtd > 0 && !carrinho[key] && conflitoEncomenda(prod)) return
     setCarrinho(prev => {
       const next = { ...prev }
       if (qtd <= 0) { delete next[key]; return next }
@@ -831,7 +873,8 @@ export default function DeliveryLoja() {
       if (!item) return prev
       const next = { ...prev }
       if (qtdTravada(item)) { delete next[key]; return next }   // só sai inteiro
-      if (item.quantidade <= 1) delete next[key]
+      // Com mínimo (ex.: 20 trufas) não existe "19": passou do mínimo pra baixo, a linha sai.
+      if (item.quantidade <= Math.max(1, minimoDoProduto(prodDoItem(item)))) delete next[key]
       else next[key] = comPrecoDaFaixa(item, item.quantidade - 1)
       return next
     })
@@ -1085,6 +1128,11 @@ export default function DeliveryLoja() {
   // do dia e da hora acontece no checkout, onde a grade da loja é consultada.
   const agendamentoLigado = !!loja?.agendamento_ativo
   const podePedir = lojaAberta || agendamentoLigado
+  // Sacola só de encomenda (mig 0452) fecha mesmo com a loja fechada: a data é
+  // escolhida no checkout, e quem encomenda um bolo não depende do balcão aberto.
+  const sacolaSoEnc = encomendaLigada && itens.length > 0
+    && itens.every(i => prodDoItem(i)?.sob_encomenda === true)
+  const podeFinalizar = podePedir || sacolaSoEnc
 
   // Define categoria ativa inicial
   useEffect(() => {
@@ -1244,6 +1292,8 @@ export default function DeliveryLoja() {
         taxaEntrega,
         // Fechada = o checkout já abre no modo agendar (não tem "pra agora").
         lojaAberta,
+        // Sacola só de encomenda: o checkout pede a data e a entrada pelo PIX.
+        encomenda: sacolaSoEnc,
         telefone: telefoneDoLink,
       },
     })
@@ -1402,6 +1452,20 @@ export default function DeliveryLoja() {
           {agendamentoLigado
             ? ' Dá pra montar seu pedido agora e agendar pra quando a loja abrir. 🗓️'
             : ' Você pode ver o cardápio, mas não é possível fazer pedidos.'}
+          {encomendaLigada && ' Encomendas (bolos, doces, kits) podem ser feitas a qualquer hora. 🎂'}
+        </div>
+      )}
+
+      {/* Lanche e encomenda não se misturam (mig 0452). Fixo no alto: o aviso
+          nasce de um toque no "+", e o cliente pode estar no meio da página. */}
+      {avisoEnc && (
+        <div role="alert" onClick={() => setAvisoEnc('')} style={{
+          position: 'fixed', top: 12, left: 12, right: 12, zIndex: 3300, maxWidth: 520, margin: '0 auto',
+          padding: '12px 14px', borderRadius: 12, background: '#1f1235', color: '#fff',
+          border: '1px solid rgba(167,139,250,.7)', boxShadow: '0 10px 30px rgba(0,0,0,.35)',
+          fontSize: 14, lineHeight: 1.45, cursor: 'pointer',
+        }}>
+          {avisoEnc}
         </div>
       )}
 
@@ -1709,9 +1773,9 @@ export default function DeliveryLoja() {
                 <button
                   className="dloja-btn-finalizar"
                   onClick={handleFinalizar}
-                  disabled={!podePedir}
+                  disabled={!podeFinalizar}
                 >
-                  {lojaAberta ? 'Finalizar pedido' : (agendamentoLigado ? '🗓️ Agendar pedido' : 'Loja fechada')}
+                  {sacolaSoEnc ? '🎂 Escolher a data da encomenda' : (lojaAberta ? 'Finalizar pedido' : (agendamentoLigado ? '🗓️ Agendar pedido' : 'Loja fechada'))}
                 </button>
               )}
             </div>
@@ -1822,7 +1886,7 @@ export default function DeliveryLoja() {
           produto={optProduto}
           draftKey={draftKey}
           rascunho={preMarcado ?? (rascunho?.produtoId === optProduto.id ? rascunho.sel : null)}
-          lojaAberta={podePedir}
+          lojaAberta={podePedir || optProduto.sob_encomenda === true}
           onClose={() => { limparRascunho(); setPreMarcado(null); setRefazendo(null); setOptProduto(null) }}
           onConfirm={(selecoes, precoUnit, qtdItem, obs) => { limparRascunho(); setPreMarcado(null); addCombo(optProduto, selecoes, precoUnit, qtdItem, obs) }}
         />
@@ -2003,8 +2067,10 @@ function FotoAmpliada({ src, alt, onFechar }) {
   )
 }
 
-function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onMais, onRemove, onQtd }) {
+function ProdutoCard({ produto, quantidade, lojaAberta: lojaAbertaProp, onAdd, onMais, onRemove, onQtd }) {
   const [zoom, setZoom] = useState(false)
+  // Encomenda (mig 0452) vende com a loja fechada: o dia é escolhido no checkout.
+  const lojaAberta = lojaAbertaProp || produto.sob_encomenda === true
   const temComplementos = produto.complementos?.length > 0
   // Preço "a partir de" = base + as opções obrigatórias mais baratas (o `min` de
   // cada grupo). Sem isso, um produto "monte" com base 0 (ex: pizza 2 sabores)
@@ -2072,6 +2138,11 @@ function ProdutoCard({ produto, quantidade, lojaAberta, onAdd, onMais, onRemove,
         </p>
         {/* Chamada do atacado no card: o desconto só vende se o cliente souber
             que ele existe antes de abrir o produto. */}
+        {produto.sob_encomenda && (
+          <p style={{ fontSize: 11.5, color: '#a78bfa', fontWeight: 700, margin: '2px 0 0' }}>
+            🎂 Sob encomenda{Number(produto.qtd_minima) > 1 ? ` · mínimo ${produto.qtd_minima} un.` : ''} · a data você escolhe no pedido
+          </p>
+        )}
         {faixa1 && (
           <p style={{ fontSize: 11.5, color: '#22c55e', fontWeight: 700, margin: '2px 0 0' }}>
             {faixa1.qtd_min}+ por R$ {fmt(faixa1.preco)} cada

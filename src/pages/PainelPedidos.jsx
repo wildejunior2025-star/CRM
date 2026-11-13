@@ -5763,7 +5763,9 @@ function CardMini({ pedido, onClick, onExpirado, onAvancar, onVoltar, onAtribuir
         )}
         {pedido.agendado_para && (
           <span className="pp-mini-badge" style={{ background: 'rgba(14,165,233,.18)', color: '#0284c7' }}>
-            🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true, ate: pedido.agendado_ate })}
+            {pedido.encomenda
+              ? `🎂 ENCOMENDA ${rotuloAgendado(pedido.agendado_para, { comData: true }).replace(/\s+(das|às)\s.*$/, '')}`
+              : <>🗓️ {rotuloAgendado(pedido.agendado_para, { comData: true, ate: pedido.agendado_ate })}</>}
           </span>
         )}
         <span className="pp-mini-badge" style={{ background: oc.bg, color: oc.color }}>{oc.label}</span>

@@ -1,0 +1,28 @@
+/* Calendário da encomenda (mig 0452). Cores por rgba/currentColor: vale no
+   tema claro e no escuro do checkout e do gestor sem depender de variável. */
+.cal-enc { width: 100%; max-width: 420px; user-select: none; }
+.cal-enc-topo {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; font-size: 15px;
+}
+.cal-enc-seta {
+  width: 34px; height: 34px; border-radius: 10px; border: 1px solid rgba(127,127,127,.45);
+  background: transparent; color: inherit; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.cal-enc-seta:disabled { opacity: .3; cursor: default; }
+.cal-enc-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-enc-semana { margin-bottom: 4px; font-size: 11.5px; font-weight: 700; opacity: .6; text-align: center; }
+.cal-enc-dia {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 46px; padding: 2px 0; border-radius: 10px; font: inherit; color: inherit;
+  border: 1px solid rgba(127,127,127,.3); background: transparent; cursor: pointer;
+}
+.cal-enc-num { font-size: 14.5px; font-weight: 700; line-height: 1.1; }
+.cal-enc-sub { font-size: 9.5px; line-height: 1.1; opacity: .8; margin-top: 1px; }
+.cal-enc-dia--livre { border-color: rgba(34,197,94,.65); background: rgba(34,197,94,.12); }
+.cal-enc-dia--lotado { border-color: rgba(239,68,68,.45); background: rgba(239,68,68,.08); text-decoration: line-through; opacity: .6; }
+.cal-enc-dia--fechado, .cal-enc-dia--passado { opacity: .35; }
+.cal-enc-dia:disabled { cursor: not-allowed; }
+.cal-enc-dia--sel { background: #7c3aed; border-color: #7c3aed; color: #fff; opacity: 1; text-decoration: none; }
+.cal-enc-legenda { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 12px; opacity: .85; }
+.cal-enc-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }

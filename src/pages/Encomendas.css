@@ -1,0 +1,23 @@
+/* /encomendas — cores só pelos tokens do tema (claro/escuro). */
+.enc-colunas { display: grid; grid-template-columns: minmax(300px, 440px) 1fr; gap: 12px; margin-bottom: 12px; align-items: start; }
+@media (max-width: 800px) { .enc-colunas { grid-template-columns: 1fr; } }
+.enc-pagina .card { margin-bottom: 12px; }
+.enc-titulo { font-size: 16px; margin: 0 0 10px; color: var(--text); }
+.enc-dica { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.5; max-width: 620px; }
+.enc-campo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; font-size: 13px; color: var(--text); }
+.enc-campo input { max-width: 220px; }
+.enc-campo small { color: var(--text-muted); }
+.enc-botoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.enc-lote { display: flex; gap: 14px; flex-wrap: wrap; }
+.enc-semana { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; font-size: 13px; color: var(--text); }
+.enc-semana label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.enc-dia-bloco { margin-bottom: 14px; }
+.enc-dia-nome { font-weight: 800; font-size: 14px; color: var(--text); margin-bottom: 6px; }
+.enc-dia-nome small { color: var(--text-muted); font-weight: 600; }
+.enc-pedido {
+  display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 10px; font-size: 13.5px; color: var(--text);
+}
+.enc-pedido-dir { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; white-space: nowrap; font-weight: 700; }
+.enc-pedido-dir a { font-size: 12.5px; font-weight: 600; }
+.enc-obs { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; white-space: pre-wrap; }

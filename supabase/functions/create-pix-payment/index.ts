@@ -98,6 +98,31 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Encomenda (mig 0452): confere ANTES de cobrar ───────────────────────
+    // Mesma razão da taxa acima: o banco também recusa no insert, mas o insert
+    // vem DEPOIS do QR do Mercado Pago — recusar lá deixaria cobrança órfã.
+    // Loja sem a chave "Vendo sob encomenda" volta NULL e nada muda. Falha da
+    // consulta nunca trava o PIX de uma loja comum (o gatilho do banco segue
+    // valendo como última trava).
+    try {
+      const partesEnc = Array.isArray(pedido.pagamentos) && pedido.pagamentos.length > 1
+      const { data: msgEncomenda } = await supabaseSrv.rpc('encomenda_validar', {
+        p_empresa:    pedido.empresa_id,
+        p_itens:      pedido.itens ?? [],
+        p_agendado:   pedido.agendado_para ?? null,
+        p_total:      pedido.total ?? null,
+        p_forma:      partesEnc ? 'dividido' : 'pix',
+        p_pagamentos: partesEnc ? pedido.pagamentos : null,
+      })
+      if (msgEncomenda) {
+        return new Response(JSON.stringify({ error: String(msgEncomenda) }), {
+          status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+        })
+      }
+    } catch (e) {
+      console.error('encomenda_validar:', e)
+    }
+
     // ── Desconto por pontos (validado no servidor) ──────────────────────────
     // O cliente informa pontos_usados, mas quem manda é o saldo real + a config.
     // Garante que a cobrança do PIX e os pontos a debitar batem com o saldo.
@@ -247,6 +272,7 @@ Deno.serve(async (req) => {
         // Pedido agendado (mig 0222): o PIX é pago agora, a comida sai na hora
         // combinada. Sem isso o agendamento se perdia justamente em quem já pagou.
         agendado_para:         pedido.agendado_para ?? null,
+        agendado_ate:          pedido.agendado_ate ?? null,
         troco_para:            pedido.troco_para ?? null,
         codigo_entrega:        pedido.codigo_entrega,
         status:                'aguardando_pagamento',

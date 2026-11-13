@@ -724,7 +724,7 @@ export default function Produtos() {
   async function loadCategorias() {
     const { data } = await supabase
       .from('categorias')
-      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana, oculta_online, faixas_preco')
+      .select('id, nome, ordem, hora_inicio, hora_fim, setor, isento_taxa, dias_semana, oculta_online, faixas_preco, sob_encomenda')
       // A mig 0341 abriu a leitura de categorias pra qualquer logado; sem este filtro a
       // tela listava (e renumerava junto) as categorias de todas as lojas.
       .eq('empresa_id', profile.empresa_id)
@@ -780,6 +780,13 @@ export default function Produtos() {
   async function salvarIsentoTaxa(id, isento) {
     setCategorias(cs => cs.map(c => (c.id === id ? { ...c, isento_taxa: isento } : c)))
     await supabase.from('categorias').update({ isento_taxa: isento }).eq('id', id)
+  }
+
+  // Categoria vendida sob encomenda (mig 0452): o cliente escolhe o DIA e o
+  // pedido conta no limite do dia. Só aparece em loja com a chave ligada.
+  async function salvarSobEncomenda(id, valor) {
+    setCategorias(cs => cs.map(c => (c.id === id ? { ...c, sob_encomenda: valor } : c)))
+    await supabase.from('categorias').update({ sob_encomenda: valor }).eq('id', id)
   }
 
   // Preço por quantidade da CATEGORIA (mig 0329): "a partir de 3, R$ 3,33". Conta
@@ -1168,6 +1175,7 @@ export default function Produtos() {
       preco_app: produto.preco_app ?? 0,
       faixas_preco: produto.faixas_preco ?? [],
       estoque_minimo: produto.estoque_minimo ?? 0,
+      qtd_minima: produto.qtd_minima ?? '',
       ativo: produto.ativo ?? true,
       vende_salao: produto.vende_salao ?? true,
       vende_mesa: produto.vende_mesa ?? true,
@@ -1413,6 +1421,9 @@ export default function Produtos() {
       destaque: !!form.destaque,
       preco_app: Number(form.preco_app) || 0,
       estoque_minimo: Number(form.estoque_minimo) || 0,
+      // Mínimo de unidades por pedido na Loja Online (mig 0452). Vazio = sem mínimo.
+      qtd_minima: (form.qtd_minima === '' || form.qtd_minima == null)
+        ? null : Math.max(1, Math.floor(Number(form.qtd_minima) || 1)),
       faixas_preco: form.faixas_preco ?? [],
     }
     // `custo_modo` é só da tela (escolhe R$ ou %) — não existe coluna pra ele.
@@ -1897,6 +1908,15 @@ export default function Produtos() {
                       <input type="checkbox" checked={!!c.isento_taxa} onChange={(e) => salvarIsentoTaxa(c.id, e.target.checked)} />
                       <span>💸 Sem taxa de serviço <span style={{ color: 'var(--text-muted)' }}>(couvert, ingresso)</span></span>
                     </label>
+                    {empresa?.encomenda_ativa && (
+                      <label
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, marginBottom: 8 }}
+                        title="Marcado: o cliente escolhe o DIA da encomenda e o pedido conta no limite do dia (menu Encomendas)"
+                      >
+                        <input type="checkbox" checked={!!c.sob_encomenda} onChange={(e) => salvarSobEncomenda(c.id, e.target.checked)} />
+                        <span>🎂 Sob encomenda <span style={{ color: 'var(--text-muted)' }}>(com data e vaga)</span></span>
+                      </label>
+                    )}
                     <div style={{ ...dicaCampo, marginTop: 8 }}>
                       Onde cada item vende (salão, mesa, loja online, app) agora se escolhe
                       <strong> em cada produto</strong>, no cadastro dele.
@@ -2818,6 +2838,22 @@ export default function Produtos() {
                     name="estoque_minimo"
                     value={form.estoque_minimo}
                     onChange={handleChange}
+                  />
+                </div>
+                )}
+
+                {/* Mínimo por pedido: só em loja que vende sob encomenda (mig 0452) */}
+                {empresa?.encomenda_ativa && (
+                <div className="form-field">
+                  <label>Quantidade mínima por pedido</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="qtd_minima"
+                    value={form.qtd_minima ?? ''}
+                    onChange={handleChange}
+                    placeholder="Ex: 20 (vazio = sem mínimo)"
                   />
                 </div>
                 )}

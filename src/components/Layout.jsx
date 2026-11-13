@@ -98,6 +98,9 @@ const links = [
   },
   // Notas dos clientes (mig 0448). Só o dono: tem telefone de cliente na tela.
   { to: '/avaliacoes', label: 'Avaliações', roles: ['admin'], mod: 'delivery' },
+  // Agenda de quem vende sob encomenda (mig 0452). `enc: true` = só aparece em
+  // loja com a chave "Vendo sob encomenda" ligada pelo Super Admin.
+  { to: '/encomendas', label: 'Encomendas', roles: ['admin'], mod: 'delivery', enc: true },
   { group: 'Automação' },
   {
     to: '/whatsapp', label: 'WhatsApp', roles: ['admin', 'super_admin', 'vendedor'], mod: 'whatsapp',
@@ -210,7 +213,7 @@ export default function Layout() {
   // Módulo BLOQUEADO continua aparecendo (com cadeado) — é o que faz o dono
   // descobrir que existe e querer o upgrade. Só o OCULTO some daqui.
   const porPerfilEModulo = links.filter(
-    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod) && (!link.ifood || ifoodAtivo) && cfgVisivel(link))
+    (link) => link.group || (link.roles?.includes(profile?.perfil) && moduloVisivel(empresa, link.mod) && (!link.ifood || ifoodAtivo) && (!link.enc || empresa?.encomenda_ativa === true) && cfgVisivel(link))
   )
   // Remove cabeçalhos de grupo que ficaram sem nenhum item visível abaixo.
   const visibleLinks = porPerfilEModulo.filter((link, i) => {

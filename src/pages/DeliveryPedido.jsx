@@ -778,7 +778,9 @@ export default function DeliveryPedido() {
                 <span className="dpd-info-rot">
                   {pedido.agendado_para ? 'Agendado para' : retirada ? 'Pronto para retirar' : 'Previsão'}
                 </span>
-                <span className="dpd-info-val">{diaHora(pedido.agendado_para || pedido.pronto_previsto_at)}</span>
+                <span className="dpd-info-val">{pedido.encomenda && pedido.agendado_para
+                  ? new Date(pedido.agendado_para).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Fortaleza' })
+                  : diaHora(pedido.agendado_para || pedido.pronto_previsto_at)}</span>
               </div>
             </div>
           )}
@@ -886,11 +888,21 @@ export default function DeliveryPedido() {
             precisa ver aqui — senão ele acha que o pedido travou. */}
         {pedido.agendado_para && (
           <section className="dpd-card" style={{ borderLeft: '3px solid #0284c7' }}>
-            <h2 className="dpd-card-title">🗓️ Pedido agendado</h2>
+            <h2 className="dpd-card-title">{pedido.encomenda ? '🎂 Encomenda marcada' : '🗓️ Pedido agendado'}</h2>
             <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>
-              Está tudo certo — seu pedido fica guardado para{' '}
-              <strong>{rotuloAgendado(pedido.agendado_para, { comData: true })}</strong>.
-              {' '}A loja começa a preparar perto do horário.
+              {pedido.encomenda ? (
+                <>
+                  Está tudo certo — sua encomenda está marcada para o dia{' '}
+                  <strong>{new Date(pedido.agendado_para).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Fortaleza' })}</strong>.
+                  {' '}O restante do pagamento é feito na retirada.
+                </>
+              ) : (
+                <>
+                  Está tudo certo — seu pedido fica guardado para{' '}
+                  <strong>{rotuloAgendado(pedido.agendado_para, { comData: true })}</strong>.
+                  {' '}A loja começa a preparar perto do horário.
+                </>
+              )}
             </p>
           </section>
         )}

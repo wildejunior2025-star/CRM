@@ -9,8 +9,9 @@ import { marcarEtapa, anotarContato } from '../lib/funil'
 import { formasAtivas, repassePct, FORMAS_VALE } from '../lib/constants'
 import { precoPorQuantidade } from '../lib/precoQuantidade'
 import { itensForaDoHorario } from '../lib/horarioCategoria'
-import { carregarExcecoes, abertaAgora } from '../lib/feriados'
+import { carregarExcecoes, abertaAgora, hojeBR } from '../lib/feriados'
 import { diasParaAgendar, paraISO, rotuloAgendado } from '../lib/agendamento'
+import CalendarioEncomenda from '../components/CalendarioEncomenda'
 import 'leaflet/dist/leaflet.css'
 import './DeliveryCheckout.css'
 
@@ -1097,7 +1098,7 @@ export default function DeliveryCheckout() {
   useEffect(() => {
     if (!state?.empresaId) return
     supabase.from('empresas')
-      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct, taxa_pela_rua, fator_rua')
+      .select('endereco, numero, telefone_contato, bairro, cidade, estado, latitude, longitude, delivery_ativo, delivery_fechado_por, taxas_entrega_km, taxas_entrega_bairro, raio_entrega_km, pedido_minimo, aceita_retirada, aceita_entrega, formas_pagamento, chave_pix, pix_nome, horarios_funcionamento, feriados_fecha, agendamento_ativo, agendamento_dias, agendamento_antecedencia_min, agendamento_faixas, encomenda_ativa, encomenda_antecedencia_dias, encomenda_entrada_pct, repasse_credito_pct, repasse_debito_pct, repasse_cartao_pct, taxa_pela_rua, fator_rua')
       .eq('id', state.empresaId)
       .maybeSingle()
       .then(({ data }) => setLojaEndereco(data ?? null))
@@ -1211,8 +1212,61 @@ export default function DeliveryCheckout() {
 
   const faixasDoDia = diasAgenda.find(d => d.ymd === agDia)?.faixas ?? []
   const faixaEscolhida = faixasDoDia.find(f => f.i === agHora && !f.cheia) ?? null
-  const agendadoPara = (quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.i) : null
-  const agendadoAte = (quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.f) : null
+  // ── Encomenda (mig 0452) ─────────────────────────────────────
+  // Sacola só de bolo/doce/kit: em vez de hora, o cliente escolhe o DIA num
+  // calendário (a dona libera os dias e fixa quantas encomendas cabem em cada
+  // um). Loja sem a chave ligada nunca entra aqui: `encomenda` fica falso.
+  const encomenda = !!state?.encomenda && !!lojaEndereco?.encomenda_ativa
+  const antecedenciaEnc = Number(lojaEndereco?.encomenda_antecedencia_dias ?? 3)
+  const entradaPct = Math.min(100, Math.max(0, Number(lojaEndereco?.encomenda_entrada_pct ?? 50)))
+  const [encDia, setEncDia] = useState('')
+  const [encAgenda, setEncAgenda] = useState({})   // 'YYYY-MM-DD' -> { liberado, limite, usados }
+  const [recadoBolo, setRecadoBolo] = useState('')
+
+  // Dias e vagas, pela RPC (o visitante anônimo não lê pedidos; recebe só a contagem).
+  useEffect(() => {
+    if (!encomenda || !state?.empresaId) return
+    let vivo = true
+    const hoje = hojeBR()
+    const [a, m, d] = hoje.split('-').map(Number)
+    const fim = new Date(a, m - 1, d + 200)
+    const ate = `${fim.getFullYear()}-${String(fim.getMonth() + 1).padStart(2, '0')}-${String(fim.getDate()).padStart(2, '0')}`
+    supabase.rpc('encomenda_agenda', { p_empresa: state.empresaId, p_de: hoje, p_ate: ate })
+      .then(({ data }) => {
+        if (!vivo) return
+        setEncAgenda(Object.fromEntries((data ?? []).map(r => [r.dia, r])))
+      })
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encomenda, state?.empresaId, tiqueRelogio])
+
+  // Primeiro dia que pode ser escolhido (hoje + antecedência da loja).
+  const primeiroDiaEnc = (() => {
+    const [a, m, d] = hojeBR().split('-').map(Number)
+    const dt = new Date(a, m - 1, d + antecedenciaEnc)
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+  })()
+  const infoDiaEnc = (ymd) => {
+    if (ymd < primeiroDiaEnc) return { estado: 'passado' }
+    const r = encAgenda[ymd]
+    if (!r || !r.liberado) return { estado: 'fechado' }
+    const lim = Number(r.limite) || 0
+    if (lim > 0 && Number(r.usados) >= lim) return { estado: 'lotado' }
+    return { estado: 'livre', sub: lim > 0 ? `${lim - Number(r.usados)} vaga${lim - Number(r.usados) === 1 ? '' : 's'}` : '' }
+  }
+  const diaEncLivre = (ymd) => infoDiaEnc(ymd).estado === 'livre'
+  // O dia escolhido lotou/fechou enquanto o cliente preenchia: desmarca.
+  useEffect(() => {
+    if (encDia && Object.keys(encAgenda).length && !diaEncLivre(encDia)) setEncDia('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encAgenda])
+
+  const agendadoPara = encomenda
+    ? (encDia ? paraISO(encDia, '08:00') : null)
+    : ((quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.i) : null)
+  const agendadoAte = encomenda
+    ? null
+    : ((quando === 'agendado' && agDia && faixaEscolhida) ? paraISO(agDia, faixaEscolhida.f) : null)
 
   // A loja pode desligar "Retirar na loja" nas configurações (Raio de entrega).
   // Enquanto os dados não chegaram, deixa aparecer — assim o botão não pisca
@@ -1689,6 +1743,26 @@ export default function DeliveryCheckout() {
   const formasEscolhidas = dividindo ? [form.pagamento, forma2] : [form.pagamento]
   const valorDinheiro = partesPag ? (partesPag.find(p => p.forma === 'dinheiro')?.valor ?? 0) : total
   const pctCartaoEscolhido = formasEscolhidas.map(f => repassePct(lojaEndereco, f)).find(p => p > 0) ?? 0
+
+  // Encomenda: a entrada vai pelo PIX online (QR do Mercado Pago) e o resto é
+  // pago na retirada, em dinheiro ou cartão. Reaproveita o pagamento dividido.
+  // A dona define o % (empresas.encomenda_entrada_pct, 50 por padrão); o banco
+  // confere de novo no insert.
+  const formasRestoEnc = formasLoja.filter(f => f !== 'pix' && f !== 'pix_entrega')
+  const encSemPix = encomenda && !formasLoja.includes('pix')
+  const entradaEnc = encomenda ? Math.ceil(Math.round(baseDividir * entradaPct * 1000) / 1000) / 100 : 0
+  useEffect(() => {
+    if (!encomenda || encSemPix) return
+    if (form.pagamento !== 'pix') set('pagamento', 'pix')
+    if (entradaPct < 100 && formasRestoEnc.length) {
+      if (!dividir) setDividir(true)
+      if (!forma2 || !formasRestoEnc.includes(forma2)) setForma2(formasRestoEnc[0])
+      if (baseDividir > 0) setValor1(entradaEnc.toFixed(2).replace('.', ','))
+    } else if (dividir) {
+      setDividir(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encomenda, encSemPix, entradaPct, baseDividir, entradaEnc, dividir, forma2, form.pagamento, lojaEndereco])
 
   // Pedido mínimo (só entrega, conta o subtotal dos produtos — sem a taxa)
   const pedidoMinimo = Number(lojaEndereco?.pedido_minimo ?? 0)
@@ -2172,6 +2246,22 @@ export default function DeliveryCheckout() {
       return
     }
 
+    // Encomenda (mig 0452): sem o dia no calendário e sem PIX pra entrada o pedido
+    // não sai. O banco confere tudo de novo (vaga, antecedência, mínimo, entrada).
+    if (encomenda) {
+      if (encSemPix) {
+        setErroGlobal('Esta loja ainda não recebe a entrada da encomenda pelo PIX. Fale com a loja pelo WhatsApp.')
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+      if (!agendadoPara) {
+        setErroGlobal('Escolha o dia da sua encomenda no calendário.')
+        setPasso(1)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+        return
+      }
+    }
+
     // Agendamento: sem dia e hora escolhidos o pedido não sai. Loja fechada é o
     // caso que mais importa — ali não existe "pra agora", e deixar passar criaria
     // um pedido pra uma cozinha que só abre daqui a quatro horas.
@@ -2283,6 +2373,13 @@ export default function DeliveryCheckout() {
     // dois só cai quando ESTE pedido for entregue.
     await registrarIndicacao(clienteId)
 
+    // Recado do bolo (nome, idade, tema) vai no começo das observações: o painel e
+    // o cupom já imprimem esse campo.
+    const obsPedido = [
+      encomenda && recadoBolo.trim() ? `🎂 RECADO DO BOLO: ${recadoBolo.trim()}` : '',
+      form.observacoes.trim(),
+    ].filter(Boolean).join('\n') || null
+
     const itensPedido = itens.map(i => ({
       produto_id:    i.id,
       // Dobra as escolhas no nome (aparece no painel/cupom) + guarda estruturado.
@@ -2353,7 +2450,7 @@ export default function DeliveryCheckout() {
         // do Maps adivinhar o texto — e endereço torto derrubava a rota inteira.
         endereco_lat:         tipo === 'entrega' ? (coordCliente?.lat ?? null) : null,
         endereco_lng:         tipo === 'entrega' ? (coordCliente?.lng ?? null) : null,
-        observacoes:  form.observacoes.trim() || null,
+        observacoes:  obsPedido,
         // Hora combinada. No PIX o cliente paga AGORA e a comida sai na hora
         // marcada — quem agenda já garantiu o lugar dele.
         agendado_para: agendadoPara,
@@ -2408,7 +2505,7 @@ export default function DeliveryCheckout() {
         forma_pagamento: pagamentosPedido ? 'dividido' : form.pagamento,
         pagamentos: pagamentosPedido,
         troco_para: trocoPara,
-        observacoes: form.observacoes.trim() || null,
+        observacoes: obsPedido,
         agendado_para: agendadoPara,
         agendado_ate: agendadoAte,
         acrescimo: acrescimoPagamento,
@@ -2420,7 +2517,9 @@ export default function DeliveryCheckout() {
 
     if (error) {
       // A trava do banco (mig 0367) recusou item de categoria fora do dia/horário.
-      setErroGlobal(/ITEM_FORA_DO_HORARIO/.test(error.message || '')
+      setErroGlobal(/ENCOMENDA:/.test(error.message || '')
+        ? String(error.message).replace(/^.*ENCOMENDA:\s*/, '')
+        : /ITEM_FORA_DO_HORARIO/.test(error.message || '')
         ? 'Algum item da sua sacola não está à venda agora (a promoção é de outro dia ou horário). Toque em "Editar itens da sacola", tire e finalize de novo.'
         : error.message)
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -2636,7 +2735,55 @@ export default function DeliveryCheckout() {
               {/* Quando o cliente quer — só aparece na loja que ligou o
                   agendamento. Fechada, "pra agora" nem existe: o único caminho
                   é escolher dia e hora dentro da grade da loja. */}
-              {agendaLigada && (
+              {encomenda && (
+              <section className="dco-section" data-p="1">
+                <h2 className="dco-section-title">Dia da encomenda</h2>
+                <p style={{ fontSize: 13.5, lineHeight: 1.5, margin: '0 0 10px', opacity: .85 }}>
+                  Encomendas precisam de pelo menos <strong>{antecedenciaEnc} dias</strong> de antecedência.
+                  Toque num dia <strong style={{ color: '#22c55e' }}>verde</strong> para escolher.
+                </p>
+                {Object.keys(encAgenda).length === 0 && (
+                  <p style={{ fontSize: 13.5, color: '#eab308', margin: '0 0 10px' }}>
+                    A loja ainda não liberou dias para encomenda. Fale com ela pelo WhatsApp.
+                  </p>
+                )}
+                <CalendarioEncomenda
+                  inicio={primeiroDiaEnc}
+                  info={infoDiaEnc}
+                  clicavel={diaEncLivre}
+                  selecionado={encDia}
+                  onEscolher={setEncDia}
+                  ultimoMes={6}
+                />
+                <div className="cal-enc-legenda">
+                  <span><i style={{ background: 'rgba(34,197,94,.5)' }} />Livre</span>
+                  <span><i style={{ background: 'rgba(239,68,68,.45)' }} />Lotado</span>
+                  <span><i style={{ background: 'rgba(127,127,127,.4)' }} />Sem encomenda</span>
+                </div>
+                {encDia && (
+                  <div style={{
+                    marginTop: 12, padding: '12px 14px', borderRadius: 10,
+                    background: 'rgba(124,58,237,.1)', border: '1px solid rgba(124,58,237,.3)',
+                    fontSize: 13.5, lineHeight: 1.5,
+                  }}>
+                    🎂 Sua encomenda é para <strong>{encDia.split('-').reverse().join('/')}</strong>
+                    {tipo === 'entrega' ? ' (entrega no dia).' : ' (retirada na loja no dia).'}
+                  </div>
+                )}
+                <Field label="Recado para o bolo" hint="nome, idade, tema... (opcional)">
+                  <textarea
+                    className="dco-textarea"
+                    rows={2}
+                    maxLength={300}
+                    placeholder="Ex: Maria, 5 anos, tema Moana"
+                    value={recadoBolo}
+                    onChange={e => setRecadoBolo(e.target.value)}
+                  />
+                </Field>
+              </section>
+              )}
+
+              {agendaLigada && !encomenda && (
               <section className="dco-section" data-p="1">
                 <h2 className="dco-section-title">Quando você quer?</h2>
                 {lojaEstavaAberta && (
@@ -3031,6 +3178,7 @@ export default function DeliveryCheckout() {
               <section className="dco-section" data-p="4">
                 <h2 className="dco-section-title">Pagamento</h2>
                 {/* Só as formas que a loja aceita (Minha Loja → Pagamento) */}
+                {!encomenda && (<>
                 <div className="dco-payment-row">
                   {formasLoja.includes('pix') && (
                     <button type="button"
@@ -3158,6 +3306,45 @@ export default function DeliveryCheckout() {
                       <div style={{ marginTop: 6, fontSize: 12.5, opacity: .85, lineHeight: 1.5 }}>
                         Você paga a parte do PIX agora, pelo QR. O resto é na entrega.
                       </div>
+                    )}
+                  </div>
+                )}
+                </>)}
+                {/* Encomenda (mig 0452): entrada pelo PIX agora, resto na retirada. */}
+                {encomenda && (
+                  <div style={{
+                    padding: '12px 14px', borderRadius: 12, lineHeight: 1.5, fontSize: 14,
+                    border: '1px solid rgba(124,58,237,.45)', background: 'rgba(124,58,237,.07)',
+                  }}>
+                    {encSemPix ? (
+                      <>Esta loja ainda não recebe a entrada pelo PIX. Fale com ela pelo WhatsApp para combinar.</>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 800, marginBottom: 4 }}>
+                          {entradaPct < 100 ? `Entrada de ${entradaPct}% pelo PIX` : 'Pagamento pelo PIX'}
+                        </div>
+                        <div>
+                          Você paga <strong>R$ {fmt(partesPag ? partesPag[0].valor : total)}</strong> agora, pelo PIX
+                          (o QR Code aparece na próxima tela), para garantir a data.
+                          {partesPag && <> O restante, <strong>R$ {fmt(partesPag[1].valor)}</strong>, você paga {tipo === 'entrega' ? 'na entrega' : 'na retirada'}.</>}
+                        </div>
+                        {partesPag && formasRestoEnc.length > 1 && (
+                          <>
+                            <div style={{ fontWeight: 700, margin: '12px 0 6px' }}>Como vai pagar o restante?</div>
+                            <div className="dco-payment-row">
+                              {formasRestoEnc.map(f => (
+                                <button key={f} type="button"
+                                  className={`dco-pay-btn${forma2 === f ? ' dco-pay-btn--active' : ''}`}
+                                  onClick={() => setForma2(f)}>
+                                  {f === 'dinheiro' ? <IconMoney /> : <IconCard />}
+                                  <span>{NOME_PAG[f] ?? f}</span>
+                                  {forma2 === f && <span className="dco-pay-check"><IconCheck /></span>}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

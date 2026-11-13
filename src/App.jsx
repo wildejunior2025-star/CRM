@@ -236,6 +236,7 @@ const MeusPedidos = lazy(() => import('./pages/MeusPedidos'))
 const LojaOnlineHome = lazy(() => import('./pages/LojaOnlineHome'))
 const RaioEntrega = lazy(() => import('./pages/RaioEntrega'))
 const HorariosLoja = lazy(() => import('./pages/HorariosLoja'))
+const Encomendas = lazy(() => import('./pages/Encomendas'))
 const NotasFiscais = lazy(() => import('./pages/NotasFiscais'))
 const WhatsAppCreditos = lazy(() => import('./pages/WhatsAppCreditos'))
 const MinhaMensalidade = lazy(() => import('./pages/MinhaMensalidade'))
@@ -473,6 +474,10 @@ export default function App() {
             <Route
               path="loja-horarios"
               element={<ProtectedRoute roles={['admin']} modulo="delivery"><HorariosLoja /></ProtectedRoute>}
+            />
+            <Route
+              path="encomendas"
+              element={<ProtectedRoute roles={['admin']} modulo="delivery"><Encomendas /></ProtectedRoute>}
             />
             <Route
               path="presencial"
