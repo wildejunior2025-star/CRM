@@ -4852,10 +4852,33 @@ serve(async (req) => {
       }
     }
 
+    // ── O que a loja ensinou (mig 0453) também vale pra IA ───────────────────
+    //
+    // A tela é uma só: o dono escreve a palavra e a resposta uma vez, e os dois
+    // robôs passam a saber. Sem isto, ligar o Vendedor IA apagava tudo que a
+    // loja tinha ensinado — e o dono não teria como adivinhar por quê.
+    //
+    // Entra como CONHECIMENTO, não como resposta pronta. A IA lê junto com o
+    // resto da conversa e usa quando o assunto for aquele; despejar o texto por
+    // cima de quem estava montando o pedido é o erro que a gente já consertou
+    // no outro robô.
+    const { data: ensinosIa } = await supabase.from("whatsapp_ensinos")
+      .select("palavras, resposta")
+      .eq("empresa_id", empresaId).eq("ativo", true).limit(60)
+    const ensinadoTexto = ((ensinosIa ?? []) as Array<Record<string, unknown>>)
+      .map(e => {
+        const palavras = String(e.palavras ?? "").trim()
+        const resposta = String(e.resposta ?? "").trim().replace(/\{link\}/g, catalogoUrl)
+        return palavras && resposta ? `- Quando o cliente falar de "${palavras}": ${resposta}` : ""
+      })
+      .filter(Boolean)
+      .join("\n")
+
     // ── System prompt ────────────────────────────────────────────────────────
     const systemPrompt = `Você é o assistente virtual de vendas da ${empresaNome}. Responda sempre em português.
 Seja inteligente e conversacional — entenda o que o cliente quer e responda naturalmente.
 ${iaInstrucoes ? `\nINSTRUÇÕES DA EMPRESA:\n${iaInstrucoes}\n` : ""}
+${ensinadoTexto ? `\nO QUE A LOJA ENSINOU — respostas que o dono escreveu na mão. Quando o assunto for um destes, é ESTA a resposta certa; pode dizer com as suas palavras, mas não invente outra coisa nem mande o cliente procurar no cardápio:\n${ensinadoTexto}\n` : ""}
 DADOS DA LOJA:
 - Nome: ${empresaNome}
 ${empresaDescricao ? `- Descrição: ${empresaDescricao}` : ""}
