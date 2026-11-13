@@ -18,12 +18,27 @@ import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '.
 // com uma aluna, com o limite em 0,5 e 2 leituras). Daí os números abaixo
 // ficarem apertados — e o aprendizado automático, que gravava a leitura da
 // catraca na ficha do aluno, foi tirado: era ele que gravava o rosto errado.
-const CONFIRMAR_LEITURAS = 3     // mesma pessoa em 3 leituras seguidas antes de liberar
-const CERTEZA_ALTA = 0.33        // abaixo disso uma leitura só basta (quase igual ao cadastro)
+// Quantas leituras seguidas exigir antes de liberar. Era 3 pra todo mundo, e
+// 3 leituras e o tempo que o aluno passa PARADO na frente da camera.
+//
+// Medido nos 2.890 acessos ja registrados: a distancia mediana e 0,348, e
+// 57% das leituras ficam abaixo de 0,36. O unico caso de pessoa errada que
+// ja aconteceu aqui bateu 0,481 — longe. Entao quem chega bem abaixo do
+// limite, e com o segundo colocado bem atras, nao precisa de 3 provas:
+//   ate 0,36 com margem folgada → 1 leitura  (reconhece andando)
+//   ate 0,41                    → 2 leituras
+//   ate 0,44 (o limite)         → 3 leituras
+const CERTEZA_ALTA = 0.36        // abaixo disso, e com margem, uma leitura basta
+const CERTEZA_BOA = 0.41         // abaixo disso, duas
+const MARGEM_SEGURA = 0.08       // o segundo colocado tem que estar bem atras
+const CONFIRMAR_LEITURAS = 3     // o caso mais apertado, encostado no limite
 const LEITURA_LENTA_MS = 330      // acima disso o detector baixa pra nao deixar o aluno esperando
 // De quanto em quanto tempo tenta religar a catraca sozinha. Eram 20 s, e
 // nesses 20 s o aluno ficava parado na porta sem ninguem entender por que.
 const RELIGAR_MS = 4000
+// Quanto o rosto pode estar virado e a leitura ainda valer. Mais folgado que
+// o do cadastro (0,15), porque na catraca o aluno chega andando.
+const GIRO_NA_CATRACA = 0.25
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -45,6 +60,8 @@ export default function AcademiaRecepcao() {
   const [qtdAlunos, setQtdAlunos] = useState(0)
   // Diagnóstico: quanto leva cada leitura neste aparelho e a última semelhança.
   const [diag, setDiag] = useState({})
+  // Guardados em ref (e nao em estado) porque quem grava o acesso roda dentro
+  // do laco da camera e nao enxerga o estado novo.
   const msRef = useRef(null)
   const motorRef = useRef(null)
   const [ajuste, setAjuste] = useState(null) // pedido pra centralizar o rosto
@@ -163,15 +180,18 @@ export default function AcademiaRecepcao() {
     let cartaoAtualId = null
     let tempos = []
     let resMostrada = false
+    // Quando a triagem barata esta ligada. Comeca ligada: sala vazia.
+    let triagem = true
 
-    function liberarResultado(achado) {
+    function liberarResultado(achado, leituras) {
       const situacao = situacaoAluno(achado.aluno)
       cartaoAtualId = achado.aluno.id
+      // A catraca ANTES do desenho da tela: abrir e o que o aluno espera, e
+      // montar o cartao com foto custa alguns quadros.
+      if (situacao.status === 'liberado') abrirCatraca(achado.aluno)
       mostrar({ aluno: achado.aluno, situacao })
       bipe(situacao.carencia ? 'aviso' : situacao.status === 'liberado' ? 'ok' : 'nao')
-      // PC com a catraca ligada (configurada em /catraca): abre sozinha.
-      if (situacao.status === 'liberado') abrirCatraca(achado.aluno)
-      registrar(achado.aluno, situacao, achado.distancia)
+      registrar(achado.aluno, situacao, achado, leituras)
     }
 
     function mostrar(c) {
@@ -181,16 +201,20 @@ export default function AcademiaRecepcao() {
       timerCartao = setTimeout(() => setCartao(null), MOSTRAR_MS)
     }
 
-    async function registrar(aluno, situacao, distancia) {
+    async function registrar(aluno, situacao, achado, leituras) {
       const agora = Date.now()
       if (agora - (vistosEm.get(aluno.id) || 0) < NAO_REGISTRAR_DE_NOVO_MS) return
       vistosEm.set(aluno.id, agora)
       setUltimas(u => [{ id: agora, nome: aluno.nome, foto: aluno.foto, status: situacao.status, hora: new Date() }, ...u].slice(0, 6))
       await supabase.from('academia_acessos').insert({
-        empresa_id: empresa.id, aluno_id: aluno.id, resultado: situacao.status, distancia: Number(distancia.toFixed(3)),
-        // So pra diagnostico: quanto tempo leva uma leitura neste aparelho e
-        // em que motor ela roda. Nao influi em nada do reconhecimento.
+        empresa_id: empresa.id, aluno_id: aluno.id, resultado: situacao.status,
+        distancia: Number(achado.distancia.toFixed(3)),
+        // Guardado pra dar pra ajustar a velocidade sem ir ate a academia:
+        // quanto o segundo colocado ficou atras, quanto tempo leva uma
+        // leitura neste computador e se ele usa placa de video ou nao.
+        margem: achado.margem != null && achado.margem !== Infinity ? Number(achado.margem.toFixed(3)) : null,
         ms: msRef.current || null,
+        leituras,
         motor: motorRef.current || null,
       })
     }
@@ -203,23 +227,31 @@ export default function AcademiaRecepcao() {
         // velha costuma dar menos — e é esse número que limita tudo.
         if (!resMostrada) { resMostrada = true; setDiag(d => ({ ...d, res: `${video.videoWidth}x${video.videoHeight}` })) }
 
-        // ETAPA BARATA: só procura a caixa do rosto. Enquanto o aluno está
-        // chegando — longe, de lado, meio fora do quadro — para por aqui.
-        // Antes a conta pesada rodava em TODO quadro e pra TODA pessoa que
-        // aparecia atrás, e 90% disso ia pro lixo.
-        const vistos = await acharRostos(video).catch(() => null)
-        if (!vivo) break
-        if (!vistos || !vistos.maior) {
-          candidato = null; seguidas = 0; desconhecidas = 0
-          setAjuste(null)
-          await esperar(250)
-          continue
-        }
-        if (!rostoInteiroNaTela(vistos.maior, video)) {
-          candidato = null; seguidas = 0
-          setAjuste('Chegue mais perto, com o rosto no meio da tela')
-          await esperar(60)
-          continue
+        // ETAPA BARATA: só procura a caixa do rosto, sem tirar a digital.
+        // Serve pra quem está CHEGANDO — longe, de lado, meio fora do quadro.
+        //
+        // Mas ela só vale a pena nessa situação: achar o rosto custa o mesmo
+        // nas duas etapas, então, com o aluno já na posição, fazer as duas é
+        // procurar o rosto DUAS VEZES no mesmo quadro — era quase metade do
+        // tempo que o aluno passava parado esperando. Agora a triagem só
+        // acontece depois de um quadro em que o rosto apareceu mal
+        // posicionado; no resto do tempo vai direto pra leitura.
+        if (triagem) {
+          const vistos = await acharRostos(video).catch(() => null)
+          if (!vivo) break
+          if (!vistos || !vistos.maior) {
+            candidato = null; seguidas = 0; desconhecidas = 0
+            triagem = false
+            setAjuste(null)
+            await esperar(250)
+            continue
+          }
+          if (!rostoInteiroNaTela(vistos.maior, video)) {
+            candidato = null; seguidas = 0
+            setAjuste('Chegue mais perto, com o rosto no meio da tela')
+            await esperar(40)
+            continue
+          }
         }
 
         // ETAPA CARA: agora sim vale a pena tirar a digital deste rosto.
@@ -234,19 +266,42 @@ export default function AcademiaRecepcao() {
           if (media > LEITURA_LENTA_MS) aliviarDetector()
           const motor = window.faceapi?.tf?.getBackend?.()
           const placa = placaDeVideo()
-          // Em ref, nao em estado: quem grava o acesso roda dentro do laco
-          // da camera e nao enxerga o estado novo.
           msRef.current = Math.round(media)
           motorRef.current = motor ? `${motor} ${detectorAtual()} ${placa}`.slice(0, 80) : null
           setDiag(d => ({ ...d, ms: Math.round(media), detector: detectorAtual(), backend: motor, placa }))
           tempos = []
         }
-        // Mexeu entre uma etapa e outra: tenta no próximo quadro.
-        if (!r || !rostoInteiroNaTela(r.caixa, video)) {
+        // Sem rosto nenhum: volta pra triagem, que é o modo de sala vazia.
+        if (!r) {
+          candidato = null; seguidas = 0; desconhecidas = 0
+          triagem = true
+          setAjuste(null)
+          await esperar(120)
+          continue
+        }
+        // Rosto fora de posição (longe, na beirada): daqui pra frente a
+        // triagem barata segura, até ele chegar na posição.
+        if (!rostoInteiroNaTela(r.caixa, video)) {
+          candidato = null; seguidas = 0
+          triagem = true
+          setAjuste('Chegue mais perto, com o rosto no meio da tela')
           await esperar(30)
           continue
         }
+        triagem = false
         setAjuste(null)
+
+        // Rosto virado nao vale como leitura: de lado a digital sai torta e
+        // pode cair perto de qualquer um. Mas aqui o limite e mais folgado
+        // que no cadastro (0,25 contra 0,15): no cadastro da pra pedir pro
+        // aluno se endireitar, na catraca ele chega andando e nunca fica
+        // perfeitamente de frente — com 0,15 a catraca parava de reconhecer.
+        if (Math.abs(r.giro) > GIRO_NA_CATRACA) {
+          setAjuste('Olhe pra câmera')
+          await esperar(0)
+          continue
+        }
+
         const achado = acharAluno(r.descritor, alunosRef.current)
         if (achado) {
           setDiag(d => ({ ...d, dist: achado.distancia, margem: achado.margem }))
@@ -254,8 +309,10 @@ export default function AcademiaRecepcao() {
           if (candidato === achado.aluno.id) seguidas++
           else { candidato = achado.aluno.id; seguidas = 1 }
           const jaNaTela = cartaoAtualId === achado.aluno.id && Date.now() < cartaoAte - 1000
-          const confirmado = seguidas >= CONFIRMAR_LEITURAS || achado.distancia < CERTEZA_ALTA
-          if (confirmado && !jaNaTela) liberarResultado(achado)
+          const precisa = achado.distancia < CERTEZA_ALTA && achado.margem >= MARGEM_SEGURA ? 1
+            : achado.distancia < CERTEZA_BOA ? 2
+              : CONFIRMAR_LEITURAS
+          if (seguidas >= precisa && !jaNaTela) liberarResultado(achado, seguidas)
         } else {
           candidato = null; seguidas = 0
           desconhecidas++
