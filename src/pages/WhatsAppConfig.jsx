@@ -1186,7 +1186,9 @@ export default function WhatsAppConfig() {
                   Muita gente manda áudio em vez de escrever. Com isto ligado, o robô
                   <strong> escuta o áudio</strong> e responde o que foi falado — preço, horário,
                   taxa, o que ele já sabe. Desligado, ele pede pra mandar por escrito.{' '}
-                  <strong>Por enquanto é por nossa conta</strong>, sem custo pra loja.
+                  <strong>Custa 1 crédito por minuto de áudio</strong> — quase todo áudio de
+                  cliente gasta 1. É a única coisa deste robô que consome crédito: as
+                  respostas continuam de graça. Sem saldo, ele volta a pedir por escrito.
                 </small>
               </div>
             </label>

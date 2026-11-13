@@ -3295,6 +3295,17 @@ async function calcularTaxaEntregaKm(
 
 // ── transcribeAudio — Whisper OpenAI ────────────────────────────────────────
 async function transcribeAudio(base64: string, mimetype: string): Promise<string | null> {
+  const r = await transcreverAudio(base64, mimetype)
+  return r?.texto ?? null
+}
+
+// A DURAÇÃO VEM JUNTO (mig 0454). Sem ela o áudio era cobrado no escuro: um
+// recado de 8 segundos e um desabafo de 4 minutos custavam o mesmo pra loja, e
+// o de 4 minutos custava 10x mais pra gente. O `verbose_json` devolve os
+// segundos exatos no mesmo pedido, sem pagar nada a mais.
+async function transcreverAudio(
+  base64: string, mimetype: string,
+): Promise<{ texto: string; segundos: number } | null> {
   const openaiKey = Deno.env.get("OPENAI_API_KEY") ?? ""
   if (!openaiKey) return null
   try {
@@ -3304,6 +3315,7 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
     form.append("file", new Blob([binary], { type: mimetype }), `audio.${ext}`)
     form.append("model", "whisper-1")
     form.append("language", "pt")
+    form.append("response_format", "verbose_json")
     const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
       headers: { "Authorization": `Bearer ${openaiKey}` },
@@ -3311,10 +3323,91 @@ async function transcribeAudio(base64: string, mimetype: string): Promise<string
     })
     if (!res.ok) { console.error("[Whisper] erro:", await res.text()); return null }
     const data = await res.json()
-    return data.text ?? null
+    const texto = String(data?.text ?? "").trim()
+    if (!texto) return null
+    return { texto, segundos: Number(data?.duration ?? 0) }
   } catch (e: any) {
     console.error("[Whisper] erro:", e?.message)
     return null
+  }
+}
+
+// ── Áudio custa crédito (mig 0454) ──────────────────────────────────────────
+//
+// Transcrever é a ÚNICA coisa do robô sem IA que sai do nosso bolso: o Whisper
+// cobra por minuto de áudio. Até hoje era por nossa conta, e com três lojas
+// mandando 300 áudios por mês isso deixa de ser detalhe.
+//
+// O preço é 1 CRÉDITO POR MINUTO COMEÇADO, não por áudio. Áudio de cliente de
+// delivery tem 20 ou 30 segundos: paga 1 crédito (R$ 0,07) por um custo nosso
+// de uns R$ 0,015. Mas o áudio de 4 minutos paga 4 — senão seria a loja que
+// manda áudio longo saindo de graça às nossas custas.
+//
+// Sem saldo, NÃO transcreve: a loja cai na fala que já existe ("ainda não
+// consigo ouvir áudio, me escreve"). Nada de transcrever fiado.
+const SEGUNDOS_POR_CREDITO = 60
+
+async function transcreverCobrando(
+  supabase: any, empresaId: string, base64: string, mimetype: string,
+): Promise<{ texto: string; creditos: number } | null> {
+  const { data: emp } = await supabase
+    .from("empresas").select("whatsapp_creditos").eq("id", empresaId).single()
+  if (!emp || Number(emp.whatsapp_creditos ?? 0) <= 0) {
+    console.log("[audio] sem crédito, não transcreve:", empresaId)
+    return null
+  }
+
+  const r = await transcreverAudio(base64, mimetype)
+  if (!r) return null
+
+  // Minuto COMEÇADO, e nunca menos de 1: áudio de 3 segundos também deu
+  // trabalho. A duração que o Whisper devolveu é a que ele cobrou de nós.
+  const creditos = Math.max(1, Math.ceil((r.segundos || 1) / SEGUNDOS_POR_CREDITO))
+  const { data: tirou } = await supabase.rpc("descontar_creditos_bot", {
+    p_empresa_id: empresaId,
+    p_quantidade: creditos,
+    p_origem: `Áudio do cliente (${Math.round(r.segundos)}s)`,
+  })
+  console.log(`[audio] ${Math.round(r.segundos)}s = ${creditos} crédito(s), descontou ${tirou}`)
+  return { texto: r.texto, creditos }
+}
+
+// Áudio parou por falta de crédito: o dono fica sabendo, uma vez por dia. Sem
+// isto ele descobre pelo cliente reclamando que "o robô não responde áudio" —
+// e vai achar que quebrou, não que acabou o saldo.
+async function avisarAudioSemCredito(
+  supabase: any, empresaId: string, instanceName: string,
+): Promise<void> {
+  try {
+    const { data: emp } = await supabase.from("empresas")
+      .select("nome, whatsapp_creditos").eq("id", empresaId).single()
+    if (!emp || Number(emp.whatsapp_creditos ?? 0) > 0) return
+    const { data: cfg } = await supabase.from("whatsapp_config")
+      .select("admin_phone").eq("empresa_id", empresaId).maybeSingle()
+    const bruto = String(cfg?.admin_phone ?? "").replace(/\D/g, "")
+    if (!bruto) return
+    const { data: pode } = await supabase.rpc("robo_avisar_uma_vez", {
+      p_empresa_id: empresaId, p_chave: "audio-sem-credito",
+      p_marca: "audio-sem-credito", p_minutos: 1440,
+    })
+    // A RPC devolve `true` quando reservou e NULL quando é cedo demais — nada
+    // de `=== false`, que deixaria o aviso sair todo áudio.
+    if (!pode) return
+    const num = bruto.startsWith("55") ? bruto : "55" + bruto
+    await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      body: JSON.stringify({
+        number: num,
+        text: `⚠️ *${emp.nome ?? "Sua loja"}* — o robô parou de entender áudio.\n\n` +
+          "Seus créditos acabaram. Entender áudio custa *1 crédito por minuto* " +
+          "(a maioria dos áudios de cliente gasta 1).\n\n" +
+          "Enquanto isso ele pede pro cliente escrever. Pra voltar a ouvir, " +
+          "recarregue em *WhatsApp → Créditos Bot*. 🤖",
+      }),
+    }).catch(() => {})
+  } catch (e: any) {
+    console.error("[audio] aviso falhou:", e?.message)
   }
 }
 
@@ -3726,11 +3819,19 @@ serve(async (req) => {
         let audioTranscrito = ""
         if (liga?.ouvir_audio_ativo === true && (msg.messageType === "pttMessage" || msg.messageType === "audioMessage")) {
           const media = await getMediaBase64(instanceName, msg)
-          const texto = media?.base64 ? await transcribeAudio(media.base64, media.mimetype) : null
-          if (texto?.trim()) {
-            audioTranscrito = texto.trim()
+          const ouvido = media?.base64 && liga?.empresa_id
+            ? await transcreverCobrando(supabase, String(liga.empresa_id), media.base64, media.mimetype)
+            : null
+          if (ouvido) {
+            audioTranscrito = ouvido.texto
             conteudo = `🎤 ${audioTranscrito}`
             console.log("[link] áudio transcrito:", audioTranscrito.slice(0, 80))
+          } else if (media?.base64 && liga?.empresa_id) {
+            // Não transcreveu (sem saldo, ou o Whisper falhou). O cliente não
+            // fica no vácuo: o `conteudo` segue como "🎤 Áudio" e o robô diz
+            // que não ouve e pede por escrito, que é a fala que já existe.
+            // O DONO precisa saber por quê, senão ele acha que quebrou.
+            await avisarAudioSemCredito(supabase, String(liga.empresa_id), instanceName)
           }
         }
 
@@ -3813,9 +3914,11 @@ serve(async (req) => {
         // O mesmo download serve pras duas coisas: transcrever pro robô e
         // guardar pra loja ouvir no gestor.
         midiaCrua = { base64: media.base64, mimetype: media.mimetype }
-        const transcricao = await transcribeAudio(media.base64, media.mimetype)
-        if (transcricao?.trim()) {
-          text = transcricao.trim()
+        // Cobra igual ao robô sem IA (mig 0454): o Whisper custa o mesmo nos
+        // dois, e aqui o crédito da RESPOSTA é cobrado depois, à parte.
+        const ouvido = await transcreverCobrando(supabase, empresaId, media.base64, media.mimetype)
+        if (ouvido) {
+          text = ouvido.texto
           console.log("[Áudio] transcrito:", text)
         } else {
           await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
