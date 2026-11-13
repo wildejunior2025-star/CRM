@@ -187,7 +187,7 @@ export default function Encomendas() {
       <div className="page-header">
         <h1>Encomendas</h1>
       </div>
-      <p style={{ color: 'var(--text-muted)', marginTop: -6, maxWidth: 720 }}>
+      <p className="enc-intro">
         Aqui você escolhe os dias em que aceita encomenda e quantas cabem em cada um. O cliente só vê os dias
         que você liberar; quando o dia enche, ele aparece como lotado.
       </p>
@@ -195,13 +195,34 @@ export default function Encomendas() {
       {erro && <div className="card" style={{ color: 'var(--danger)' }}>{erro}</div>}
       {msg && <div className="card" style={{ color: 'var(--success)' }}>{msg}</div>}
 
+      {!loading && (
+        <div className="enc-resumo">
+          <div className="enc-resumo-item">
+            <b>{Object.values(agenda).filter(a => a.dia >= hoje && a.liberado !== false).length}</b>
+            <span>dias liberados</span>
+          </div>
+          <div className="enc-resumo-item">
+            <b>{pedidos.length}</b>
+            <span>encomendas marcadas</span>
+          </div>
+          <div className="enc-resumo-item">
+            <b>{cfg.antecedencia} dia{Number(cfg.antecedencia) === 1 ? '' : 's'}</b>
+            <span>de antecedência</span>
+          </div>
+          <div className="enc-resumo-item">
+            <b>{cfg.entrada}%</b>
+            <span>de entrada no PIX</span>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="card"><div className="skeleton-row" /><div className="skeleton-row" style={{ width: '70%' }} /></div>
       ) : (
         <>
           <div className="enc-colunas">
             <div className="card">
-              <h2 className="enc-titulo">Calendário</h2>
+              <h2 className="enc-titulo"><span className="enc-num">1</span> Calendário</h2>
               <CalendarioEncomenda
                 inicio={hoje}
                 info={info}
@@ -218,9 +239,13 @@ export default function Encomendas() {
             </div>
 
             <div className="card">
-              <h2 className="enc-titulo">{diaSel ? `Dia ${dataBR(diaSel)}` : 'Escolha um dia'}</h2>
+              <h2 className="enc-titulo"><span className="enc-num">2</span> {diaSel ? `Dia ${dataBR(diaSel)}` : 'Escolha um dia'}</h2>
               {!diaSel ? (
-                <p className="enc-dica">Toque num dia do calendário para liberar, bloquear ou mudar o limite.</p>
+                <div className="enc-vazio">
+                  <div className="enc-vazio-icone">👈</div>
+                  <p>Toque num dia do calendário para liberar, fechar ou mudar quantas encomendas cabem.</p>
+                  <p className="enc-vazio-dica">Para liberar muitos dias de uma vez, use o bloco logo abaixo.</p>
+                </div>
               ) : (
                 <>
                   <p className="enc-dica">
@@ -249,7 +274,7 @@ export default function Encomendas() {
           </div>
 
           <div className="card">
-            <h2 className="enc-titulo">Liberar vários dias de uma vez</h2>
+            <h2 className="enc-titulo"><span className="enc-num">⚡</span> Liberar vários dias de uma vez</h2>
             <div className="enc-lote">
               <label className="enc-campo"><span>De</span>
                 <input type="date" min={hoje} value={lote.de} onChange={e => setLote(l => ({ ...l, de: e.target.value }))} />
@@ -262,21 +287,27 @@ export default function Encomendas() {
                   onChange={e => setLote(l => ({ ...l, limite: e.target.value }))} placeholder="Ex: 5" />
               </label>
             </div>
+            <div className="enc-rotulo">Em quais dias da semana?</div>
             <div className="enc-semana">
               {SEMANA.map((nome, i) => (
-                <label key={i}>
+                <label key={i} className={'enc-pilula' + (lote.dias.includes(i) ? ' enc-pilula--on' : '')}>
                   <input type="checkbox" checked={lote.dias.includes(i)}
                     onChange={() => setLote(l => ({ ...l, dias: l.dias.includes(i) ? l.dias.filter(x => x !== i) : [...l.dias, i] }))} />
                   {nome.slice(0, 3)}
                 </label>
               ))}
             </div>
+            <div className="enc-atalhos">
+              <button type="button" className="enc-atalho" onClick={() => setLote(l => ({ ...l, dias: [5, 6, 0] }))}>Sex a Dom</button>
+              <button type="button" className="enc-atalho" onClick={() => setLote(l => ({ ...l, dias: [1, 2, 3, 4, 5] }))}>Seg a Sex</button>
+              <button type="button" className="enc-atalho" onClick={() => setLote(l => ({ ...l, dias: [0, 1, 2, 3, 4, 5, 6] }))}>Todos</button>
+            </div>
             <p className="enc-dica">Se o dia já estava liberado, o limite dele é trocado pelo novo número.</p>
             <button className="btn btn-primary" onClick={liberarLote} disabled={salvando}>Liberar esses dias</button>
           </div>
 
           <div className="card">
-            <h2 className="enc-titulo">Regras</h2>
+            <h2 className="enc-titulo"><span className="enc-num">⚙</span> Regras</h2>
             <div className="enc-lote">
               <label className="enc-campo"><span>Antecedência mínima (dias)</span>
                 <input type="number" min="0" inputMode="numeric" value={cfg.antecedencia}
@@ -295,7 +326,7 @@ export default function Encomendas() {
           </div>
 
           <div className="card">
-            <h2 className="enc-titulo">Encomendas marcadas</h2>
+            <h2 className="enc-titulo"><span className="enc-num">🎂</span> Encomendas marcadas</h2>
             {porDia.length === 0 ? (
               <p className="enc-dica">Nenhuma encomenda marcada daqui pra frente.</p>
             ) : porDia.map(([dia, lista]) => (
