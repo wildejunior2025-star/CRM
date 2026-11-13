@@ -151,6 +151,16 @@ export default function WhatsAppConfig() {
   const [ensinoMsg,       setEnsinoMsg]       = useState(null)
   const ensinoRef  = useRef(null)
 
+  // ── Seções dobradas (13/11/2026) ──
+  // A tela tinha nove blocos abertos, um embaixo do outro: no celular era um
+  // rolo que ninguém chegava no fim, e pra mexer numa coisa você passava por
+  // todas as outras. Agora é uma lista de títulos — abre o que vai mexer.
+  // Uma de cada vez, de propósito: duas abertas e já volta a ser rolo.
+  const [secaoAberta, setSecaoAberta] = useState(null)
+  const alternarSecao = (chave) =>
+    setSecaoAberta(atual => (atual === chave ? null : chave))
+
+
   const pollRef    = useRef(null)
   const qrRefRef   = useRef(null)
 
@@ -952,8 +962,8 @@ export default function WhatsAppConfig() {
       )}
 
       {/* ── Seção Conexão (Evolution / QR — modo alternativo) ── */}
-      <div className="wa-section">
-        <h2 className="wa-section-title">
+      <div className={'wa-section wa-dobravel' + (secaoAberta === 'qr' ? '' : ' wa-fechada')}>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('qr')}>
           <WhatsAppIcon size={15} />
           {CLOUD_HABILITADO ? 'Conexão por QR (alternativa)' : 'Conexão WhatsApp'}
         </h2>
@@ -1054,8 +1064,8 @@ export default function WhatsAppConfig() {
       </div>
 
       {/* ── Resposta automática com o link (sem IA, sem crédito) ── */}
-      <div className="wa-section">
-        <h2 className="wa-section-title">🔗 Resposta automática com o cardápio</h2>
+      <div className={'wa-section wa-dobravel' + (secaoAberta === 'cardapio' ? '' : ' wa-fechada')}>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('cardapio')}>🔗 Resposta automática com o cardápio</h2>
 
         <div className="wa-fields">
           <label className="wa-checkbox-row">
@@ -1379,8 +1389,8 @@ export default function WhatsAppConfig() {
       </div>
 
       {/* ── Seção Vendedor IA ── */}
-      <div className="wa-section">
-        <h2 className="wa-section-title">
+      <div className={'wa-section wa-dobravel' + (secaoAberta === 'ia' ? '' : ' wa-fechada')}>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('ia')}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
             <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
@@ -1491,8 +1501,8 @@ export default function WhatsAppConfig() {
           12/11/2026, Agv Grill: "Opções do dia" levou "essa eu não sei te
           responder". A cliente queria as quentinhas. A palavra não estava na
           lista de fábrica — e essa lista é código. Aqui a loja resolve sozinha. */}
-      <div className="wa-section" ref={ensinoRef}>
-        <h2 className="wa-section-title">🎓 Ensine o robô</h2>
+      <div className={'wa-section wa-dobravel' + (secaoAberta === 'ensino' ? '' : ' wa-fechada')} ref={ensinoRef}>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('ensino')}>🎓 Ensine o robô{duvidas.length > 0 && (<span className="wa-badge-duvidas" title="perguntas que o robô não soube responder">{duvidas.length}</span>)}</h2>
 
         <p className="wa-hint" style={{ marginBottom: 14 }}>
           Quando o cliente disser uma dessas palavras, o robô responde o que você escrever.
@@ -1618,8 +1628,8 @@ export default function WhatsAppConfig() {
 
       {/* ── Seção Roteiro do Vendedor IA ── */}
       <form onSubmit={handleSaveInstrucoes}>
-        <div className="wa-section">
-          <h2 className="wa-section-title">
+        <div className={'wa-section wa-dobravel' + (secaoAberta === 'roteiro' ? '' : ' wa-fechada')}>
+          <h2 className="wa-section-title" onClick={() => alternarSecao('roteiro')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
               <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
@@ -1677,8 +1687,8 @@ export default function WhatsAppConfig() {
 
       {/* ── Seção Notificações ── */}
       <form onSubmit={handleSave}>
-        <div className="wa-section">
-          <h2 className="wa-section-title">
+        <div className={'wa-section wa-dobravel' + (secaoAberta === 'notif' ? '' : ' wa-fechada')}>
+          <h2 className="wa-section-title" onClick={() => alternarSecao('notif')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -1832,8 +1842,8 @@ export default function WhatsAppConfig() {
         </div>
 
         {/* ── Modelos de mensagem ── */}
-        <div className="wa-section">
-          <h2 className="wa-section-title">
+        <div className={'wa-section wa-dobravel' + (secaoAberta === 'modelos' ? '' : ' wa-fechada')}>
+          <h2 className="wa-section-title" onClick={() => alternarSecao('modelos')}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
@@ -1875,7 +1885,12 @@ export default function WhatsAppConfig() {
         </div>
 
         {/* ── Ações ── */}
-        <div className="wa-form-actions">
+        {/* O botão é das DUAS seções acima (notificações e modelos). Com as
+            duas fechadas ele ficava sozinho no fim da página, sem nada pra
+            salvar. */}
+        <div className="wa-form-actions" style={{
+          display: (secaoAberta === 'notif' || secaoAberta === 'modelos') ? undefined : 'none',
+        }}>
           {saveMsg && (
             <div className={`wa-test-result ${saveMsg.type}`}>
               {saveMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}

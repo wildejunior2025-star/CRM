@@ -562,3 +562,43 @@
   color: #22c55e;
   font-weight: 600;
 }
+
+/* ── Seções dobradas (13/11/2026) ────────────────────────────────────────────
+   Fechada, a seção é só o título: tudo que é filho direto some, e o conteúdo
+   continua montado (o estado dos campos não se perde ao abrir e fechar). */
+.wa-section.wa-dobravel > .wa-section-title {
+  cursor: pointer;
+  user-select: none;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.wa-section.wa-dobravel > .wa-section-title::after {
+  content: '▾';
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.wa-section.wa-fechada > .wa-section-title::after { content: '▸'; }
+.wa-section.wa-fechada > .wa-section-title { margin-bottom: 0; }
+.wa-section.wa-fechada > *:not(.wa-section-title) { display: none; }
+
+.wa-section.wa-fechada {
+  padding: 14px 20px;
+  margin-bottom: 10px;
+}
+
+/* O número de perguntas que o robô não soube responder, no título da seção:
+   fechada, era a única coisa que o dono não podia deixar de ver. */
+.wa-badge-duvidas {
+  background: #f59e0b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  margin-left: 2px;
+}
