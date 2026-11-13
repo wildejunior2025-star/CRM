@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import SenhaCaixa from './SenhaCaixa'
 import { caixaLiberado } from '../../lib/caixaAcademia'
@@ -586,8 +586,15 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
       .then(({ data: d }) => setJaPagouHoje(d || null))
   }, [aluno?.id, primeira])
 
+  // Trava de clique duplo. O `disabled={salvando}` nao segura: o React so
+  // desabilita o botao no proximo desenho, e dois toques rapidos (ou o Enter
+  // junto com o toque) entram aqui duas vezes antes disso. Deu mensalidade
+  // repetida no mesmo segundo em 4 alunos — e cada repeticao soma um mes.
+  const gravando = useRef(false)
+
   async function confirmar(e) {
     e.preventDefault()
+    if (gravando.current) return
     const v1 = num(valor)
     const v2 = num(valor2)
     if (!v1 || v1 <= 0) return setErro('Coloque o valor que o aluno pagou.')
@@ -595,6 +602,7 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
       if (!v2 || v2 <= 0) return setErro('Coloque o valor da segunda forma de pagamento.')
       if (forma === forma2) return setErro('As duas partes estão na mesma forma. Escolha formas diferentes ou tire a divisão.')
     }
+    gravando.current = true
     setSalvando(true)
     setErro(null)
     try {
@@ -614,6 +622,7 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
     } catch (err) {
       setErro('Não deu pra registrar: ' + err.message)
       setSalvando(false)
+      gravando.current = false
     }
   }
 
