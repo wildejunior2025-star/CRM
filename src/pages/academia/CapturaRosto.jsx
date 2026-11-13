@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, miniaturaDoRosto, acharAluno,
-  sairTelaCheia, GIRO_LADO, cameraPadrao, guardarCamera,
+  sairTelaCheia, GIRO_LADO, cameraPadrao, guardarCamera, amostrasQueCombinam,
 } from '../../lib/reconhecimentoFacial'
 
 // Captura do rosto numa tacada: enquadra de frente e aperta Capturar.
@@ -88,6 +88,19 @@ export default function CapturaRosto({ alunos, onPronto, onCancelar }) {
       await esperar(PAUSA)
     }
     if (cancelou()) return
+
+    // As 4 fotos são do mesmo rosto? Se alguém passou atrás, ou se a
+    // primeira saiu antes da pessoa se ajeitar, entra uma foto que não é
+    // dela — e essa foto vira um ímã que abre a catraca no nome errado.
+    const bons = amostrasQueCombinam(descritores)
+    if (bons.length < 2) {
+      setMsg('')
+      alert('As fotos saíram muito diferentes umas das outras. Pode ter passado alguém atrás. Vamos tirar de novo, com só o aluno na frente da câmera.')
+      tirarDeNovo()
+      return
+    }
+    descritores.length = 0
+    descritores.push(...bons)
 
     // Já é outro aluno? Evita cadastrar a mesma pessoa duas vezes.
     const repetido = acharAluno(descritores[0], alunos)
