@@ -251,7 +251,9 @@
 .al-dia.ativo { background: var(--al-roxo-claro); border-color: var(--al-roxo); color: var(--al-roxo); }
 
 .al-itens { list-style: none; margin: 0; padding: 0; }
-.al-itens li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--al-linha); }
+.al-itens li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--al-linha); }
+/* O quadro de prescrever pega a linha inteira, embaixo do exercicio. */
+.al-itens li > .al-prescricao { flex: 0 0 100%; width: 100%; margin-top: 0; }
 .al-itens li:last-child { border-bottom: 0; }
 .al-item-num { width: 26px; height: 26px; flex-shrink: 0; border-radius: 50%; background: var(--al-roxo-claro); color: var(--al-roxo); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; }
 .al-item-nome { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -409,7 +411,9 @@
 .al-modelo { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .al-modelo strong { display: block; font-size: 18px; }
 .al-modelo small { color: var(--al-apagado); font-size: 14px; }
-.al-modelo .al-botao { padding: 10px 18px; flex-shrink: 0; }
+/* width:100% do botao padrao + flex-shrink:0 estourava a tela no celular. */
+.al-modelo > span { min-width: 0; }
+.al-modelo .al-botao { padding: 10px 18px; width: auto; flex: 0 0 auto; }
 .al-aviso-apaga { margin: 0; color: var(--al-vermelho); font-size: 14px; line-height: 1.45; text-align: center; }
 
 /* Marcas na lista do professor */
@@ -447,6 +451,11 @@
 .al-prescricao-abre { background: none; border: 0; padding: 2px 0; font: inherit; font-size: 14px; color: var(--al-roxo); font-weight: 700; text-align: left; cursor: pointer; }
 .al-prescricao { background: var(--al-roxo-claro); border-radius: 14px; padding: 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 10px; }
 .al-prescricao-grade { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 8px; }
+/* Sem isto o campo nao encolhe abaixo do tamanho de fabrica e a linha
+   inteira vaza pro lado de fora da tela do celular. */
+.al-prescricao-grade > .al-campo { min-width: 0; margin-bottom: 0; }
+.al-prescricao .al-campo { margin-bottom: 0; }
+.al-prescricao input { min-width: 0; width: 100%; }
 .al-prescricao-dica { margin: 0; font-size: 13px; line-height: 1.5; color: var(--al-apagado); }
 .al-prescricao-dica b { color: var(--al-texto); }
 .al-prescricao-botoes { display: flex; gap: 8px; }

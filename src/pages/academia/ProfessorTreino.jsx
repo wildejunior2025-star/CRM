@@ -1036,20 +1036,23 @@ export default function ProfessorTreino({ aluno, app, onVoltar }) {
                   <button className="al-prescricao-abre" onClick={() => setPrescrevendo(i)}>
                     {receita(i) || '✎ séries, repetições e método'}
                   </button>
-                  {prescrevendo?.id === i.id && (
-                    <Prescricao
-                      item={i}
-                      letra={letra}
-                      onFechar={() => setPrescrevendo(null)}
-                      onSalvar={campos => salvarPrescricao(i, campos)}
-                      onEspalhar={(campos, alcance) => espalharPrescricao(i, campos, alcance)}
-                    />
-                  )}
                 </span>
                 <select value={i.variacao || ''} onChange={e => mudarVariacao(i, e.target.value)}>
                   {VARIACOES.map(v => <option key={v} value={v}>{v || '—'}</option>)}
                 </select>
                 <button className="al-item-x" onClick={() => remover(i)} aria-label="Tirar">✕</button>
+                {/* Fora da coluna do nome, de propósito: ali o quadro ficava
+                    espremido em um terço da tela e empurrava o CROSS e o ✕
+                    pra fora do celular. Aqui ele pega a linha inteira. */}
+                {prescrevendo?.id === i.id && (
+                  <Prescricao
+                    item={i}
+                    letra={letra}
+                    onFechar={() => setPrescrevendo(null)}
+                    onSalvar={campos => salvarPrescricao(i, campos)}
+                    onEspalhar={(campos, alcance) => espalharPrescricao(i, campos, alcance)}
+                  />
+                )}
               </li>
             ))}
           </ul>
