@@ -583,7 +583,10 @@
 
 .wa-section.wa-fechada > .wa-section-title::after { content: '▸'; }
 .wa-section.wa-fechada > .wa-section-title { margin-bottom: 0; }
-.wa-section.wa-fechada > *:not(.wa-section-title) { display: none; }
+/* A explicação do '?' aparece mesmo com a seção fechada: a pergunta
+   'pra que serve isso?' vem ANTES de abrir. */
+.wa-section.wa-fechada > *:not(.wa-section-title):not(.wa-ajuda-texto) { display: none; }
+.wa-section.wa-fechada > .wa-ajuda-texto { margin-top: 12px; }
 
 .wa-section.wa-fechada {
   padding: 14px 20px;
@@ -601,4 +604,177 @@
   padding: 3px 7px;
   border-radius: 999px;
   margin-left: 2px;
+}
+
+/* ── O "?" do lado do nome ─────────────────────────────────────────────────── */
+.wa-ajuda-btn {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.wa-ajuda-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.wa-ajuda-texto {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 8px 8px 0;
+  background: rgba(124, 58, 237, .06);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+/* ── Campo solto, fora de .wa-input-group ────────────────────────────────────
+   O "Ensine o robô" e o recado do dia usavam .wa-input e .wa-textarea, que não
+   existiam no CSS: os campos saíam crus, do tamanho que o navegador quis, com
+   a borda feia do sistema. Agora têm a mesma cara dos outros campos da tela. */
+.wa-input,
+.wa-textarea {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 160ms ease;
+}
+
+.wa-input:focus,
+.wa-textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.wa-input::placeholder,
+.wa-textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+
+.wa-textarea {
+  resize: vertical;
+  min-height: 92px;
+}
+
+/* ── Ensine o robô ───────────────────────────────────────────────────────────
+   No celular os botões empilhavam um embaixo do outro e o "Apagar" vermelho
+   era a coisa mais forte do cartão — pior destaque possível pra ação que a
+   loja quase nunca quer. Pergunta e palavra ganham a linha inteira; as ações
+   vão pra uma linha só, alinhadas à direita. */
+.wa-duvidas {
+  background: rgba(245, 158, 11, .08);
+  border: 1px solid rgba(245, 158, 11, .35);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.wa-duvidas-titulo {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.wa-duvida-linha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.wa-duvida-txt {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.wa-duvida-vezes {
+  margin-left: 6px;
+  color: var(--primary);
+}
+
+.wa-duvida-acoes {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.wa-ensino-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.wa-ensino-off { opacity: .55; }
+
+.wa-ensino-palavras {
+  display: block;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.wa-ensino-resposta {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.wa-ensino-rodape {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.wa-ensino-rodape .wa-hint { margin-right: auto; }
+
+/* Apagar não é o assunto do cartão: fica discreto, e só fica vermelho de
+   verdade quando o dedo chega perto. */
+.wa-btn-apagar {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: #dc2626;
+}
+
+.wa-btn-apagar:hover {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, .08);
+}
+
+@media (max-width: 560px) {
+  .wa-duvida-txt { flex: 1 1 100%; }
+  .wa-duvida-acoes { margin-left: 0; width: 100%; }
+  .wa-duvida-acoes .btn { flex: 1; }
 }

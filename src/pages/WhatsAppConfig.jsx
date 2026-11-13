@@ -55,6 +55,54 @@ const VARIAVEIS_PRIMEIRA_FALA = [
   },
 ]
 
+// O que cada bloco desta tela faz, em uma frase que o dono entende sem
+// precisar ligar pra gente. Abre no "?" do lado do nome, e abre mesmo com a
+// seção fechada: a pergunta "pra que serve isso?" vem ANTES de abrir.
+const AJUDA = {
+  creditos:
+    'Crédito é o que o Vendedor IA gasta pra pensar uma resposta: cada mensagem '
+    + 'que ele responde consome um. As respostas prontas — cardápio, horário, taxa '
+    + 'de entrega, preço de produto e o que você ensinou — não gastam crédito nenhum. '
+    + 'Clique no bloco pra ver o saldo e recarregar.',
+  meta:
+    'O jeito oficial de ligar o WhatsApp da loja: o número fica registrado na Meta, '
+    + 'no nome do seu negócio. Não depende de celular ligado, não cai sozinho e não '
+    + 'corre risco de bloqueio. É o recomendado pra quem vende todo dia.',
+  qr:
+    'O jeito antigo: você lê um QR Code com o celular da loja, igual ao WhatsApp Web. '
+    + 'Liga na hora e sem papelada, mas depende do celular estar ligado e com internet. '
+    + 'Se a conexão cair, é só ler o QR de novo.',
+  cardapio:
+    'Cliente mandou mensagem e não tem ninguém no atendimento? O sistema responde na '
+    + 'hora com o link do seu cardápio, já com o telefone dele — o pedido abre com nome '
+    + 'e endereço preenchidos. Não gasta crédito: é texto pronto, sem inteligência '
+    + 'artificial. Aqui dentro você também escolhe a primeira fala, o que ele diz com a '
+    + 'loja fechada, se responde preço de produto e o recado do dia.',
+  ia:
+    'O robô que LÊ a mensagem e responde pensando, com as palavras da sua loja. Entende '
+    + 'o cliente mesmo escrito torto ou pela metade. Cada resposta dele gasta um crédito '
+    + '— por isso vem desligado até você ligar.',
+  ensino:
+    'Aqui você ensina ao robô as palavras que a SUA loja usa e ele não conhece de '
+    + 'fábrica: "opções do dia", "marmitex", "prato feito". Escreve a palavra e a '
+    + 'resposta, e vale na mensagem seguinte, sem gastar crédito. Em cima aparece o que '
+    + 'ele não soube responder, tirado de conversa de cliente de verdade — é dali que '
+    + 'você descobre o que ensinar.',
+  roteiro:
+    'As instruções que o Vendedor IA lê antes de responder qualquer cliente: tom de voz, '
+    + 'promoção que está valendo, formas de pagamento, o que fazer quando o cliente '
+    + 'reclama. Só funciona com o Vendedor IA LIGADO — com ele desligado, quem manda é o '
+    + '"Ensine o robô".',
+  notif:
+    'Os avisos que saem sozinhos no WhatsApp: a confirmação pro cliente quando o pedido '
+    + 'entra, e os avisos no SEU número quando o caixa abre ou fecha, quando mexem no '
+    + 'estoque e quando o robô precisa chamar gente. O número do responsável é quem '
+    + 'recebe esses avisos.',
+  modelos:
+    'O texto desses avisos, escrito do seu jeito. Onde você põe {nome} entra o nome do '
+    + 'cliente e onde põe {valor} entra o valor — o sistema troca na hora de enviar.',
+}
+
 const DEFAULT_MSG_PEDIDO = 'Olá {nome}! Seu pedido foi recebido com sucesso. Em breve entraremos em contato para confirmar a entrega.'
 const DEFAULT_MSG_FIADO  = 'Olá {nome}! Você tem um saldo em aberto de R$ {valor}. Entre em contato para regularizar.'
 
@@ -157,6 +205,9 @@ export default function WhatsAppConfig() {
   // todas as outras. Agora é uma lista de títulos — abre o que vai mexer.
   // Uma de cada vez, de propósito: duas abertas e já volta a ser rolo.
   const [secaoAberta, setSecaoAberta] = useState(null)
+  const [ajudaAberta, setAjudaAberta] = useState(null)
+  const alternarAjuda = (chave) =>
+    setAjudaAberta(atual => (atual === chave ? null : chave))
   const alternarSecao = (chave) =>
     setSecaoAberta(atual => (atual === chave ? null : chave))
 
@@ -867,12 +918,18 @@ export default function WhatsAppConfig() {
                 <line x1="12" y1="8" x2="12" y2="16"/>
                 <line x1="8" y1="12" x2="16" y2="12"/>
               </svg>
-              Créditos WhatsApp
+              Créditos WhatsApp<button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('creditos') }}>?</button>
             </span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 18l6-6-6-6"/>
             </svg>
           </h2>
+        {ajudaAberta === 'creditos' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.creditos}
+          </p>
+        )}
+
 
           {creditos === null ? (
             <p className="wa-hint">Carregando saldo...</p>
@@ -904,7 +961,13 @@ export default function WhatsAppConfig() {
           <h2 className="wa-section-title">
             <WhatsAppIcon size={15} />
             Conectar WhatsApp (oficial Meta)
-          </h2>
+          <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('meta') }}>?</button></h2>
+        {ajudaAberta === 'meta' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.meta}
+          </p>
+        )}
+
 
           {cloudPhone ? (
             <div className="wa-conn-connected">
@@ -966,7 +1029,13 @@ export default function WhatsAppConfig() {
         <h2 className="wa-section-title" onClick={() => alternarSecao('qr')}>
           <WhatsAppIcon size={15} />
           {CLOUD_HABILITADO ? 'Conexão por QR (alternativa)' : 'Conexão WhatsApp'}
-        </h2>
+        <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('qr') }}>?</button></h2>
+        {ajudaAberta === 'qr' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.qr}
+          </p>
+        )}
+
 
         {isLoading && (
           <p className="wa-hint" style={{ textAlign: 'center', padding: '16px 0' }}>
@@ -1065,7 +1134,13 @@ export default function WhatsAppConfig() {
 
       {/* ── Resposta automática com o link (sem IA, sem crédito) ── */}
       <div className={'wa-section wa-dobravel' + (secaoAberta === 'cardapio' ? '' : ' wa-fechada')}>
-        <h2 className="wa-section-title" onClick={() => alternarSecao('cardapio')}>🔗 Resposta automática com o cardápio</h2>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('cardapio')}>🔗 Resposta automática com o cardápio<button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('cardapio') }}>?</button></h2>
+        {ajudaAberta === 'cardapio' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.cardapio}
+          </p>
+        )}
+
 
         <div className="wa-fields">
           <label className="wa-checkbox-row">
@@ -1398,7 +1473,13 @@ export default function WhatsAppConfig() {
             <line x1="15" y1="9" x2="15.01" y2="9"/>
           </svg>
           Vendedor IA
-        </h2>
+        <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('ia') }}>?</button></h2>
+        {ajudaAberta === 'ia' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.ia}
+          </p>
+        )}
+
 
         <div className="wa-fields">
           <label className="wa-checkbox-row">
@@ -1502,7 +1583,13 @@ export default function WhatsAppConfig() {
           responder". A cliente queria as quentinhas. A palavra não estava na
           lista de fábrica — e essa lista é código. Aqui a loja resolve sozinha. */}
       <div className={'wa-section wa-dobravel' + (secaoAberta === 'ensino' ? '' : ' wa-fechada')} ref={ensinoRef}>
-        <h2 className="wa-section-title" onClick={() => alternarSecao('ensino')}>🎓 Ensine o robô{duvidas.length > 0 && (<span className="wa-badge-duvidas" title="perguntas que o robô não soube responder">{duvidas.length}</span>)}</h2>
+        <h2 className="wa-section-title" onClick={() => alternarSecao('ensino')}>🎓 Ensine o robô{duvidas.length > 0 && (<span className="wa-badge-duvidas" title="perguntas que o robô não soube responder">{duvidas.length}</span>)}<button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('ensino') }}>?</button></h2>
+        {ajudaAberta === 'ensino' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.ensino}
+          </p>
+        )}
+
 
         <p className="wa-hint" style={{ marginBottom: 14 }}>
           Quando o cliente disser uma dessas palavras, o robô responde o que você escrever.
@@ -1513,33 +1600,24 @@ export default function WhatsAppConfig() {
         </p>
 
         {duvidas.length > 0 && (
-          <div style={{
-            background: 'rgba(245,158,11,.08)',
-            border: '1px solid rgba(245,158,11,.35)', borderRadius: 10,
-            padding: '12px 14px', marginBottom: 16,
-          }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-              O robô não soube responder isto
-            </div>
+          <div className="wa-duvidas">
+            <div className="wa-duvidas-titulo">O robô não soube responder isto</div>
             <p className="wa-hint" style={{ margin: '0 0 10px' }}>
               São perguntas de clientes de verdade. Clique em <strong>Ensinar</strong> que a
               pergunta já entra no campo de baixo — você só escreve a resposta.
             </p>
             {duvidas.map(d => (
-              <div key={d.id} style={{
-                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                padding: '7px 0', borderTop: '1px solid var(--border)',
-              }}>
-                <span style={{ flex: '1 1 180px', fontSize: 14 }}>
+              <div key={d.id} className="wa-duvida-linha">
+                <span className="wa-duvida-txt">
                   “{d.pergunta}”
-                  {d.vezes > 1 && (
-                    <strong style={{ marginLeft: 6, color: 'var(--primary)' }}>{d.vezes}x</strong>
-                  )}
+                  {d.vezes > 1 && <strong className="wa-duvida-vezes">{d.vezes}x</strong>}
                 </span>
-                <button type="button" className="btn btn-primary btn-sm"
-                  onClick={() => ensinarDuvida(d)}>Ensinar</button>
-                <button type="button" className="btn btn-secondary btn-sm"
-                  onClick={() => resolverDuvida(d.id)}>Tirar da lista</button>
+                <span className="wa-duvida-acoes">
+                  <button type="button" className="btn btn-primary btn-sm"
+                    onClick={() => ensinarDuvida(d)}>Ensinar</button>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => resolverDuvida(d.id)}>Tirar da lista</button>
+                </span>
               </div>
             ))}
           </div>
@@ -1548,13 +1626,11 @@ export default function WhatsAppConfig() {
         {ensinos.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             {ensinos.map(item => (
-              <div key={item.id} style={{
-                border: '1px solid var(--border)', borderRadius: 10,
-                padding: '10px 12px', marginBottom: 8,
-                opacity: item.ativo ? 1 : 0.55,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <strong style={{ flex: '1 1 160px', fontSize: 14 }}>{item.palavras}</strong>
+              <div key={item.id}
+                className={'wa-ensino-card' + (item.ativo ? '' : ' wa-ensino-off')}>
+                <strong className="wa-ensino-palavras">{item.palavras}</strong>
+                <div className="wa-ensino-resposta">{item.resposta}</div>
+                <div className="wa-ensino-rodape">
                   <span className="wa-hint">
                     {item.usos > 0 ? 'usado ' + item.usos + 'x' : 'nunca usado'}
                   </span>
@@ -1564,14 +1640,8 @@ export default function WhatsAppConfig() {
                     onClick={() => alternarEnsino(item.id, !item.ativo)}>
                     {item.ativo ? 'Desligar' : 'Ligar'}
                   </button>
-                  <button type="button" className="btn btn-danger btn-sm"
+                  <button type="button" className="btn btn-sm wa-btn-apagar"
                     onClick={() => apagarEnsino(item.id)}>Apagar</button>
-                </div>
-                <div style={{
-                  marginTop: 6, fontSize: 13.5, color: 'var(--text-muted)',
-                  whiteSpace: 'pre-wrap',
-                }}>
-                  {item.resposta}
                 </div>
               </div>
             ))}
@@ -1588,6 +1658,7 @@ export default function WhatsAppConfig() {
           <input
             id="wa-ens-palavras"
             className="wa-input"
+            style={{ marginTop: 2 }}
             value={ensPalavras}
             onChange={e => setEnsPalavras(e.target.value)}
             placeholder="opções do dia, quentinha, marmita, o que tem hoje"
@@ -1599,6 +1670,7 @@ export default function WhatsAppConfig() {
           <textarea
             id="wa-ens-resposta"
             className="wa-textarea"
+            style={{ marginTop: 6 }}
             rows={3}
             value={ensResposta}
             onChange={e => setEnsResposta(e.target.value)}
@@ -1635,7 +1707,13 @@ export default function WhatsAppConfig() {
               <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
             </svg>
             Roteiro do Vendedor IA
-          </h2>
+          <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('roteiro') }}>?</button></h2>
+        {ajudaAberta === 'roteiro' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.roteiro}
+          </p>
+        )}
+
 
           <p className="wa-hint" style={{ marginBottom: 14 }}>
             Escreva aqui as instruções personalizadas para o seu vendedor IA. Ele vai seguir este roteiro antes de responder qualquer cliente.
@@ -1694,7 +1772,13 @@ export default function WhatsAppConfig() {
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
             Notificações automáticas
-          </h2>
+          <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('notif') }}>?</button></h2>
+        {ajudaAberta === 'notif' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.notif}
+          </p>
+        )}
+
 
           {loading ? (
             <p className="wa-hint">Carregando...</p>
@@ -1848,7 +1932,13 @@ export default function WhatsAppConfig() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             Modelos de mensagem
-          </h2>
+          <button type="button" className="wa-ajuda-btn" aria-label="Pra que serve" title="Pra que serve" onClick={e => { e.preventDefault(); e.stopPropagation(); alternarAjuda('modelos') }}>?</button></h2>
+        {ajudaAberta === 'modelos' && (
+          <p className="wa-ajuda-texto" onClick={e => { e.preventDefault(); e.stopPropagation() }}>
+            {AJUDA.modelos}
+          </p>
+        )}
+
 
           <div className="wa-fields">
             <div className="wa-input-group">
