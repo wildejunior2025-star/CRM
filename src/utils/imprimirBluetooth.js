@@ -235,10 +235,19 @@ async function escreverChunk(chunk, tentativas = 3) {
   }
 }
 
+// Se falhar já no PRIMEIRO pacote, nada chegou na impressora: o erro sai
+// marcado com `nadaEnviado`, e quem chamou pode dizer com certeza que não saiu
+// papel (Saidera, 12/11/2026: o celular que pegou a vez da pré-conta falhava
+// logo no começo e a tela tratava como "saiu parcial" — ninguém tentava de novo).
 async function escrever(bytes) {
   const TAM = 180
   for (let i = 0; i < bytes.length; i += TAM) {
-    await escreverChunk(bytes.slice(i, i + TAM))
+    try {
+      await escreverChunk(bytes.slice(i, i + TAM))
+    } catch (e) {
+      if (i === 0) { try { e.nadaEnviado = true } catch { /* ok */ } }
+      throw e
+    }
     await new Promise(r => setTimeout(r, 18)) // respiro entre pacotes
   }
 }
@@ -568,7 +577,9 @@ export async function imprimirMesaSeConectada(tipo, dados) {
       await escrever(montarContaMesaBytes(dados))
     }
     return 'ok'
-  } catch {
+  } catch (e) {
+    // Falhou antes do primeiro byte: aí sim dá pra afirmar que não saiu nada.
+    if (e?.nadaEnviado) return false
     // Erro DEPOIS de começar a enviar pra uma impressora conectada. A térmica
     // imprime o que recebe, então na prática o papel saiu (inteiro ou quase) —
     // era este caso que fazia o Salão gritar "não saiu" com a comanda já na mão

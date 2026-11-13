@@ -10293,16 +10293,20 @@ export default function PainelPedidos() {
         // a vez e a pré-conta não saía). PC/tablet de mesa segue como antes.
         if (aparelhoMovel()) {
           if (Date.now() - quando > 180_000) continue   // pedido velho: não sai de surpresa depois que a impressora reconectar
-          if (!(await podeImprimirAqui())) continue
+          // Este aparelho acabou de falhar numa pré-conta: deixa a vez pra outro.
+          if (Date.now() < precontaFalhouAteRef.current) continue
+          if (!(await podeImprimirAqui('conta'))) continue
         }
         precontaFeitaRef.current.set(c.id, quando)
         // O carimbo chega a TODO Painel aberto (PC, tablet, outra aba): a vez de
         // imprimir é dada no banco a UM só (mig 0441). Falha do banco = imprime
         // (melhor repetir que ficar sem a pré-conta).
         const carimbo = c.preconta_pedida_em
-        supabase.rpc('reservar_preconta', { p_comanda: c.id, p_carimbo: carimbo, p_quem: 'painel' })
-          .then(({ data, error }) => { if (error || data !== false) imprimirPreContaMesa(c) },
-                () => imprimirPreContaMesa(c))
+        supabase.rpc('reservar_preconta', { p_comanda: c.id, p_carimbo: carimbo, p_quem: quemSouEu() })
+          .then(({ data, error }) => {
+            if (!error && data === false) return
+            imprimirPreContaMesa(c).then(saiu => { if (!saiu && !error) devolverVezPreConta(c.id, carimbo) })
+          }, () => imprimirPreContaMesa(c))
       }
 
       const aguardando = lista.filter(c => c.status === 'aguardando_conferencia')
@@ -10484,14 +10488,56 @@ export default function PainelPedidos() {
   const segundaViaFeitaRef = useRef(new Map())
   const reimpressaoFeitaRef = useRef(new Map())
   const abertoEmRef = useRef(Date.now())
+  const precontaFalhouAteRef = useRef(0)
+
+  // PRÉ-CONTA QUE NÃO SAIU DEVOLVE A VEZ (Saidera, 09 e 12/11/2026).
+  //
+  // A vez de imprimir é dada no banco ANTES de imprimir. Quando o aparelho que
+  // ganhou achava que estava ligado na térmica mas não estava (Bluetooth caído,
+  // aba em segundo plano), o papel não saía e ninguém tentava de novo: a mesa 6
+  // foi pedida 7 vezes em 2 minutos sem papel. Só saía fechando a conta final,
+  // que não passa por essa disputa.
+  //
+  // Agora quem falha: apaga a reserva, fica 1 minuto fora da disputa e carimba
+  // o pedido de novo, pra outro aparelho com a impressora ligada pegar. Só
+  // recarimba pedido de menos de 1 minuto, pra dois aparelhos ruins não ficarem
+  // jogando a vez um pro outro.
+  async function devolverVezPreConta(comandaId, carimbo) {
+    precontaFalhouAteRef.current = Date.now() + 60_000
+    try {
+      await supabase.from('impressao_preconta').delete()
+        .eq('comanda_id', comandaId).eq('carimbo', carimbo)
+      if (Date.now() - new Date(carimbo).getTime() > 60_000) return
+      await supabase.from('comandas').update({ preconta_pedida_em: new Date().toISOString() })
+        .eq('id', comandaId).eq('preconta_pedida_em', carimbo)
+    } catch { /* melhor esforço */ }
+  }
+
+  // Quem pegou a vez, pra dar pra saber depois QUAL aparelho foi (antes era só
+  // "painel" e não dava pra dizer qual dos 6 celulares da loja falhou).
+  function quemSouEu() {
+    let modelo = ''
+    try {
+      const ua = navigator.userAgent || ''
+      const m = ua.match(/Android [\d.]+; ([^;)]+?)(?: Build\/[^;)]*)?[;)]/)
+      modelo = m ? m[1] : (/iPhone/.test(ua) ? 'iPhone' : /Windows/.test(ua) ? 'Windows' : 'outro')
+      if (/; wv\)/.test(ua)) modelo += ' app'
+    } catch { /* ok */ }
+    let bt = ''
+    try { bt = window.__fwcBtConectada ? ' bt' : '' } catch { /* ok */ }
+    return `painel ${modelo}${bt}`.slice(0, 60)
+  }
 
   // Este aparelho tem COMO imprimir agora? (térmica Bluetooth conectada, ou app
   // FWC no PC). A vez de imprimir é dada no banco a UM só — se quem ganhasse a
   // vez fosse um aparelho sem impressora, o papel não sairia em lugar nenhum.
-  async function podeImprimirAqui() {
+  // tipo 'conta': aparelho marcado como impressora da COZINHA não entra na
+  // disputa — ele ganhava a vez da pré-conta e depois a descartava ('filtrado'),
+  // e o papel não saía em lugar nenhum.
+  async function podeImprimirAqui(tipo) {
     try {
       const bt = await import('../utils/imprimirBluetooth')
-      if (bt.imprimeOrigem('mesa') && bt.estaConectada()) return true
+      if (bt.imprimeOrigem('mesa') && bt.estaConectada() && (tipo !== 'conta' || bt.imprimeConta())) return true
     } catch { /* sem Bluetooth */ }
     try {
       const mod = await import('../utils/imprimirCupom')
@@ -10542,7 +10588,7 @@ export default function PainelPedidos() {
 
   async function imprimirPreContaMesa(c) {
     const itens = Array.isArray(c.comanda_itens) ? c.comanda_itens : []
-    if (!itens.length) return
+    if (!itens.length) return true   // nada a imprimir: não é falha
     const subtotal = itens.reduce((s, it) => s + Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 1), 0)
     const pct = Number(empresa?.taxa_servico_pct ?? 0)
     const taxa = calcularTaxa(itens, pct, true)
@@ -10557,8 +10603,18 @@ export default function PainelPedidos() {
       // Pré-conta não fala em pagamento: a mesa ainda vai escolher.
       formaPagamento: '', pagamentos: [], empresa, preConta: true,
     }
-    if (await viaBluetooth('conta', dados)) return
+    // Prazo de 10s: térmica que "está conectada" mas não responde deixava a
+    // tentativa pendurada sem fim, e a vez presa neste aparelho.
+    const viaBt = await Promise.race([
+      viaBluetooth('conta', dados),
+      new Promise(r => setTimeout(() => r(false), 10_000)),
+    ])
+    if (viaBt && viaBt !== 'filtrado') return true
+    // Celular sem Bluetooth funcionando não tem outra saída (não há app FWC
+    // nem janela do navegador aqui): avisa quem chamou que não saiu.
+    if (aparelhoMovel()) return false
     imprimirHtml(montarContaPresencialHtml(dados), empresa?.nome, { origem: 'mesa', soApp: semJanelaDoNavegador(), soFrente: true })
+    return true
   }
 
   // Recebe os DADOS da conta (não o HTML pronto): a Bluetooth monta em ESC/POS,
