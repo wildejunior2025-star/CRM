@@ -5,7 +5,7 @@ import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual, acharRostos,
-  GIRO_LADO,
+  placaDeVideo,
 } from '../../lib/reconhecimentoFacial'
 import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
 
@@ -36,6 +36,9 @@ const LEITURA_LENTA_MS = 330      // acima disso o detector baixa pra nao deixar
 // De quanto em quanto tempo tenta religar a catraca sozinha. Eram 20 s, e
 // nesses 20 s o aluno ficava parado na porta sem ninguem entender por que.
 const RELIGAR_MS = 4000
+// Quanto o rosto pode estar virado e a leitura ainda valer. Mais folgado que
+// o do cadastro (0,15), porque na catraca o aluno chega andando.
+const GIRO_NA_CATRACA = 0.25
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
@@ -262,9 +265,10 @@ export default function AcademiaRecepcao() {
           // o aluno fica esperando. Alivia o detector uma vez e segue.
           if (media > LEITURA_LENTA_MS) aliviarDetector()
           const motor = window.faceapi?.tf?.getBackend?.()
+          const placa = placaDeVideo()
           msRef.current = Math.round(media)
-          motorRef.current = motor ? `${motor} ${detectorAtual()}` : null
-          setDiag(d => ({ ...d, ms: Math.round(media), detector: detectorAtual(), backend: motor }))
+          motorRef.current = motor ? `${motor} ${detectorAtual()} ${placa}`.slice(0, 80) : null
+          setDiag(d => ({ ...d, ms: Math.round(media), detector: detectorAtual(), backend: motor, placa }))
           tempos = []
         }
         // Sem rosto nenhum: volta pra triagem, que é o modo de sala vazia.
@@ -287,11 +291,12 @@ export default function AcademiaRecepcao() {
         triagem = false
         setAjuste(null)
 
-        // Rosto virado nao vale como leitura. O cadastro ja recusa amostra de
-        // lado pelo mesmo motivo: de lado a digital do rosto sai torta e pode
-        // cair perto de qualquer um. Foi o que liberou a pessoa errada em
-        // 13/11. Aqui nao zera o contador — so nao conta, e tenta de novo.
-        if (Math.abs(r.giro) > GIRO_LADO) {
+        // Rosto virado nao vale como leitura: de lado a digital sai torta e
+        // pode cair perto de qualquer um. Mas aqui o limite e mais folgado
+        // que no cadastro (0,25 contra 0,15): no cadastro da pra pedir pro
+        // aluno se endireitar, na catraca ele chega andando e nunca fica
+        // perfeitamente de frente — com 0,15 a catraca parava de reconhecer.
+        if (Math.abs(r.giro) > GIRO_NA_CATRACA) {
           setAjuste('Olhe pra câmera')
           await esperar(0)
           continue
@@ -500,7 +505,7 @@ export default function AcademiaRecepcao() {
         )}
         {diag.ms && (
           <div className="ac-rec-diag">
-            leitura {diag.ms} ms · {diag.backend}{diag.detector ? ` · detector ${diag.detector}` : ''}{diag.res ? ` · câmera ${diag.res}` : ''}
+            leitura {diag.ms} ms · {diag.backend}{diag.placa ? ` (${diag.placa})` : ''}{diag.detector ? ` · detector ${diag.detector}` : ''}{diag.res ? ` · câmera ${diag.res}` : ''}
             {diag.dist != null ? ` · distância ${diag.dist.toFixed(3)}` : ''}
             {diag.margem != null && diag.margem !== Infinity ? ` · margem ${diag.margem.toFixed(3)}` : ''}
           </div>

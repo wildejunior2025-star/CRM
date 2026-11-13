@@ -24,12 +24,19 @@ export const MARGEM_MINIMA = 0.05
 
 let carregando = null
 
-// O navegador deste aparelho tem placa de vídeo pra usar?
-function temPlacaDeVideo() {
+// Qual placa de vídeo o navegador está usando de verdade. Em PC de loja o
+// Chrome às vezes diz "webgl" mas por baixo é o SwiftShader, que é a placa
+// imitada no processador — e aí cada leitura passa de meio segundo. O nome
+// aparece no diagnóstico da recepção, pra dar pra saber sem ir até lá.
+export function placaDeVideo() {
   try {
     const c = document.createElement('canvas')
-    return !!(c.getContext('webgl2') || c.getContext('webgl'))
-  } catch { return false }
+    const gl = c.getContext('webgl2') || c.getContext('webgl')
+    if (!gl) return 'sem placa'
+    const info = gl.getExtension('WEBGL_debug_renderer_info')
+    const nome = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
+    return String(nome || '?').slice(0, 60)
+  } catch { return '?' }
 }
 
 function carregarScript(src) {
@@ -76,20 +83,14 @@ export function carregarFaceApi(aviso = () => {}) {
       if (!faceapi.tf.getBackend()) {
         try { await faceapi.tf.setBackend('cpu') } catch { /* segue */ }
       }
-      // Mas se ele caiu no processador tendo placa de vídeo, é um aluno
-      // parado na porta por nada: no processador cada leitura passa de meio
-      // segundo, na placa fica na casa dos 60 ms. Isso acontece quando o
-      // Chrome liga sem aceleração (acontece em PC de loja, depois de
-      // atualização de driver). Tenta voltar pra placa uma vez.
-      if (faceapi.tf.getBackend() === 'cpu' && temPlacaDeVideo()) {
-        aviso('Ligando a placa de vídeo...')
-        try {
-          await faceapi.tf.setBackend('webgl')
-          await comPrazo(faceapi.tf.ready(), 10, 'ligando a placa de vídeo')
-        } catch {
-          try { await faceapi.tf.setBackend('cpu'); await faceapi.tf.ready() } catch { /* segue */ }
-        }
-      }
+      // TIRADO em 13/11/2026, no mesmo dia em que entrou. A ideia era: se o
+      // aparelho caiu no processador tendo placa de vídeo, forçar a placa,
+      // que é ~10x mais rápida. O problema é que quando o tensorflow NÃO
+      // escolhe a placa sozinho é porque ela não serve pra ele — e forçar
+      // deixa a conta rodando num lugar quebrado, que não dá erro: devolve
+      // número sem sentido. O resultado é a câmera não reconhecer NINGUÉM,
+      // que foi o que aconteceu no celular. Quem escolhe o motor é o
+      // tensorflow; a gente só mostra qual foi, no diagnóstico.
 
       const modelos = [
         ['Baixando o detector (2 de 4)...', faceapi.nets.tinyFaceDetector, 'baixando o detector'],
