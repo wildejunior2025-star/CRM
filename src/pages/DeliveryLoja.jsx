@@ -946,9 +946,36 @@ export default function DeliveryLoja() {
   // ao lado. Somar a reserva aqui seria mostrar de novo o número errado.
   const total = subtotal + (taxaIndefinida ? 0 : taxaEntrega)
 
+  // Relógio de meio em meio minuto. Sem ele a tela só descobria que a loja
+  // fechou quando alguém recarregava a página: quem estava com o cardápio
+  // aberto às 11h50 continuava com os botões liberados e fechava pedido às
+  // 12h02, com a cozinha já fechada (aconteceu na CD Bom em 02/09/2026).
+  const [tiqueRelogio, setTiqueRelogio] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Loja aberta = dentro da grade semanal E sem pausa MANUAL.
+  //
+  // `delivery_ativo` desligado com motivo "horario" é o painel tendo fechado
+  // sozinho no fim do expediente anterior — não é decisão de ninguém, e não
+  // pode segurar a loja fechada quando o horário volta (o painel pode estar
+  // desligado, ou noutro aparelho, e ninguém reabre).
+  const pausaManual = !loja?.delivery_ativo && loja?.delivery_fechado_por !== 'horario'
+  const lojaAberta = useMemo(() => !pausaManual && abertaAgora({
+    grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
+  // tiqueRelogio entra de propósito: é ele que faz a conta ser refeita sozinha.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [loja, excecoes, tiqueRelogio])
+  // Loja de encomenda (mig 0452) FECHADA: o link só mostra o que se pode
+  // encomendar. Lanche/pastel fora do horário é vitrine de coisa que ninguém
+  // consegue pedir. Só vale com a chave ligada; nas outras lojas nada muda.
+  const foraDoHorarioSoEnc = encomendaLigada && !lojaAberta
   const produtosFiltrados = useMemo(() => (filtroEstoqueBaixo
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)
-    : produtos), [produtos, filtroEstoqueBaixo])
+    : produtos).filter(p => !foraDoHorarioSoEnc || p.sob_encomenda === true),
+  [produtos, filtroEstoqueBaixo, foraDoHorarioSoEnc])
 
   // Agrupa por categoria UMA vez. Antes cada categoria varria a lista inteira
   // (`filter` dentro do `map`): no depósito eram 19 categorias × 4 mil itens =
@@ -1089,28 +1116,6 @@ export default function DeliveryLoja() {
          semAcento(p.descricao).includes(buscaTrim)))
     : null
 
-  // Relógio de meio em meio minuto. Sem ele a tela só descobria que a loja
-  // fechou quando alguém recarregava a página: quem estava com o cardápio
-  // aberto às 11h50 continuava com os botões liberados e fechava pedido às
-  // 12h02, com a cozinha já fechada (aconteceu na CD Bom em 02/09/2026).
-  const [tiqueRelogio, setTiqueRelogio] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setTiqueRelogio(t => t + 1), 30000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Loja aberta = dentro da grade semanal E sem pausa MANUAL.
-  //
-  // `delivery_ativo` desligado com motivo "horario" é o painel tendo fechado
-  // sozinho no fim do expediente anterior — não é decisão de ninguém, e não
-  // pode segurar a loja fechada quando o horário volta (o painel pode estar
-  // desligado, ou noutro aparelho, e ninguém reabre).
-  const pausaManual = !loja?.delivery_ativo && loja?.delivery_fechado_por !== 'horario'
-  const lojaAberta = useMemo(() => !pausaManual && abertaAgora({
-    grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
-  // tiqueRelogio entra de propósito: é ele que faz a conta ser refeita sozinha.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [loja, excecoes, tiqueRelogio])
   // Por que fechou (feriado, folga) — vira o texto do aviso pro cliente.
   const motivoFechada = comoFicaNoDia(hojeBR(), {
     grade: loja?.horarios_funcionamento, excecoes, fechaFeriado: !!loja?.feriados_fecha,
@@ -1455,7 +1460,7 @@ export default function DeliveryLoja() {
           {agendamentoLigado
             ? ' Dá pra montar seu pedido agora e agendar pra quando a loja abrir. 🗓️'
             : ' Você pode ver o cardápio, mas não é possível fazer pedidos.'}
-          {encomendaLigada && ' Encomendas (bolos, doces, kits) podem ser feitas a qualquer hora. 🎂'}
+          {encomendaLigada && ' Por enquanto, só as encomendas (bolos, doces, kits) — elas podem ser feitas a qualquer hora. 🎂'}
         </div>
       )}
 
