@@ -4,6 +4,7 @@ import { semanaAtual } from '../../lib/microciclo'
 import { ehHoje, diaDeHoje } from '../../lib/diaSemana'
 import { buscaNoYoutube } from '../../lib/videoExercicio'
 import { receita } from '../../lib/prescricao'
+import { iso } from '../../lib/dataLocal'
 
 // "Meus treinos" do aluno: o treino do dia primeiro, com o número da máquina
 // de cada exercício — é por ele que o aluno acha o aparelho na academia.
@@ -55,7 +56,7 @@ export default function AlunoTreinos({ aluno }) {
         setAberto(trs.find(t => ehHoje(t.dia_semana))?.id || trs[0].id)
       }
       // Última carga de cada exercício e o que já foi feito hoje.
-      const hojeIso = new Date().toISOString().slice(0, 10)
+      const hojeIso = iso()
       const { data: execs } = await supabase
         .from('academia_execucoes')
         .select('item_id, carga, data')
@@ -123,7 +124,7 @@ export default function AlunoTreinos({ aluno }) {
       carga: limpo,
     })
     setFeitosHoje(f => ({ ...f, [item.id]: limpo }))
-    setUltimas(u => ({ ...u, [item.id]: { carga: limpo, data: new Date().toISOString().slice(0, 10) } }))
+    setUltimas(u => ({ ...u, [item.id]: { carga: limpo, data: iso() } }))
     setEditando(null)
     setCarga('')
     comecarDescanso(item.descanso_seg || 60)

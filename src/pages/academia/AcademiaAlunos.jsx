@@ -7,12 +7,13 @@ import { situacaoAluno, entrarTelaCheia } from '../../lib/reconhecimentoFacial'
 import { FORMAS, hojeIso, somarMeses, registrarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
 import CapturaRosto from './CapturaRosto'
 import AcademiaFicha from './AcademiaFicha'
+import { iso } from '../../lib/dataLocal'
 
 
 function hojeMais(dias) {
   const d = new Date()
   d.setDate(d.getDate() + dias)
-  return d.toISOString().slice(0, 10)
+  return iso(d)
 }
 
 const VAZIO = { nome: '', telefone: '', plano: 'Mensal', valor: '', vencimento: '', ativo: true, cortesia: false }
@@ -599,7 +600,11 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
     try {
       await registrarPagamento({
         empresaId,
-        aluno: primeira ? { ...aluno, vencimento: null } : aluno,
+        aluno,
+        // A tela mostrava "passa a vencer X" contando de hoje e salvava
+        // somando em cima do vencimento velho: a caixinha so mexia no
+        // texto da tela. Aqui ela passa a valer de verdade.
+        deHoje: primeira || contarDeHoje,
         valor: dividido ? v1 + v2 : v1,
         forma, meses, data,
         partes: dividido ? [{ forma, valor: v1 }, { forma: forma2, valor: v2 }] : null,

@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { FORMAS, hojeIso, cancelarPagamento, dinheiro, dataBr } from '../../lib/academiaPagamento'
 import SenhaCaixa from './SenhaCaixa'
 import { caixaLiberado } from '../../lib/caixaAcademia'
+import { iso } from '../../lib/dataLocal'
 
 // academia.fwcinter.com/pagamentos — quem pagou, quanto entrou e o fechamento
 // do dia. Cada linha vem do botão "Renovar" da lista de alunos (mig 0294).
@@ -12,7 +13,7 @@ const nomeForma = id => FORMAS.find(f => f.id === id)?.nome || id
 
 function primeiroDiaDoMes() {
   const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+  return iso(new Date(d.getFullYear(), d.getMonth(), 1))
 }
 
 export default function AcademiaPagamentos() {

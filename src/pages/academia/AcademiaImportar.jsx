@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
+import { iso } from '../../lib/dataLocal'
 
 // academia.fwcinter.com/importar — traz os alunos do sistema antigo.
 //
@@ -74,7 +75,7 @@ export default function AcademiaImportar() {
     setPronto({ importados: n, total: count ?? n })
   }
 
-  const hoje = new Date().toISOString().slice(0, 10)
+  const hoje = iso()
   const emDia = alunos?.filter(a => (a.vencimento || '') >= hoje).length
   const semTelefone = alunos?.filter(a => !a.telefone).length
 

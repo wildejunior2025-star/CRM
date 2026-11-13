@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient'
 import { quemAbriuOCaixa } from './caixaAcademia'
+import { iso } from './dataLocal'
 
 // Mensalidade da academia (mig 0294). "Renovar" grava o pagamento E empurra o
 // vencimento; cancelar desfaz os dois.
@@ -11,7 +12,9 @@ export const FORMAS = [
   { id: 'outro', nome: 'Outro' },
 ]
 
-export const hojeIso = () => new Date().toISOString().slice(0, 10)
+// Pelo relógio daqui, não pelo de Londres: das 21h à meia-noite o UTC já
+// está no dia seguinte e a mensalidade caía no caixa do dia errado.
+export const hojeIso = () => iso()
 
 // Soma meses no vencimento. Aluno em dia ganha a partir do vencimento dele;
 // aluno vencido conta de hoje, senão ele pagaria por um mês que já passou.
@@ -24,14 +27,18 @@ export function somarMeses(vencimento, meses = 1, apartirDe = hojeIso()) {
   // 31 de janeiro + 1 mês = 28/29 de fevereiro, não 3 de março.
   const ultimo = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
   d.setDate(Math.min(dia, ultimo))
-  return d.toISOString().slice(0, 10)
+  return iso(d)
 }
 
 // `partes`: pagamento em duas formas, ex. metade dinheiro e metade cartao.
 // Fica UM pagamento so (uma mensalidade), com as partes guardadas dentro;
 // assim a conta por forma sai certa sem contar a mensalidade duas vezes.
-export async function registrarPagamento({ empresaId, aluno, valor, forma, meses = 1, data = hojeIso(), observacao = null, partes = null }) {
-  const vencimentoDepois = somarMeses(aluno.vencimento, meses, data)
+// `deHoje`: ignora o vencimento que o aluno tem e conta o prazo a partir de
+// hoje. E a matricula nova e o caso do aluno cujo vencimento foi empurrado na
+// mao — somar em cima dele daria prazo dobrado. O vencimento_antes continua
+// guardando o que era, senao cancelar o pagamento apagaria a data do aluno.
+export async function registrarPagamento({ empresaId, aluno, valor, forma, meses = 1, data = hojeIso(), observacao = null, partes = null, deHoje = false }) {
+  const vencimentoDepois = somarMeses(deHoje ? null : aluno.vencimento, meses, data)
   const { data: user } = await supabase.auth.getUser()
   const { error: e1 } = await supabase.from('academia_pagamentos').insert({
     empresa_id: empresaId,
