@@ -720,6 +720,9 @@ export default function DeliveryLoja() {
   // Produto com complementos — chave = id + opções escolhidas (combos distintos = linhas distintas)
   function addCombo(prod, selecoes, precoUnit, qtdItem = 1, observacao = '') {
     if (!refazendo && conflitoEncomenda(prod)) return
+    // Produto com mínimo (ex.: 20 trufas) entra pelo menos com o mínimo. O
+    // produto simples também passa por aqui (o modal da observação).
+    qtdItem = Math.max(Number(qtdItem) || 1, minimoDoProduto(prod))
     // A chave leva a QUANTIDADE junto: sem isso "500 uva" e "100 uva" cairiam na
     // mesma linha do carrinho e uma apagaria a outra.
     const key = selecoes.length
