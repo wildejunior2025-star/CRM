@@ -984,20 +984,28 @@ export default function DeliveryLoja() {
     } catch { /* sem armazenamento: segue o padrão */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loja?.id])
-  const modoEnc = !lojaAberta ? 'encomenda' : (modoEncEscolhido || 'agora')
+  // Primeira visita (nada escolhido ainda): os dois botões vêm GRANDES e em
+  // destaque e o cardápio fica vazio de propósito — o cliente precisa escolher
+  // um pra ver os produtos. Depois de escolher, os botões encolhem. A busca
+  // por nome continua achando tudo.
+  const semModoEnc = encomendaLigada && !modoEncEscolhido
+  const modoEnc = semModoEnc ? null : (!lojaAberta ? 'encomenda' : modoEncEscolhido)
   const escolherModoEnc = (m) => {
     setModoEncEscolhido(m)
     setCatAberta(null)
     try { localStorage.setItem(chaveModoEnc, m) } catch { /* ok */ }
   }
+  const buscandoEnc = busca.trim() !== ''
   const foraDoHorarioSoEnc = encomendaLigada && modoEnc === 'encomenda'
   const soLanche = encomendaLigada && modoEnc === 'agora'
+  const cardapioVazioEnc = semModoEnc && !buscandoEnc
   const produtosFiltrados = useMemo(() => (filtroEstoqueBaixo
     ? produtos.filter(p => p.estoque != null && p.estoque_minimo != null && p.estoque <= p.estoque_minimo)
     : produtos)
     .filter(p => !foraDoHorarioSoEnc || p.sob_encomenda === true)
-    .filter(p => !soLanche || p.sob_encomenda !== true),
-  [produtos, filtroEstoqueBaixo, foraDoHorarioSoEnc, soLanche])
+    .filter(p => !soLanche || p.sob_encomenda !== true)
+    .filter(() => !cardapioVazioEnc),
+  [produtos, filtroEstoqueBaixo, foraDoHorarioSoEnc, soLanche, cardapioVazioEnc])
 
   // Agrupa por categoria UMA vez. Antes cada categoria varria a lista inteira
   // (`filter` dentro do `map`): no depósito eram 19 categorias × 4 mil itens =
@@ -1063,7 +1071,9 @@ export default function DeliveryLoja() {
   // até o card e deixar ele clicar de novo é um passo a mais à toa.
   function irParaProduto(p, abrirSempre = false) {
     // Produto de encomenda pedido por link/atalho: troca pro grupo certo.
-    if (p?.sob_encomenda === true && encomendaLigada) setModoEncEscolhido('encomenda')
+    if (encomendaLigada && (p?.sob_encomenda === true || !modoEncEscolhido)) {
+      setModoEncEscolhido(p?.sob_encomenda === true ? 'encomenda' : 'agora')
+    }
     if (!p) return
     // Rola até o card antes de abrir: quando o cliente fechar a tela, ele cai
     // no produto dentro do cardápio e não lá no topo.
@@ -1451,25 +1461,28 @@ export default function DeliveryLoja() {
       </div>
 
       {encomendaLigada && (
-        <div className="dloja-modo-enc" role="tablist" aria-label="Tipo de pedido">
-          <button type="button" role="tab" aria-selected={modoEnc === 'agora'}
-            className={'dloja-modo-enc-btn' + (modoEnc === 'agora' ? ' ativo' : '')}
-            disabled={!lojaAberta}
-            onClick={() => escolherModoEnc('agora')}>
-            <span className="dloja-modo-enc-titulo">🛵 Pedir agora</span>
-            <small>{lojaAberta ? 'Lanches e bebidas' : 'Fechado no momento'}</small>
-          </button>
-          <button type="button" role="tab" aria-selected={modoEnc === 'encomenda'}
-            className={'dloja-modo-enc-btn' + (modoEnc === 'encomenda' ? ' ativo' : '')}
-            onClick={() => escolherModoEnc('encomenda')}>
-            <span className="dloja-modo-enc-titulo">🎂 Encomendar</span>
-            <small>Bolos, doces e kits para uma data</small>
-          </button>
+        <div className={'dloja-modo-enc' + (semModoEnc ? ' dloja-modo-enc--grande' : '')}>
+          {semModoEnc && <div className="dloja-modo-enc-chamada">👇 Como você quer pedir?</div>}
+          <div className="dloja-modo-enc-linha" role="tablist" aria-label="Tipo de pedido">
+            <button type="button" role="tab" aria-selected={modoEnc === 'agora'}
+              className={'dloja-modo-enc-btn' + (modoEnc === 'agora' ? ' ativo' : '')}
+              disabled={!lojaAberta}
+              onClick={() => escolherModoEnc('agora')}>
+              <span className="dloja-modo-enc-titulo">🛵 Pedir agora</span>
+              <small>{lojaAberta ? 'Lanches e bebidas' : 'Fechado no momento'}</small>
+            </button>
+            <button type="button" role="tab" aria-selected={modoEnc === 'encomenda'}
+              className={'dloja-modo-enc-btn' + (modoEnc === 'encomenda' ? ' ativo' : '')}
+              onClick={() => escolherModoEnc('encomenda')}>
+              <span className="dloja-modo-enc-titulo">🎂 Encomendar</span>
+              <small>Bolos, doces e kits para uma data</small>
+            </button>
+          </div>
         </div>
       )}
 
       {/* ── Barra de categorias (some durante a busca) ── */}
-      {!buscaTrim && (
+      {!buscaTrim && !cardapioVazioEnc && (
       <nav className="dloja-cat-nav" ref={navRef} aria-label="Categorias">
         <div className="dloja-cat-nav-inner">
           {categorias.map(cat => (
