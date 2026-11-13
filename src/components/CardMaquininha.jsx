@@ -20,7 +20,7 @@ const MODO_TXT = {
   STANDALONE: { txt: 'Modo avulso: ainda não recebe do sistema', cor: '#d97706' },
 }
 
-export default function CardMaquininha({ empresa, refreshProfile }) {
+export default function CardMaquininha({ empresa, refreshProfile, fechada = false, onAlternar }) {
   const conectado = !!empresa?.mp_point_conectado
   const [msg, setMsg] = useState(null)              // { tipo: 'ok'|'erro', texto }
   const [ocupado, setOcupado] = useState(false)
@@ -122,8 +122,8 @@ export default function CardMaquininha({ empresa, refreshProfile }) {
   })
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>💳 Cobrar na maquininha (Mercado Pago Point)</h2>
+    <div className={'card' + (onAlternar ? ' sec-dobravel' : '') + (fechada ? ' sec-fechada' : '')} style={{ marginBottom: 16 }}>
+      <h2 onClick={onAlternar} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>💳 Cobrar na maquininha (Mercado Pago Point)</h2>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
         O garçom aperta <strong>"Cobrar na maquininha"</strong> na mesa, o valor da conta aparece na
         maquininha, o cliente paga e a <strong>mesa fecha sozinha</strong>. O dinheiro cai na conta

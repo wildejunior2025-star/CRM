@@ -156,3 +156,11 @@ a {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
+/* Seções dobradas (13/11/2026): fechada, o card é só o título; o conteúdo
+   continua montado (o que foi digitado não se perde ao abrir e fechar). */
+.card.sec-dobravel > h2 { cursor: pointer; user-select: none; display: flex; align-items: center; }
+.card.sec-dobravel > h2::after { content: '▾'; margin-left: auto; padding-left: 10px; color: var(--text-muted); font-size: 12px; }
+.card.sec-fechada > h2::after { content: '▸'; }
+.card.sec-fechada > h2 { margin-bottom: 0 !important; }
+.card.sec-fechada > *:not(h2) { display: none; }

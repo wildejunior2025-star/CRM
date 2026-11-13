@@ -12,6 +12,11 @@ import '../components/Page.css'
 
 export default function MinhaLoja({ secao = 'loja' }) {
   const { empresa, refreshProfile } = useAuth()
+  // Seções dobradas na tela Pagamento (13/11/2026): eram cinco blocos grandes
+  // abertos, um embaixo do outro. Mesmo padrão do WhatsApp — só uma aberta por
+  // vez; o conteúdo continua montado, então o que foi digitado não se perde.
+  const [secaoPag, setSecaoPag] = useState('formas')
+  const alternarSecaoPag = (k) => setSecaoPag(a => (a === k ? null : k))
   const SECAO_TITULO = { loja: 'Minha Loja', pagamentos: 'Pagamento', integracoes: 'Integrações', fiscal: 'Nota Fiscal', conta: 'Conta' }
 
   const [nome, setNome] = useState('')
@@ -936,8 +941,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
 
       {secao === 'pagamentos' && (
       <form onSubmit={handleSalvar}>
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Formas de pagamento aceitas</h2>
+        <div className={'card sec-dobravel' + (secaoPag === 'formas' ? '' : ' sec-fechada')} style={{ marginBottom: 16 }}>
+          <h2 onClick={() => alternarSecaoPag('formas')} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Formas de pagamento aceitas</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
             Marque as formas que aparecem na Nova venda e no checkout da sua Loja Online.
             Desmarcou, some do botão — e pelo menos uma precisa ficar ligada.
@@ -1072,8 +1077,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
         {/* ── COMO O CAIXA FUNCIONA (migs 0173/0336) ──
             As duas chaves já existiam no banco e não tinham onde ligar: quem
             quisesse mudar dependia de a gente mexer no SQL. */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Como o caixa funciona</h2>
+        <div className={'card sec-dobravel' + (secaoPag === 'caixa' ? '' : ' sec-fechada')} style={{ marginBottom: 16 }}>
+          <h2 onClick={() => alternarSecaoPag('caixa')} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Como o caixa funciona</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
             Muda só o jeito de conferir. Nenhuma venda é alterada, e dá pra voltar atrás quando quiser.
           </p>
@@ -1137,8 +1142,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
         {/* Cupom do balcão: a única configuração de impressão que vale pra loja
             toda. O resto (o que CADA PC imprime, auto-imprimir, pausa) continua
             no painel Impressora do gestor, porque é mesmo coisa de aparelho. */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Papel que sai sozinho</h2>
+        <div className={'card sec-dobravel' + (secaoPag === 'papel' ? '' : ' sec-fechada')} style={{ marginBottom: 16 }}>
+          <h2 onClick={() => alternarSecaoPag('papel')} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Papel que sai sozinho</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
             Vale pra <strong>loja toda</strong>: todo computador, celular e a impressora do app FWC.
             Desligar não muda nada da venda — ela entra no sistema e no caixa igual.
@@ -1182,8 +1187,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
           </label>
         </div>
 
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Receber PIX automático (Mercado Pago)</h2>
+        <div className={'card sec-dobravel' + (secaoPag === 'mp' ? '' : ' sec-fechada')} style={{ marginBottom: 16 }}>
+          <h2 onClick={() => alternarSecaoPag('mp')} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Receber PIX automático (Mercado Pago)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 14 }}>
             Conecte sua conta Mercado Pago para receber os PIX dos pedidos <strong>direto nela</strong>,
             com confirmação automática (o pedido cai na loja assim que o cliente paga).
@@ -1228,10 +1233,11 @@ export default function MinhaLoja({ secao = 'loja' }) {
           )}
         </div>
 
-        <CardMaquininha empresa={empresa} refreshProfile={refreshProfile} />
+        <CardMaquininha empresa={empresa} refreshProfile={refreshProfile}
+          fechada={secaoPag !== 'maquininha'} onAlternar={() => alternarSecaoPag('maquininha')} />
 
-        <div className="card" style={{ marginBottom: 16 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX (chave manual)</h2>
+        <div className={'card sec-dobravel' + (secaoPag === 'pixmanual' ? '' : ' sec-fechada')} style={{ marginBottom: 16 }}>
+          <h2 onClick={() => alternarSecaoPag('pixmanual')} style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, marginTop: 0 }}>Pagamento PIX (chave manual)</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
             Chave PIX exibida no checkout para seus clientes pagarem pedidos.
             É ela que o cliente usa no <strong>PIX na entrega</strong> — aparece no pedido dele e no cupom do entregador.
