@@ -140,12 +140,24 @@ export default function WhatsAppConfig() {
   // Qual etiqueta acabou de ser copiada (só pra dizer "copiado ✓" por 1,5s).
   const [varCopiada,      setVarCopiada]      = useState(null)
 
+  // ── Ensine o robô (mig 0453) ──
+  // O que a loja ensinou, e o que o robô não soube responder.
+  const [ensinos,         setEnsinos]         = useState([])
+  const [duvidas,         setDuvidas]         = useState([])
+  const [ensPalavras,     setEnsPalavras]     = useState('')
+  const [ensResposta,     setEnsResposta]     = useState('')
+  const [ensEditando,     setEnsEditando]     = useState(null)
+  const [salvandoEnsino,  setSalvandoEnsino]  = useState(false)
+  const [ensinoMsg,       setEnsinoMsg]       = useState(null)
+  const ensinoRef  = useRef(null)
+
   const pollRef    = useRef(null)
   const qrRefRef   = useRef(null)
 
   useEffect(() => {
     if (!profile?.empresa_id) return
     loadConfig()
+    carregarEnsinos()
     checkStatus()
     return () => stopPolling()
   }, [profile?.empresa_id])
@@ -168,6 +180,83 @@ export default function WhatsAppConfig() {
     }
     setVarCopiada(token)
     setTimeout(() => setVarCopiada(atual => (atual === token ? null : atual)), 1500)
+  }
+
+  // ── Ensine o robô (mig 0453) ────────────────────────────────────────────
+  //
+  // A lista de palavras que o robô entende de fábrica está no código. Cada
+  // loja fala do seu jeito — "opções do dia" numa, "marmitex" na outra — e
+  // esperar um programador a cada palavra nova é o robô ficando burro
+  // enquanto a loja aprende. Aqui o dono escreve, e vale na mensagem seguinte.
+  async function carregarEnsinos() {
+    if (!profile?.empresa_id) return
+    const [{ data: es }, { data: ds }] = await Promise.all([
+      supabase.from('whatsapp_ensinos').select('*')
+        .eq('empresa_id', profile.empresa_id).order('created_at', { ascending: false }),
+      // As mais perguntadas primeiro: "20 pessoas perguntaram isso" é outra
+      // conversa que "uma pessoa perguntou uma vez".
+      supabase.from('whatsapp_duvidas').select('*')
+        .eq('empresa_id', profile.empresa_id).eq('resolvida', false)
+        .order('vezes', { ascending: false }).order('updated_at', { ascending: false })
+        .limit(30),
+    ])
+    setEnsinos(es ?? [])
+    setDuvidas(ds ?? [])
+  }
+
+  async function salvarEnsino(e) {
+    e.preventDefault()
+    const palavras = ensPalavras.trim()
+    const resposta = ensResposta.trim()
+    if (!palavras || !resposta) {
+      setEnsinoMsg({ type: 'error', text: 'Falta a palavra ou a resposta.' })
+      return
+    }
+    setSalvandoEnsino(true)
+    const { error } = ensEditando
+      ? await supabase.from('whatsapp_ensinos').update({ palavras, resposta }).eq('id', ensEditando)
+      : await supabase.from('whatsapp_ensinos')
+          .insert({ empresa_id: profile.empresa_id, palavras, resposta })
+    setSalvandoEnsino(false)
+    if (error) { setEnsinoMsg({ type: 'error', text: error.message }); return }
+    setEnsinoMsg({ type: 'success', text: 'Pronto. O robô já sabe responder isso.' })
+    setEnsPalavras(''); setEnsResposta(''); setEnsEditando(null)
+    carregarEnsinos()
+  }
+
+  async function apagarEnsino(id) {
+    if (!window.confirm('Apagar? O robô volta a não saber responder isso.')) return
+    await supabase.from('whatsapp_ensinos').delete().eq('id', id)
+    if (ensEditando === id) { setEnsEditando(null); setEnsPalavras(''); setEnsResposta('') }
+    carregarEnsinos()
+  }
+
+  async function alternarEnsino(id, ativo) {
+    await supabase.from('whatsapp_ensinos').update({ ativo }).eq('id', id)
+    carregarEnsinos()
+  }
+
+  function editarEnsino(item) {
+    setEnsEditando(item.id)
+    setEnsPalavras(item.palavras ?? '')
+    setEnsResposta(item.resposta ?? '')
+    setEnsinoMsg(null)
+    ensinoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // A pergunta real do cliente vira a palavra do ensino. É daqui que a loja
+  // aprende mais rápido: ela não adivinha o que o cliente escreve, ela lê.
+  function ensinarDuvida(duvida) {
+    setEnsEditando(null)
+    setEnsPalavras(duvida.pergunta ?? '')
+    setEnsResposta('')
+    setEnsinoMsg(null)
+    ensinoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  async function resolverDuvida(id) {
+    await supabase.from('whatsapp_duvidas').update({ resolvida: true }).eq('id', id)
+    carregarEnsinos()
   }
 
   async function loadConfig() {
@@ -1396,6 +1485,135 @@ export default function WhatsAppConfig() {
           </div>
 
         </div>
+      </div>
+
+      {/* ── Seção Ensine o robô (mig 0453) ────────────────────────────────
+          12/11/2026, Agv Grill: "Opções do dia" levou "essa eu não sei te
+          responder". A cliente queria as quentinhas. A palavra não estava na
+          lista de fábrica — e essa lista é código. Aqui a loja resolve sozinha. */}
+      <div className="wa-section" ref={ensinoRef}>
+        <h2 className="wa-section-title">🎓 Ensine o robô</h2>
+
+        <p className="wa-hint" style={{ marginBottom: 14 }}>
+          Quando o cliente disser uma dessas palavras, o robô responde o que você escrever.
+          Serve pro jeito que a <strong>sua</strong> loja fala: <em>opções do dia, quentinha,
+          marmitex, prato feito</em>. Escreva <code>{'{link}'}</code> no meio do texto e ele
+          põe aí o link do seu cardápio, já com o telefone do cliente.
+          {' '}<strong>Não gasta crédito.</strong>
+        </p>
+
+        {duvidas.length > 0 && (
+          <div style={{
+            background: 'rgba(245,158,11,.08)',
+            border: '1px solid rgba(245,158,11,.35)', borderRadius: 10,
+            padding: '12px 14px', marginBottom: 16,
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              O robô não soube responder isto
+            </div>
+            <p className="wa-hint" style={{ margin: '0 0 10px' }}>
+              São perguntas de clientes de verdade. Clique em <strong>Ensinar</strong> que a
+              pergunta já entra no campo de baixo — você só escreve a resposta.
+            </p>
+            {duvidas.map(d => (
+              <div key={d.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '7px 0', borderTop: '1px solid var(--border)',
+              }}>
+                <span style={{ flex: '1 1 180px', fontSize: 14 }}>
+                  “{d.pergunta}”
+                  {d.vezes > 1 && (
+                    <strong style={{ marginLeft: 6, color: 'var(--primary)' }}>{d.vezes}x</strong>
+                  )}
+                </span>
+                <button type="button" className="btn btn-primary btn-sm"
+                  onClick={() => ensinarDuvida(d)}>Ensinar</button>
+                <button type="button" className="btn btn-secondary btn-sm"
+                  onClick={() => resolverDuvida(d.id)}>Tirar da lista</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {ensinos.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            {ensinos.map(item => (
+              <div key={item.id} style={{
+                border: '1px solid var(--border)', borderRadius: 10,
+                padding: '10px 12px', marginBottom: 8,
+                opacity: item.ativo ? 1 : 0.55,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <strong style={{ flex: '1 1 160px', fontSize: 14 }}>{item.palavras}</strong>
+                  <span className="wa-hint">
+                    {item.usos > 0 ? 'usado ' + item.usos + 'x' : 'nunca usado'}
+                  </span>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => editarEnsino(item)}>Editar</button>
+                  <button type="button" className="btn btn-secondary btn-sm"
+                    onClick={() => alternarEnsino(item.id, !item.ativo)}>
+                    {item.ativo ? 'Desligar' : 'Ligar'}
+                  </button>
+                  <button type="button" className="btn btn-danger btn-sm"
+                    onClick={() => apagarEnsino(item.id)}>Apagar</button>
+                </div>
+                <div style={{
+                  marginTop: 6, fontSize: 13.5, color: 'var(--text-muted)',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {item.resposta}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={salvarEnsino}>
+          <label htmlFor="wa-ens-palavras" className="wa-primeira-fala-label">
+            Quando o cliente disser
+          </label>
+          <p className="wa-hint" style={{ margin: '2px 0 6px' }}>
+            Separadas por vírgula. Acento e maiúscula não importam.
+          </p>
+          <input
+            id="wa-ens-palavras"
+            className="wa-input"
+            value={ensPalavras}
+            onChange={e => setEnsPalavras(e.target.value)}
+            placeholder="opções do dia, quentinha, marmita, o que tem hoje"
+          />
+
+          <label htmlFor="wa-ens-resposta" className="wa-primeira-fala-label" style={{ marginTop: 12 }}>
+            O robô responde
+          </label>
+          <textarea
+            id="wa-ens-resposta"
+            className="wa-textarea"
+            rows={3}
+            value={ensResposta}
+            onChange={e => setEnsResposta(e.target.value)}
+            placeholder="Hoje tem quentinha de frango, carne de panela e peixe. Peça aqui: {link}"
+          />
+
+          <div className="wa-primeira-fala-acoes" style={{ marginTop: 10 }}>
+            {ensEditando && (
+              <button type="button" className="btn btn-secondary btn-sm"
+                onClick={() => { setEnsEditando(null); setEnsPalavras(''); setEnsResposta('') }}>
+                Cancelar
+              </button>
+            )}
+            <button type="submit" className="btn btn-primary btn-sm" disabled={salvandoEnsino}>
+              {salvandoEnsino ? 'Salvando...' : ensEditando ? 'Salvar alteração' : 'Ensinar o robô'}
+            </button>
+          </div>
+
+          {ensinoMsg && (
+            <div className={'wa-test-result ' + ensinoMsg.type} style={{ marginTop: 8 }}>
+              {ensinoMsg.type === 'success' ? <CheckIcon /> : <AlertIcon />}
+              {ensinoMsg.text}
+            </div>
+          )}
+        </form>
       </div>
 
       {/* ── Seção Roteiro do Vendedor IA ── */}

@@ -559,6 +559,52 @@ function recadoDoDia(
     : null
 }
 
+// ── O que a LOJA ensinou (mig 0453) ──────────────────────────────────────────
+//
+// 12/11/2026, Agv Grill: a cliente escreveu "Opções do dia" e levou "essa eu
+// não sei te responder". Ela queria as quentinhas — o cardápio responderia,
+// mas "opções do dia" não está na lista de palavras que puxa o cardápio, e
+// essa lista mora no CÓDIGO.
+//
+// O problema não é a palavra, é quem pode ensinar. Cada loja fala do seu jeito
+// (quentinha, marmitex, prato feito, "o que tem hoje"), e esperar um
+// programador a cada palavra nova é o robô ficando burro enquanto a loja
+// aprende. Aqui o dono escreve a palavra e a resposta na tela, e o robô sabe
+// na mensagem seguinte.
+type Ensino = { id: string; palavras: string; resposta: string }
+
+async function respostaEnsinada(
+  supabase: Sb, empresaId: string, texto: string, link: string,
+): Promise<string | null> {
+  const t = semAcento(texto)
+  const { data } = await supabase.from("whatsapp_ensinos")
+    .select("id, palavras, resposta")
+    .eq("empresa_id", empresaId).eq("ativo", true).limit(100)
+  const ensinos = (data ?? []) as Ensino[]
+  if (!ensinos.length) return null
+
+  // Ganha a palavra MAIS LONGA que casou, não a primeira cadastrada. Quem
+  // ensinou "opções do dia" e também "opções" quer a de cima quando o cliente
+  // escreve a frase inteira.
+  let achou: Ensino | null = null
+  let tamanho = 0
+  for (const e of ensinos) {
+    for (const bruta of String(e.palavras ?? "").split(",")) {
+      const p = semAcento(bruta).trim()
+      if (p.length < 3) continue
+      const re = new RegExp(`(^|[^a-z0-9])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+      if (re.test(t) && p.length > tamanho) { achou = e; tamanho = p.length }
+    }
+  }
+  if (!achou) return null
+
+  const resposta = String(achou.resposta ?? "").trim()
+  if (!resposta) return null
+  // O contador é o que mostra pra loja o que está pegando e o que nunca pegou.
+  await supabase.rpc("contar_uso_ensino", { p_id: achou.id })
+  return resposta.replace(/\{link\}/g, link)
+}
+
 function respostaDeEndereco(empresa: Record<string, unknown>): string | null {
   const rua = String(empresa.endereco ?? "").trim()
   if (!rua) return null
@@ -1672,6 +1718,13 @@ export async function responderSemIA({
     const recado = recadoDoDia(cfg, mensagem, excecoes)
     if (recado) return await responder(recado)
 
+    // 3-) O QUE A LOJA ENSINOU (mig 0453). Vem antes do cardápio, do horário e
+    //     do produto de propósito: palavra que o dono cadastrou na mão vale
+    //     mais que o palpite que veio de fábrica. Uma consulta por mensagem,
+    //     na tabela indexada por loja.
+    const ensinada = await respostaEnsinada(supabase, empresaId, mensagem, link)
+    if (ensinada) return await responder(ensinada)
+
     // 3a) Cardápio, horário, taxa de entrega, endereço — o que ele SABE.
     const daInfo = respostaDeInfo(mensagem, empresa, link, excecoes, falaDoPresencial, linkRecente)
     // O HORÁRIO NÃO VAI DUAS VEZES SEGUIDAS. Agv Grill, 05/11/2026: "vocês
@@ -1805,6 +1858,17 @@ export async function responderSemIA({
     //    Então: dentro da hora em que o link já foi, ele não vai mais. O que
     //    sobra é oferecer gente — que é o certo pra quem perguntou duas coisas
     //    que o robô não soube responder.
+    // O ROBÔ ANOTA O QUE NÃO SOUBE (mig 0453). É esta lista que a loja abre no
+    // gestor pra ensinar. Sem ela o dono só descobre o buraco quando o cliente
+    // reclama — e descobre uma pergunta, não as vinte que vieram antes.
+    // Pergunta repetida não vira linha nova: sobe o contador.
+    //
+    // Fica ANTES da trava de uma hora: a pergunta conta mesmo quando o robô
+    // já ofereceu atendente agora há pouco e vai calar.
+    await supabase.rpc("registrar_duvida", {
+      p_empresa: empresaId, p_phone: phone, p_pergunta: mensagem,
+    })
+
     if (!(await reservarAviso(supabase, empresaId, phone, "oferece-atendente", 60))) return false
     return await responder(`Essa eu não sei te responder por aqui. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
   } catch (e) {
