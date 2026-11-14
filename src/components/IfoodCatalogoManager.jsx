@@ -92,6 +92,39 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
 
   const notify = (tipo, texto) => setMsg({ tipo, texto })
 
+  // "Este item do iFood = este produto daqui": é o que faz o pedido baixar o
+  // estoque quando o nome de lá não bate com o de cá (ver mover_estoque_pedido_delivery).
+  const [produtosEstq, setProdutosEstq] = useState([])
+  const [vinculosProd, setVinculosProd] = useState([])
+  useEffect(() => {
+    if (!empresaId) return
+    let vivo = true
+    ;(async () => {
+      const [{ data: prods }, { data: vins }] = await Promise.all([
+        supabase.from('produtos').select('id, nome, controla_estoque').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(2000),
+        supabase.from('ifood_produto_vinculo').select('nome_norm, nome_ifood, produto_id').eq('empresa_id', empresaId),
+      ])
+      if (!vivo) return
+      setProdutosEstq(prods ?? [])
+      setVinculosProd(vins ?? [])
+    })()
+    return () => { vivo = false }
+  }, [empresaId])
+
+  async function ligarProduto(it, produtoId) {
+    const n = norm(it.nome)
+    if (!produtoId) {
+      const { error } = await supabase.from('ifood_produto_vinculo').delete().eq('empresa_id', empresaId).eq('nome_norm', n)
+      if (error) { notify('erro', error.message); return }
+      setVinculosProd(v => v.filter(x => x.nome_norm !== n))
+      return
+    }
+    const linha = { empresa_id: empresaId, nome_norm: n, nome_ifood: it.nome, produto_id: produtoId }
+    const { error } = await supabase.from('ifood_produto_vinculo').upsert(linha, { onConflict: 'empresa_id,nome_norm' })
+    if (error) { notify('erro', error.message); return }
+    setVinculosProd(v => [...v.filter(x => x.nome_norm !== n), linha])
+  }
+
   // Empresa chegou depois (ou o lojista trocou de loja): recarrega o rascunho dela.
   useEffect(() => {
     const r = lerJson(CHAVE_RASCUNHO(cacheId))
@@ -571,6 +604,31 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
                           {it.descricao}
                         </div>
                       )}
+                      {(() => {
+                        const n = norm(it.nome)
+                        const v = vinculosProd.find(x => x.nome_norm === n)
+                        const igual = !v && produtosEstq.find(p => norm(p.nome) === n)
+                        return (
+                          <div style={{ fontWeight: 400, fontSize: '.82em', marginTop: 5, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>📦 Baixa do estoque:</span>
+                            <select
+                              value={v?.produto_id ?? ''}
+                              onChange={e => ligarProduto(it, e.target.value || null)}
+                              style={{
+                                padding: '3px 6px', borderRadius: 6, fontSize: 12, maxWidth: 230,
+                                border: `1px solid ${v || igual ? 'var(--border)' : RED}`,
+                                background: 'var(--input-bg, transparent)', color: 'var(--text)',
+                              }}
+                            >
+                              <option value="">{igual ? `automático: ${igual.nome}` : '— escolher produto —'}</option>
+                              {produtosEstq.map(p => (
+                                <option key={p.id} value={p.id}>{p.nome}{p.controla_estoque === false ? ' (sem controle)' : ''}</option>
+                              ))}
+                            </select>
+                            {!v && !igual && <span style={{ color: RED, fontWeight: 700 }}>não baixa</span>}
+                          </div>
+                        )
+                      })()}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       <button type="button" className="ifc-acao" style={btnLista} onClick={() => editar(it)}>✏ Editar</button>
