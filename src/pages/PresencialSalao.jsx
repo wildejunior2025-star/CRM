@@ -757,9 +757,29 @@ export default function PresencialSalao() {
       raiz.dataset.teclado = (window.innerHeight - vv.height) > 120 ? 'aberto' : ''
     }
     ajustar()
+    // iPhone: ao fechar o teclado o visualViewport às vezes NÃO avisa, e a
+    // gaveta ficava presa na altura "com teclado" (metade da tela, com as mesas
+    // aparecendo embaixo). Reconferimos ao sair do campo e, enquanto o teclado
+    // consta como aberto, de tempos em tempos.
+    let timers = []
+    const reconferir = () => {
+      timers.forEach(clearTimeout)
+      timers = [100, 400, 900].map((ms) => setTimeout(ajustar, ms))
+    }
+    const vigia = setInterval(() => {
+      if (raiz.dataset.teclado === 'aberto') ajustar()
+    }, 700)
     vv.addEventListener('resize', ajustar)
     vv.addEventListener('scroll', ajustar)
+    window.addEventListener('resize', ajustar)
+    window.addEventListener('orientationchange', reconferir)
+    document.addEventListener('focusout', reconferir)
     return () => {
+      timers.forEach(clearTimeout)
+      clearInterval(vigia)
+      window.removeEventListener('resize', ajustar)
+      window.removeEventListener('orientationchange', reconferir)
+      document.removeEventListener('focusout', reconferir)
       vv.removeEventListener('resize', ajustar)
       vv.removeEventListener('scroll', ajustar)
       raiz.style.removeProperty('--sal-altura')
