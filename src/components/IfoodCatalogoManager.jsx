@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useConfirmar } from '../hooks/useConfirmar'
+import IfoodProdutoCombo from './IfoodProdutoCombo'
 import './IfoodCatalogo.css'
 
 // ============================================================================
@@ -611,21 +612,13 @@ export default function IfoodCatalogoManager({ empresaId, merchantId, merchantOk
                         return (
                           <div style={{ fontWeight: 400, fontSize: '.82em', marginTop: 5, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <span style={{ color: 'var(--text-muted)' }}>📦 Baixa do estoque:</span>
-                            <select
-                              value={v?.produto_id ?? ''}
-                              onChange={e => ligarProduto(it, e.target.value || null)}
-                              style={{
-                                padding: '3px 6px', borderRadius: 6, fontSize: 12, maxWidth: 230,
-                                border: `1px solid ${v || igual ? 'var(--border)' : RED}`,
-                                background: 'var(--input-bg, transparent)', color: 'var(--text)',
-                              }}
-                            >
-                              <option value="">{igual ? `automático: ${igual.nome}` : '— escolher produto —'}</option>
-                              {produtosEstq.map(p => (
-                                <option key={p.id} value={p.id}>{p.nome}{p.controla_estoque === false ? ' (sem controle)' : ''}</option>
-                              ))}
-                            </select>
-                            {!v && !igual && <span style={{ color: RED, fontWeight: 700 }}>não baixa</span>}
+                            <IfoodProdutoCombo
+                              valor={v?.produto_id ?? ''}
+                              automatico={igual || null}
+                              produtos={produtosEstq}
+                              onChange={id => ligarProduto(it, id)}
+                            />
+                            {!v && !igual && <span style={{ color: RED, fontWeight: 700 }}>não baixa do estoque</span>}
                           </div>
                         )
                       })()}
