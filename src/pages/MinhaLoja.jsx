@@ -1751,8 +1751,8 @@ export default function MinhaLoja({ secao = 'loja' }) {
                 </button>
               </div>
               <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-                No Portal do Parceiro do iFood, em <strong>Ajustes → Dados da loja</strong>. O código
-                tem 36 caracteres com tracinhos. Cada loja tem o seu.
+                No Portal do Parceiro do iFood, em <strong>Configurações → Perfil da loja</strong>: role até
+                o fim e copie o <strong>ID da loja</strong>. Ele tem 36 caracteres com tracinhos. Cada loja tem o seu.
               </p>
             </div>
           )}
