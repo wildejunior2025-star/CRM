@@ -68,6 +68,14 @@ const AUTO_CONCLUIR_ENTREGA_MS = 6 * 60 * 60 * 1000 // 6 horas
 // Status que encerram o ciclo — pedido sai do painel
 const STATUS_FINALIZADOS = new Set(['entregue', 'cancelado'])
 
+// Pedido com PIX que NUNCA foi pago (venceu os 10 min, ou o próprio cliente
+// desistiu e refez). A loja nunca chegou a ver esse pedido — ele ficava no
+// "aguardando pagamento", fora do painel — então aparecer depois na lista de
+// cancelados só gera pergunta sem resposta ("que pedido cancelado é esse?").
+// O motivo vem do cron `cancelar-pix-expirados` e da tela do cliente.
+const ehPixNaoPago = (p) => p?.status === 'cancelado'
+  && /^(PIX expirado|Cliente desistiu do PIX)/i.test(String(p?.motivo_cancelamento ?? ''))
+
 // Progressão de status por tipo de entrega
 const PROXIMO_STATUS = {
   aguardando:   'confirmado',
@@ -8582,7 +8590,7 @@ export default function PainelPedidos() {
       .in('status', ['entregue', 'cancelado'])
       .order('created_at', { ascending: false })
       .limit(40)
-    setHistorico(data || [])
+    setHistorico((data || []).filter(p => !ehPixNaoPago(p)))
     setLoadingHist(false)
   }, [empresa])
 
@@ -8722,7 +8730,7 @@ export default function PainelPedidos() {
       .order('created_at', { ascending: false })
     const todos = data || []
     setConcluidosHoje(todos.filter(p => p.status === 'entregue'))
-    setCanceladosHoje(todos.filter(p => p.status === 'cancelado'))
+    setCanceladosHoje(todos.filter(p => p.status === 'cancelado' && !ehPixNaoPago(p)))
 
     // G3 — mesas (comandas) com conta fechada hoje também entram nos concluídos
     const { data: mesas } = await supabase
