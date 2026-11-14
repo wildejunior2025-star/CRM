@@ -200,7 +200,7 @@ export default function CategoriasComplemento() {
     setLoading(true)
     const [gruposRes, prodRes, linkRes] = await Promise.all([
       supabase.from('complemento_grupos')
-        .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, preco_custo, ordem, disponivel)')
+        .select('id, nome, min, max, ordem, disponivel, regra_preco, modo_quantidade, permite_repetir, complemento_opcoes(id, nome, descricao, preco_adicional, preco_custo, ordem, disponivel)')
         .eq('empresa_id', empresaId).order('nome'),
       fetchAll(() => supabase.from('produtos').select('id, nome, categoria, descricao, preco_venda, preco_custo, ativo').eq('empresa_id', empresaId).is('arquivado_em', null).order('nome').order('id')),
       supabase.from('produto_complemento_grupos')
@@ -214,6 +214,7 @@ export default function CategoriasComplemento() {
       id: g.id, nome: g.nome, min: g.min ?? 0, max: g.max ?? 1, disponivel: g.disponivel !== false,
       regra_preco: g.regra_preco ?? 'somar',
       modo_quantidade: g.modo_quantidade === true,
+      permite_repetir: g.permite_repetir === true,
       opcoes: (g.complemento_opcoes ?? []).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)),
       links: (linksPorGrupo[g.id] ?? []),
     }))
@@ -617,6 +618,19 @@ export default function CategoriasComplemento() {
                   />
                   quantidade por opção
                 </label>
+                {/* Extras: o cliente pode pôr 2x a mesma opção. O "máx" continua
+                    sendo o total de unidades do grupo. Vale na Loja Online e no app. */}
+                {!cat.modo_quantidade && (
+                  <label className="cc-minmax" style={{ cursor: 'pointer', gap: 5 }}
+                    title="O cliente pode escolher a mesma opção mais de uma vez (ex.: 2 linguiças extras). O máx vira o total de unidades. Vale na Loja Online e no app — balcão e mesa seguem marcando uma de cada.">
+                    <input
+                      type="checkbox"
+                      checked={!!cat.permite_repetir}
+                      onChange={e => salvarCategoria(cat, { permite_repetir: e.target.checked })}
+                    />
+                    pode repetir a opção
+                  </label>
+                )}
                 {/* Como cobrar: somar (adicional comum) ou pelo mais caro (pizza meio a meio) */}
                 <span className="cc-minmax" title="Somar: cada opção soma no preço. Mais caro: vale só a opção mais cara (pizza meio a meio).">
                   cobrar

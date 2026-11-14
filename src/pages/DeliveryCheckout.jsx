@@ -2388,7 +2388,7 @@ export default function DeliveryCheckout() {
       // e quem monta não saberia quanto separar de cada um.
       nome:          i.complementos?.length
         ? `${i.nome} (${i.complementos.map(c =>
-            c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome).join(', ')})`
+            (c?.absoluto || (Number(c.qtd) || 1) > 1) ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome).join(', ')})`
         : i.nome,
       quantidade:    i.quantidade,
       preco_unitario: i.preco,

@@ -330,7 +330,7 @@ export default function PortalLoja() {
       // e entraria na sacola a R$ 0,00 — por isso falha com aviso em vez de seguir calado.
       const vinc = await fetchAll(() => supabase
         .from('produto_complemento_grupos')
-        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+        .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, permite_repetir, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
         .eq('complemento_grupos.empresa_id', resolvedId)
         .order('produto_id'))
       if (vinc.error) {
@@ -353,6 +353,7 @@ export default function PortalLoja() {
             id: g.id, nome: g.nome, min: v.min_override ?? g.min ?? 0, max: v.max_override ?? g.max ?? 1,
             regra_preco: g.regra_preco ?? 'somar', ordem: v.ordem ?? 0, opcoes,
             modo_quantidade: g.modo_quantidade === true,
+            permite_repetir: g.permite_repetir === true && g.modo_quantidade !== true,
           })
         }
         for (const k of Object.keys(porProduto)) porProduto[k].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
@@ -851,7 +852,7 @@ export default function PortalLoja() {
     const itens = itensCarrinho.map(i => ({
       produto_id: i.produto.produto_id,
       nome: i.complementos?.length
-        ? `${i.produto.nome} (${i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')})`
+        ? `${i.produto.nome} (${i.complementos.map(c => ((c?.absoluto || (Number(c.qtd) || 1) > 1) ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')})`
         : i.produto.nome,
       quantidade: i.qtd,
       preco_unitario: i.precoUnit,
@@ -1136,7 +1137,7 @@ export default function PortalLoja() {
                     {/* Item montado: mostra o que foi escolhido (sabores, borda...) */}
                     {i.ehCombo && i.complementos?.length > 0 && (
                       <span className="loja-drawer-item-sub" style={{ whiteSpace: 'normal', lineHeight: 1.35 }}>
-                        {i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
+                        {i.complementos.map(c => ((c?.absoluto || (Number(c.qtd) || 1) > 1) ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
                       </span>
                     )}
                     {i.ehCombo && i.observacao && (
@@ -1201,7 +1202,7 @@ export default function PortalLoja() {
                       {i.qtd}× {i.produto.nome}
                       {i.ehCombo && i.complementos?.length > 0 && (
                         <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.35 }}>
-                          {i.complementos.map(c => (c?.absoluto ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
+                          {i.complementos.map(c => ((c?.absoluto || (Number(c.qtd) || 1) > 1) ? `${Number(c.qtd) || 1}× ${c.nome}` : c.nome)).join(', ')}
                         </span>
                       )}
                     </span>

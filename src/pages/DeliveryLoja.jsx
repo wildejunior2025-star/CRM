@@ -401,7 +401,7 @@ export default function DeliveryLoja() {
         // porque a loja não usa complemento nenhum.
         const vinc = await lerOuFalhar(() => fetchAll(() => supabase
           .from('produto_complemento_grupos')
-          .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
+          .select('produto_id, ordem, min_override, max_override, complemento_grupos!inner(id, nome, min, max, disponivel, regra_preco, modo_quantidade, permite_repetir, complemento_opcoes(id, nome, descricao, preco_adicional, ordem, disponivel))')
           .eq('complemento_grupos.empresa_id', lojaData.id)
           .order('produto_id')))
 
@@ -438,6 +438,9 @@ export default function DeliveryLoja() {
             // Atacado (mig 0200): cliente diz QUANTO de cada opcao. O max_override
             // nao vale aqui — o sentido do modo e justamente nao ter teto.
             modo_quantidade: g.modo_quantidade === true,
+            // Pode pôr a MESMA opção mais de uma vez (2x linguiça extra); o max
+            // do grupo passa a contar unidades, não opções diferentes.
+            permite_repetir: g.permite_repetir === true && g.modo_quantidade !== true,
           })
         }
         produtosFinal = produtosFinal.map(p => ({
@@ -2412,7 +2415,7 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
   const precoUnit = qtdItem > 0 ? precoBase + adicional / qtdItem : precoBase + adicional
   const totalItem = precoUnit * (qtdItem || 1)
 
-  const faltando = grupos.filter(g => g.modo_quantidade
+  const faltando = grupos.filter(g => (g.modo_quantidade || g.permite_repetir)
     ? somaQtd(sel, g.id) < (g.min ?? 0)
     : nEscolhidas(sel, g.id) < (g.min ?? 0))
   // Com a loja fechada esta tela ainda ABRE (o link do robô e o banner levam
@@ -2474,7 +2477,8 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
             const qtdSel = nEscolhidas(sel, grupo.id)
             const totalGrupo = somaQtd(sel, grupo.id)
             const obrig = (grupo.min ?? 0) > 0
-            const incompleto = grupo.modo_quantidade
+            const repete = !!grupo.permite_repetir && !grupo.modo_quantidade && (grupo.max ?? 1) > 1
+            const incompleto = (grupo.modo_quantidade || repete)
               ? totalGrupo < (grupo.min ?? 0)
               : qtdSel < (grupo.min ?? 0)
             const pulouPraCa = destaque === grupo.id
@@ -2497,7 +2501,9 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
                           : (obrig ? `Mínimo ${grupo.min}` : 'Escolha a quantidade'))
                       : grupo.min > 0 && grupo.min === grupo.max
                         ? `Escolha ${grupo.max}`
-                        : `${obrig ? 'Obrigatório' : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
+                        : repete && totalGrupo > 0
+                          ? `${totalGrupo} de ${grupo.max}`
+                          : `${obrig ? 'Obrigatório' : 'Opcional'}${grupo.max > 1 ? ` · até ${grupo.max}` : ''}`}
                   </span>
                 </div>
                 {cobraPeloMaior(grupo) && (
@@ -2511,11 +2517,15 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
                   {bloco.opcoes.map(opcao => {
                     const qtdOpcao = Number(sel[grupo.id]?.[opcao.id]) || 0
                     const marcado = qtdOpcao > 0
-                    const bloqueado = !marcado && grupo.max > 1 && qtdSel >= grupo.max
+                    const bloqueado = !repete && !marcado && grupo.max > 1 && qtdSel >= grupo.max
+                    // Repetir: o teto é o TOTAL de unidades do grupo, não as opções diferentes.
+                    const tetoOpcao = repete ? Math.max(0, grupo.max - (totalGrupo - qtdOpcao)) : Infinity
+                    const mudaQtd = (n) => setQtd(grupo, opcao, repete ? Math.min(n, tetoOpcao) : n)
 
                     // Atacado: linha com − / número / +. O número é um campo de
                     // verdade porque ninguém clica 500 vezes no + — desiste antes.
-                    if (grupo.modo_quantidade) return (
+                    // Com `permite_repetir` usa a mesma linha, mas com teto no total.
+                    if (grupo.modo_quantidade || repete) return (
                       <div
                         key={opcao.id}
                         style={{
@@ -2534,11 +2544,16 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
                             </span>
                           )}
                         </span>
+                        {repete && rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt) && (
+                          <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>
+                            {rotuloPrecoOpcao(grupo, opcao.preco_adicional, fmt)}
+                          </span>
+                        )}
                         <div className="dloja-qty" style={{ flexShrink: 0 }}>
                           <button
                             type="button" className="dloja-qty-btn" aria-label={`Menos ${opcao.nome}`}
                             disabled={qtdOpcao <= 0}
-                            onClick={() => setQtd(grupo, opcao, qtdOpcao - 1)}
+                            onClick={() => mudaQtd(qtdOpcao - 1)}
                           >
                             <IconMinus />
                           </button>
@@ -2547,7 +2562,7 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
                             aria-label={`Quantidade de ${opcao.nome}`}
                             value={qtdOpcao === 0 ? '' : qtdOpcao}
                             placeholder="0"
-                            onChange={e => setQtd(grupo, opcao, e.target.value)}
+                            onChange={e => mudaQtd(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
                             onFocus={e => e.target.select()}
                             style={{
                               width: 62, textAlign: 'center', fontSize: 14, fontWeight: 700,
@@ -2557,7 +2572,8 @@ export function OptionsModal({ produto, draftKey, rascunho, onClose, onConfirm, 
                           />
                           <button
                             type="button" className="dloja-qty-btn" aria-label={`Mais ${opcao.nome}`}
-                            onClick={() => setQtd(grupo, opcao, qtdOpcao + 1)}
+                            disabled={repete && qtdOpcao >= tetoOpcao}
+                            onClick={() => mudaQtd(qtdOpcao + 1)}
                           >
                             <IconPlus />
                           </button>
