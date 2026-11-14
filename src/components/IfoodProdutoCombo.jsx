@@ -18,7 +18,10 @@ export default function IfoodProdutoCombo({ valor, automatico, produtos, onChang
   const escolhido = valor ? produtos.find(p => p.id === valor) : null
   const ligado = escolhido || automatico
   const texto = escolhido ? escolhido.nome : automatico ? automatico.nome : 'Escolher produto'
-  const cor = ligado ? VERDE : RED
+  // Produto ligado mas SEM controle de estoque (ex.: prato feito na hora): o
+  // pedido não baixa nada, então não pode aparecer verde como se baixasse.
+  const semControle = !!ligado && ligado.controla_estoque === false
+  const cor = semControle ? '#6b7280' : ligado ? VERDE : RED
 
   function abrir() {
     const r = botaoRef.current?.getBoundingClientRect()
@@ -81,13 +84,15 @@ export default function IfoodProdutoCombo({ valor, automatico, produtos, onChang
           display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%',
           padding: '5px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
           border: `1px solid ${cor}`, color: cor,
-          background: ligado ? 'rgba(22,163,74,.08)' : 'rgba(234,29,44,.08)',
+          background: semControle ? 'rgba(107,114,128,.10)' : ligado ? 'rgba(22,163,74,.08)' : 'rgba(234,29,44,.08)',
         }}
         title="Clique para escolher qual produto baixa do estoque"
       >
-        <span>{ligado ? '✓' : '⚠'}</span>
+        <span>{semControle ? '–' : ligado ? '✓' : '⚠'}</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{texto}</span>
-        {!escolhido && automatico && <span style={{ fontWeight: 400, opacity: .75 }}>· automático</span>}
+        {semControle
+          ? <span style={{ fontWeight: 400, opacity: .85 }}>· sem controle de estoque</span>
+          : !escolhido && automatico && <span style={{ fontWeight: 400, opacity: .75 }}>· automático</span>}
         <span style={{ opacity: .6 }}>▾</span>
       </button>
 
