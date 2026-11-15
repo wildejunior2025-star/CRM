@@ -6,7 +6,7 @@ import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { tocarPedidoNovo, prepararSom, somBloqueado } from '../lib/somChamado'
-import { moduloAtivo } from '../lib/modulos'
+import { moduloAtivo, moduloVisivel } from '../lib/modulos'
 import BaixaInsumos from '../components/BaixaInsumos'
 import PrecoEditavel from '../components/PrecoEditavel'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
@@ -8448,7 +8448,7 @@ export default function PainelPedidos() {
   const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
-  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id, true, somAtivo && moduloAtivo(empresa, 'alarme_chamado'))
+  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id, moduloVisivel(empresa, 'whatsapp'), somAtivo && moduloAtivo(empresa, 'alarme_chamado'))
 
   // Robô ligado = o vendedor de IA ou a resposta automática do link. Um dos dois
   // basta; nenhum dos dois quer dizer que a conversa é 100% humana.
@@ -8751,6 +8751,10 @@ export default function PainelPedidos() {
   useEffect(() => {
     if (!empresa) return
     let ativo = true
+    // Loja com o módulo WhatsApp oculto (Super Admin) não atende o zap pelo
+    // gestor: nem busca nem escuta essas mensagens. O chat do App e da Loja
+    // Online continua, porque ali o cliente não tem outro caminho.
+    const comZap = moduloVisivel(empresa, 'whatsapp')
     ;(async () => {
       // Só as conversas de HOJE — as de dias anteriores não aparecem no gestor.
       const inicioHoje = new Date(); inicioHoje.setHours(0, 0, 0, 0)
@@ -8782,7 +8786,7 @@ export default function PainelPedidos() {
       //
       // Teto alto e do mais NOVO pro mais velho: a loja passa de 300 falas num
       // dia, e cortar pelo começo derrubava a conversa que acabou de chegar.
-      const { data: daLoja } = await supabase
+      const { data: daLoja } = comZap ? await supabase
         .from('mensagens_chat')
         .select('cliente_ref')
         .eq('empresa_id', empresa.id)
@@ -8790,7 +8794,7 @@ export default function PainelPedidos() {
         .eq('remetente', 'loja')
         .gte('created_at', inicioHoje.toISOString())
         .order('created_at', { ascending: false })
-        .limit(2000)
+        .limit(2000) : { data: [] }
       const refsAbertas = [...new Set((daLoja ?? []).map(r => r.cliente_ref).filter(Boolean))]
       let doZap = []
       if (refsAbertas.length) {
@@ -8814,6 +8818,7 @@ export default function PainelPedidos() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'mensagens_chat', filter: `empresa_id=eq.${empresa.id}` },
         payload => {
+          if (!comZap && payload.new?.canal === 'whatsapp') return
           if (payload.eventType === 'INSERT') {
             setChatMsgs(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new])
           } else if (payload.eventType === 'UPDATE') {
