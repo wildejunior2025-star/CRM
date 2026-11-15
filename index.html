@@ -66,8 +66,17 @@
           try {
             if (!/Android/i.test(navigator.userAgent) || !('ontouchstart' in window)) return;
             var sw = window.screen && window.screen.width;
-            if (sw && sw <= 768 && window.innerWidth > 768 && _vp) {
+            if (sw && sw <= 768 && window.innerWidth > sw * 1.1 && _vp) {
               _vp.setAttribute('content', 'width=' + sw + ', initial-scale=1.0');
+            }
+            // DIAGNÓSTICO TEMPORÁRIO (só no app Android, só se a largura passar de
+            // 640): mostra os números reais do aparelho pra descobrir o motivo.
+            if (/; wv\)/.test(navigator.userAgent) && window.innerWidth > 640 && !window.__diagLarg) {
+              window.__diagLarg = 1;
+              var d = document.createElement('div');
+              d.style.cssText = 'position:fixed;left:0;bottom:0;z-index:99999;background:#000;color:#0f0;font:12px monospace;padding:3px 6px;pointer-events:none';
+              d.textContent = 'inner ' + window.innerWidth + ' screen ' + sw + 'x' + window.screen.height + ' dpr ' + window.devicePixelRatio;
+              (document.body || document.documentElement).appendChild(d);
             }
           } catch (e) {}
         };
