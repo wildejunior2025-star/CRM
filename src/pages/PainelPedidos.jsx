@@ -6,6 +6,7 @@ import { supabase, invocarEdge, fetchAll } from '../lib/supabaseClient'
 import { adicionalComplementos } from '../lib/complementos'
 import { descontosDoEntregador, descontoDoPedido, ganhoDaCorrida, rotuloDoDesconto, textoDoDesconto, temValorDigitado, rotuloValorEntregador } from '../lib/descontoEntrega'
 import { tocarPedidoNovo, prepararSom, somBloqueado } from '../lib/somChamado'
+import { moduloAtivo } from '../lib/modulos'
 import BaixaInsumos from '../components/BaixaInsumos'
 import PrecoEditavel from '../components/PrecoEditavel'
 import ModalTaxaMotoboy from '../components/ModalTaxaMotoboy'
@@ -8447,7 +8448,7 @@ export default function PainelPedidos() {
   const [salvandoPedidoChat, setSalvandoPedidoChat] = useState(false)
   // Cliente que pediu atendente no WhatsApp: o robô não inventa resposta, chama
   // gente. Toca AQUI, no gestor — é a tela que fica aberta no balcão.
-  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id, true, somAtivo)
+  const { chamados, atender: atenderChamado, silenciados: chamadosSilenciados, silenciar: silenciarChamado } = useChamados(empresa?.id, true, somAtivo && moduloAtivo(empresa, 'alarme_chamado'))
 
   // Robô ligado = o vendedor de IA ou a resposta automática do link. Um dos dois
   // basta; nenhum dos dois quer dizer que a conversa é 100% humana.
