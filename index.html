@@ -58,6 +58,22 @@
         // quando a página aparece, por isso ela precisa mudar aqui no começo).
         var _vp = document.querySelector('meta[name="viewport"]');
         if (_vp) _vp.setAttribute('content', 'width=device-width, initial-scale=1.0');
+        // WebView velho de celular Android (só no app da Play) ignora o
+        // "device-width" e desenha como PC (~980px). Se o aparelho é de tela
+        // pequena mas a página acha que é larga, força a largura real da tela.
+        // Só mexe nesse caso; Chrome e PC não passam por aqui.
+        var _ajustaLargura = function () {
+          try {
+            if (!/Android/i.test(navigator.userAgent) || !('ontouchstart' in window)) return;
+            var sw = window.screen && window.screen.width;
+            if (sw && sw <= 768 && window.innerWidth > 768 && _vp) {
+              _vp.setAttribute('content', 'width=' + sw + ', initial-scale=1.0');
+            }
+          } catch (e) {}
+        };
+        _ajustaLargura();
+        document.addEventListener('DOMContentLoaded', _ajustaLargura);
+        window.addEventListener('load', _ajustaLargura);
       }
     </script>
     <title>FWC Inter</title>
