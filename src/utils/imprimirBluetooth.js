@@ -8,7 +8,7 @@
 // "Bluetooth Classic" (SPP) NÃO aparecem aqui — nesse caso, usar o app RawBT.
 // ============================================================================
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar, nomeForma, ehFiado } from '../lib/pagamentoPartes'
-import { separarItem } from '../lib/itensPedido'
+import { separarItem, separarReferencia } from '../lib/itensPedido'
 import { agruparItensComanda } from '../lib/comanda'
 
 const ESC = 0x1b, GS = 0x1d
@@ -334,6 +334,11 @@ export function montarCupomBytes(pedido, empresa = {}) {
   const isRetirada = (pedido.tipo_entrega || 'entrega') === 'retirada'
   const numero = pedido.numero_pedido ?? String(pedido.id).slice(-4)
   const hora = new Date(pedido.created_at || Date.now()).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  // Referência do endereço sai junto do "End:"; só some das observações se
+  // realmente foi impressa lá (entrega com endereço).
+  const refObs = separarReferencia(pedido.observacoes)
+  const endTemTexto = !isRetirada && [pedido.endereco_rua, pedido.endereco_numero, pedido.endereco_complemento, pedido.endereco_bairro, pedido.endereco_cidade].some(Boolean)
+  const obsCupom = (endTemTexto && refObs.ref) ? refObs.resto : String(pedido.observacoes || '')
 
   b.center().big(true).txt(empresa.nome || 'Pedido').nl().big(false)
   if (empresa.telefone) b.txt(empresa.telefone).nl()
@@ -346,6 +351,7 @@ export function montarCupomBytes(pedido, empresa = {}) {
   if (!isRetirada) {
     const end = [pedido.endereco_rua, pedido.endereco_numero, pedido.endereco_complemento, pedido.endereco_bairro, pedido.endereco_cidade].filter(Boolean).join(', ')
     if (end) b.txt('End: ' + end).nl()
+    if (end && refObs.ref) b.bold(true).txt('Ref: ' + semAcento(refObs.ref)).nl().bold(false)
   }
   b.line()
   for (const item of (Array.isArray(pedido.itens) ? pedido.itens : [])) {
@@ -392,7 +398,7 @@ export function montarCupomBytes(pedido, empresa = {}) {
       b.txt('(cliente paga com ' + fmt(trocoPara) + ')').nl()
     } else b.txt('(troco nao informado - confirmar)').nl()
   }
-  if (pedido.observacoes) b.txt('Obs: ' + semAcento(pedido.observacoes)).nl()
+  if (obsCupom) b.txt('Obs: ' + semAcento(obsCupom)).nl()
   if (pedido.codigo_entrega) b.line().center().txt('Codigo: ' + pedido.codigo_entrega).nl().left()
   b.line().center().txt('Obrigado pela preferencia!').nl().left()
   b.nl(4).cut()

@@ -8,7 +8,7 @@
 
 import { partesPagamento, ehDividido, partePaga, aCobrarNaEntrega, trocoALevar } from '../lib/pagamentoPartes'
 import { fwcFetch } from '../lib/appFwc'
-import { separarItem } from '../lib/itensPedido'
+import { separarItem, separarReferencia } from '../lib/itensPedido'
 import { agruparItensComanda } from '../lib/comanda'
 
 
@@ -77,6 +77,11 @@ export function montarCupomHtml(pedido, empresa = {}) {
   const showTaxa = c.taxa !== false
   const showObs = c.obs !== false
   const showCodigo = c.codigo !== false
+  // Referência do endereço sai junto do "End:"; só some das observações se
+  // realmente foi impressa lá (entrega, com endereço visível).
+  const refObs = separarReferencia(pedido.observacoes)
+  const refJuntoEnd = !isRetirada && endereco && showEnd && !!refObs.ref
+  const obsCupom = refJuntoEnd ? refObs.resto : String(pedido.observacoes || '')
   const showTotalItens = c.totalItens === true
   const totalItens = itens.reduce((s, it) => s + Number(it.qtd ?? it.quantidade ?? 1), 0)
 
@@ -129,6 +134,7 @@ export function montarCupomHtml(pedido, empresa = {}) {
   <div><span class="b">Cliente:</span> ${esc(pedido.cliente_nome || '—')}</div>
   ${pedido.cliente_telefone && showTel ? `<div><span class="b">Tel:</span> ${esc(pedido.cliente_telefone)}</div>` : ''}
   ${!isRetirada && endereco && showEnd ? `<div><span class="b">End:</span> ${esc(endereco)}</div>` : ''}
+  ${!isRetirada && endereco && showEnd && refObs.ref ? `<div><span class="b">Ref: ${esc(refObs.ref)}</span></div>` : ''}
   <hr>
   <ul>${itensHtml || '<li>—</li>'}</ul>
   ${showTotalItens ? `<div class="row b"><span>Total de itens</span><span>${totalItens}</span></div>` : ''}
@@ -151,7 +157,7 @@ export function montarCupomHtml(pedido, empresa = {}) {
        <div>(cliente paga com ${fmt(pedido.troco_para)})</div>`
     : '<div>(troco não informado — confirmar)</div>') : ''}
   ${partesPagamento(pedido).some(x => x.forma === 'pix_entrega') && empresa?.chave_pix ? `<div><span class="b">Chave PIX:</span> ${esc(empresa.chave_pix)}${empresa.pix_nome ? ` — ${esc(empresa.pix_nome)}` : ''}</div>` : ''}
-  ${pedido.observacoes && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(pedido.observacoes)}</div>` : ''}
+  ${obsCupom && showObs ? `<div style="margin-top:4px"><span class="b">Obs:</span> ${esc(obsCupom)}</div>` : ''}
   ${pedido.codigo_entrega && showCodigo ? `<hr><div class="center b">Código de entrega: ${esc(pedido.codigo_entrega)}</div>` : ''}
   <hr>
   <div class="center">Obrigado pela preferência!</div>

@@ -39,6 +39,21 @@ function tiraListaColada(nome, complementos) {
   return partes.every(p => nomes.includes(p)) ? m[1].trim() : nome
 }
 
+// O iFood (e a loja online) manda o ponto de referência dentro de `observacoes`,
+// como "Referência: Em frente à Editora FTD · outro recado". Separa a referência
+// do resto pra ela sair junto do endereço no cupom, não perdida no fim do papel.
+export function separarReferencia(obs) {
+  const partes = String(obs || '').split(' · ').map(s => s.trim()).filter(Boolean)
+  let ref = null
+  const resto = []
+  for (const s of partes) {
+    const m = s.match(/^refer[eê]ncia:\s*(.+)$/i)
+    if (m && !ref) ref = m[1].trim()
+    else resto.push(s)
+  }
+  return { ref, resto: resto.join(' · ') }
+}
+
 export function separarItem(item) {
   let nome = String(item?.nome ?? '')
   let complementos = Array.isArray(item?.complementos) ? item.complementos : []

@@ -128,9 +128,25 @@ function formaPagamento(p) {
   return { cobrar: true, label: nome + (ifood ? ' (via iFood)' : '') }
 }
 
+// O iFood (e a loja online) manda o ponto de referencia dentro de `observacoes`,
+// como "Referencia: Em frente a Editora FTD · outro recado". Separa a referencia
+// do resto pra ela sair junto do endereco, nao perdida no fim do papel.
+function separarReferencia(obs) {
+  const partes = String(obs || '').split(' · ').map(s => s.trim()).filter(Boolean)
+  let ref = null
+  const resto = []
+  for (const s of partes) {
+    const m = s.match(/^refer[eê]ncia:\s*(.+)$/i)
+    if (m && !ref) ref = m[1].trim()
+    else resto.push(s)
+  }
+  return { ref, resto: resto.join(' · ') }
+}
+
 function montarCupom(pedido, empresa) {
   const p = pedido, e = empresa || {}
   const parts = [INIT]
+  const refObs = separarReferencia(p.observacoes)
 
   // Cabecalho — nome da loja grande
   parts.push(ALIGN(1), SIZE(0x11), BOLD(1))
@@ -162,6 +178,8 @@ function montarCupom(pedido, empresa) {
     const bc = [p.endereco_bairro, p.endereco_cidade].filter(Boolean).join(' - ')
     if (bc) parts.push(linha(bc))
     if (p.endereco_complemento) parts.push(linha('Compl: ' + p.endereco_complemento))
+    // Ponto de referencia junto do endereco (o motoboy le os dois de uma vez).
+    if (refObs.ref) parts.push(BOLD(1), linha('Ref: ' + refObs.ref), BOLD(0))
   }
   parts.push(divisor())
 
@@ -281,7 +299,9 @@ function montarCupom(pedido, empresa) {
   }
   parts.push(BOLD(0), ALIGN(0))
 
-  if (p.observacoes) { parts.push(divisor(), linha('OBS: ' + p.observacoes)) }
+  // Se a referencia ja saiu junto do endereco, nao repete aqui embaixo.
+  const obsFinal = ((p.tipo_entrega || 'entrega') !== 'retirada') ? refObs.resto : String(p.observacoes || '')
+  if (obsFinal) { parts.push(divisor(), linha('OBS: ' + obsFinal)) }
 
   // Rodape
   parts.push(divisor())
