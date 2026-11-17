@@ -119,6 +119,11 @@ function formaPagamento(p) {
   if (f === 'fiado') return { cobrar: false, fiado: true, label: 'F' }
   // Saldo pre-pago do cliente (mig 0436): ja foi pago adiantado, nada a cobrar.
   if (f === 'saldo') return { cobrar: false, label: 'PAGO c/ SALDO' }
+  // Vale-refeicao/alimentacao (mig 0385/0388): Pluxee, Alelo, VR e Ticket passam
+  // na maquininha. Sem este caso caiam no padrao 'Dinheiro' — o Agv Grill viu um
+  // pedido Pluxee sair no papel como Dinheiro e o motoqueiro levou troco.
+  const VALES = { pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' }
+  if (VALES[f]) return { cobrar: true, label: VALES[f] + (ifood ? ' (via iFood)' : ' (maquininha)') }
   let nome = 'Dinheiro'
   if (['cartao', 'cartao', 'credito', 'debito'].includes(f)) nome = f === 'debito' ? 'Debito' : f === 'credito' ? 'Credito' : 'Cartao'
   else if (f === 'pix') nome = 'PIX (nao confirmado)'
@@ -166,6 +171,11 @@ function montarCupom(pedido, empresa) {
   parts.push(BOLD(0), SIZE(0))
   const tipo = (p.tipo_entrega || 'entrega') === 'retirada' ? 'RETIRADA' : 'ENTREGA'
   parts.push(linha(tipo))
+  // Data e hora do pedido (hora de Fortaleza, UTC-3, sem horario de verao). O
+  // cupom do navegador e o do Bluetooth ja traziam; so o do PC saia sem data.
+  const t = new Date(new Date(p.created_at || Date.now()).getTime() - 3 * 3600 * 1000)
+  const d2 = n => String(n).padStart(2, '0')
+  parts.push(linha(d2(t.getUTCDate()) + '/' + d2(t.getUTCMonth() + 1) + '/' + t.getUTCFullYear() + ' ' + d2(t.getUTCHours()) + ':' + d2(t.getUTCMinutes())))
   parts.push(ALIGN(0))
   parts.push(divisor())
 
@@ -269,7 +279,9 @@ function montarCupom(pedido, empresa) {
     parts.push(ALIGN(1), BOLD(1))
   } else if (pg.cobrar) {
     parts.push(linha('*** COBRAR NA ENTREGA ***'))
-    parts.push(SIZE(0), linha(pg.label + ' - ' + money(p.total)))
+    // Forma na esquerda e valor na direita, na largura toda — alinhado igual ao
+    // Subtotal/TOTAL de cima (antes ia centralizado, "Dinheiro - R$ 19,99" solto).
+    parts.push(SIZE(0), ALIGN(0), kv(pg.label, money(p.total)), ALIGN(1))
     // Troco: o gestor e o app do motoqueiro ja mostravam quanto levar, so o
     // PAPEL nao — e quem separa o pedido na loja le o papel. O motoqueiro saia
     // sem o troco na mao (pedido 1014 da CDBom, 03/09/2026). O valor A LEVAR
