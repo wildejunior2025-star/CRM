@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { corAvatar, inicialDe, horaCurta, horaLista, diaRotulo, agruparBolhas } from '../lib/chatVisual'
 import './AtendimentoFWC.css'
 
 // ── Atendimento FWC ─────────────────────────────────────────────────────────
@@ -39,41 +40,6 @@ function quando(iso) {
   const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   if (d.toDateString() === hoje.toDateString()) return hora
   return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hora}`
-}
-
-const horaCurta = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-
-// Hora na lista de conversas: hoje → "14:32", ontem → "Ontem", antes → "12/11/26".
-function horaLista(iso) {
-  const d = new Date(iso)
-  const hoje = new Date()
-  if (d.toDateString() === hoje.toDateString()) return horaCurta(iso)
-  const ontem = new Date()
-  ontem.setDate(hoje.getDate() - 1)
-  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
-}
-
-// Separador de dia dentro da conversa.
-function diaRotulo(iso) {
-  const d = new Date(iso)
-  const hoje = new Date()
-  if (d.toDateString() === hoje.toDateString()) return 'Hoje'
-  const ontem = new Date()
-  ontem.setDate(hoje.getDate() - 1)
-  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-const CORES_AVATAR = ['#6d5ccf', '#0b8f7a', '#c2410c', '#2563eb', '#a21caf', '#b45309', '#0e7490', '#be123c']
-function corAvatar(chave) {
-  let h = 0
-  for (const ch of String(chave ?? '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return CORES_AVATAR[h % CORES_AVATAR.length]
-}
-function iniciais(titulo) {
-  const t = String(titulo ?? '').replace(/[^\p{L}\p{N} ]/gu, '').trim()
-  return (t[0] ?? '#')
 }
 
 function rotuloMidia(tipo) {
@@ -335,19 +301,7 @@ export default function AtendimentoFWC() {
   // Mensagens com o separador de dia e o "rabinho" (primeira bolha de cada
   // sequência do mesmo lado) já resolvidos.
   const msgsAtuais = atual?.msgs
-  const bolhas = useMemo(() => {
-    const out = []
-    let diaAnt = null
-    let remAnt = null
-    for (const m of msgsAtuais ?? []) {
-      const dia = new Date(m.created_at).toDateString()
-      const novoDia = dia !== diaAnt
-      out.push({ m, novoDia, cauda: novoDia || remAnt !== m.remetente })
-      diaAnt = dia
-      remAnt = m.remetente
-    }
-    return out
-  }, [msgsAtuais])
+  const bolhas = useMemo(() => agruparBolhas(msgsAtuais, (m) => m.remetente), [msgsAtuais])
 
   // A janela de 24h é regra da Meta. No número do Evolution ela não existe:
   // escreve e vai, a qualquer hora, sem modelo aprovado.
@@ -502,7 +456,7 @@ export default function AtendimentoFWC() {
             )}
             {lojasComTelefone.map((e) => (
               <button key={e.id} type="button" className="atw-item" onClick={() => comecarCom(e.telefone_contato, e)}>
-                <span className="atw-avatar" style={{ background: corAvatar(e.id) }}>{iniciais(e.nome)}</span>
+                <span className="atw-avatar" style={{ background: corAvatar(e.id) }}>{inicialDe(e.nome)}</span>
                 <span className="atw-item-corpo">
                   <span className="atw-item-nome">{e.nome}</span>
                   <span className="atw-item-previa">{telefoneBonito(e.telefone_contato)}</span>
@@ -525,7 +479,7 @@ export default function AtendimentoFWC() {
               return (
                 <button key={c.chave} type="button" className={`atw-item${c.chave === sel ? ' ativo' : ''}`} onClick={() => abrirConversa(c.chave)}>
                   <span className="atw-av-wrap">
-                    <span className="atw-avatar" style={{ background: corAvatar(c.chaveTel) }}>{iniciais(c.titulo)}</span>
+                    <span className="atw-avatar" style={{ background: corAvatar(c.chaveTel) }}>{inicialDe(c.titulo)}</span>
                     {/* A bolinha mostra qual número da FWC a pessoa chamou. Sem ela, duas
                         conversas do mesmo nome ficariam iguais na lista. */}
                     <span className="atw-canal" style={{ background: c.canal === 'evolution' ? '#25d366' : '#2563eb' }}
@@ -561,7 +515,7 @@ export default function AtendimentoFWC() {
             <IconeVoltar />
           </button>
         )}
-        <span className="atw-avatar p" style={{ background: corAvatar(atual.chaveTel) }}>{iniciais(atual.titulo)}</span>
+        <span className="atw-avatar p" style={{ background: corAvatar(atual.chaveTel) }}>{inicialDe(atual.titulo)}</span>
         <div className="atw-conv-info">
           <div className="atw-conv-nome">{atual.titulo}</div>
           <div className="atw-conv-sub">

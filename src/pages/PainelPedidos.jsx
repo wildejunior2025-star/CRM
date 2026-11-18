@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
@@ -51,6 +51,8 @@ import PresencialReservas from './PresencialReservas'
 import PresencialMesas from './PresencialMesas'
 import PresencialHistorico from './PresencialHistorico'
 import PresencialCozinha from './PresencialCozinha'
+import { corAvatar, inicialDe, horaCurta, horaLista, diaRotulo, agruparBolhas } from '../lib/chatVisual'
+import '../components/AtendimentoFWC.css'   // visual de WhatsApp da caixa de Mensagens
 import './PainelPedidos.css'
 import { recadoDeErro } from '../lib/erroRede'
 import { ehAppNativo } from '../lib/appNativo'
@@ -6438,15 +6440,19 @@ function CadastroRapidoNoChat({ empresaId, telefone, onNomeDoCliente }) {
 
 function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, canalLabel, aviso, empresaId, empresa, onEscolherProduto, botPausado, onDevolverAoRobo, onPausarRobo, sacola, onQtdSacola, onQtdDiretaSacola, onAvulsoSacola, onEditarSacola, onObsSacola, onEnviarSacola, enviandoSacola, onAbrirSacola, onFinalizarPedido, salvandoPedido, onPedirLocalizacao, onUsarLocalizacao, onUsarEndereco, onNomeDoCliente, cadastroVersao, pinChat, enderecoRobo, onEnviarCategoria, enviandoCategoria, roboLigado }) {
   const g = useTelaGrande()
-  const fimRef = useRef(null)
+  const corpoRef = useRef(null)
+  const campoRef = useRef(null)
   // No celular a sacola + o "fechar pedido" abriam empilhados embaixo da
   // conversa e empurravam as mensagens até não sobrar nada: quem estava
   // atendendo ficava preso numa tela de formulário, sem caminho de volta.
   // Agora é gaveta: abre no botão, fecha no botão, e a conversa nunca some.
   const [sacolaAberta, setSacolaAberta] = useState(false)
+  // Sempre no fim da conversa. Rola só a caixa das mensagens: scrollIntoView
+  // puxava a gaveta inteira junto.
   useEffect(() => {
-    fimRef.current?.scrollIntoView({ block: 'end' })
-  }, [thread.msgs.length])
+    const el = corpoRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [thread.msgs.length, thread.cliente_ref])
   // Trocou de conversa: a gaveta da anterior não fica aberta na nova.
   useEffect(() => { setSacolaAberta(false) }, [thread.cliente_ref])
   // Entrou o primeiro item por fora (o robô transferiu com produto, a busca do
@@ -6457,25 +6463,45 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
     if (!g && antesItens.current === 0 && nItens > 0) setSacolaAberta(true)
     antesItens.current = nItens
   }, [nItens, g])
+  // A caixa de escrever cresce com o texto (até 5 linhas) e volta ao tamanho
+  // de uma linha quando o texto some (depois de enviar).
+  useEffect(() => {
+    const el = campoRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+  }, [texto])
+  // Separador de dia e "rabinho" na primeira bolha de cada sequência. Robô e
+  // atendente contam como lados diferentes: trocou quem falou, ganha rabinho.
+  const bolhas = useMemo(
+    () => agruparBolhas(thread.msgs, m => (m.remetente === 'loja' ? (m.bot ? 'robo' : 'loja') : 'cliente')),
+    [thread.msgs],
+  )
+  const tituloConversa = thread.cliente_nome || telefoneBonito(thread.cliente_ref) || 'Cliente'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
-      {/* Cabeçalho da conversa */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 10, borderBottom: '1px solid var(--border, #2a2a3a)', marginBottom: 8 }}>
-        <button type="button" onClick={onVoltar} aria-label="Voltar"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontSize: 20, lineHeight: 1, padding: 0 }}>
-          ‹
-        </button>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {thread.cliente_nome || telefoneBonito(thread.cliente_ref) || 'Cliente'}
+    <div className="atw atw-emb atw-emb-conv">
+      {/* Cabeçalho da conversa. A seta de voltar só existe no celular: no
+          computador a lista fica sempre ao lado. */}
+      <div className="atw-head">
+        {!g && (
+          <button type="button" className="atw-icone" onClick={onVoltar} aria-label="Voltar pra lista">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" /></svg>
+          </button>
+        )}
+        <span className="atw-avatar p" style={{ background: corAvatar(thread.cliente_ref) }}>{inicialDe(tituloConversa)}</span>
+        <div className="atw-conv-info">
+          <div className="atw-conv-nome">{tituloConversa}</div>
+          <div className="atw-conv-sub">
+            {canalLabel}{thread.cliente_nome && thread.canal === 'whatsapp' ? ` · ${telefoneBonito(thread.cliente_ref)}` : ''}
           </div>
-          <span style={{
-            fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20,
-            background: thread.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
-          }}>{canalLabel}</span>
         </div>
-        {/* O número já está aqui — falta o nome pra virar cliente da loja. */}
+      </div>
+
+      {/* O número já está aqui — falta o nome pra virar cliente da loja. Fica numa
+          faixa própria (o chip roxo não lê bem em cima do verde) e some sozinha
+          quando não tem nada pra mostrar. */}
+      <div className="atw-faixa">
         <CadastroRapidoNoChat
           empresaId={empresaId}
           telefone={thread.canal === 'whatsapp' ? thread.cliente_ref : null}
@@ -6485,263 +6511,223 @@ function ChatConversa({ thread, texto, onTexto, enviando, onEnviar, onVoltar, ca
 
       {/* Mensagens. O minHeight é o que garante que a conversa continue à vista
           mesmo com a gaveta da sacola aberta no celular. */}
-      {/* Fundo um tom mais escuro que o painel: sem ele, no modo claro, o balão
-          do cliente (branco) sumia dentro do branco da tela e a conversa virava
-          um texto corrido só. */}
-      <div style={{
-        flex: 1, minHeight: g ? undefined : 110, overflowY: 'auto', display: 'flex',
-        flexDirection: 'column', gap: 6, padding: '8px 8px',
-        background: 'var(--chat-fundo, rgba(0,0,0,.14))', borderRadius: 10,
-      }}>
-        {thread.msgs.map(m => {
+      <div className="atw-corpo" ref={corpoRef} style={g ? undefined : { minHeight: 110 }}>
+        {bolhas.map(({ m, novoDia, cauda }) => {
           const daLoja = m.remetente === 'loja'
           const doRobo = daLoja && m.bot
           return (
-            <div key={m.id} style={{ display: 'flex', justifyContent: daLoja ? 'flex-end' : 'flex-start' }}>
-              <div style={{
-                maxWidth: g ? '76%' : '82%', padding: g ? '12px 16px' : '7px 11px', borderRadius: 13,
-                fontSize: g ? 17 : 13.5, lineHeight: g ? 1.5 : 1.35,
-                // Duas cores, um significado só, igual à tela de Mensagens do
-                // portal: ROXO é o robô, VERDE é você. Antes as duas falas
-                // saíam roxas (a sua em roxo cheio, a do robô apagada) e quem
-                // atende tinha que ler pra saber quem tinha falado.
-                background: doRobo ? 'rgba(124,58,237,.28)' : daLoja ? 'rgba(34,197,94,.16)' : 'var(--bg, #0f0f1a)',
-                color: 'var(--text)',
-                border: doRobo ? '1px solid rgba(124,58,237,.55)' : daLoja ? '1px solid rgba(34,197,94,.45)' : '1px solid var(--border, #2a2a3a)',
-                borderBottomRightRadius: daLoja ? 3 : 12,
-                borderBottomLeftRadius: daLoja ? 12 : 3,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}>
-                {doRobo && (
-                  <div style={{ fontSize: 9.5, fontWeight: 800, opacity: .8, marginBottom: 2 }}>🤖 Robô</div>
-                )}
-                {/* Localização que o cliente mandou (mig 0238): o ponto exato
-                    da casa dele. Vale mais que qualquer endereço digitado —
-                    aqui ele vira endereço + pino com um clique. */}
-                {m.lat != null && m.lng != null ? (
-                  <div>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>📍 Localização enviada</div>
-                    <a
-                      href={`https://www.google.com/maps?q=${m.lat},${m.lng}`}
-                      target="_blank" rel="noopener noreferrer"
-                      style={{ fontSize: 11.5, color: '#60a5fa', textDecoration: 'underline' }}
-                    >
-                      abrir no mapa
-                    </a>
-                    {onUsarLocalizacao && (
-                      <button
-                        type="button"
-                        onClick={() => onUsarLocalizacao({ lat: Number(m.lat), lng: Number(m.lng) })}
-                        style={{
-                          display: 'block', marginTop: 6, padding: '6px 10px', borderRadius: 7,
-                          border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.15)',
-                          color: '#a78bfa', fontWeight: 700, fontSize: 11.5, cursor: 'pointer',
-                        }}
-                      >
-                        Usar como endereço do cliente
+            <Fragment key={m.id}>
+              {novoDia && <div className="atw-dia"><span>{diaRotulo(m.created_at)}</span></div>}
+              {/* Duas cores, um significado só, igual à tela de Mensagens do
+                  portal: ROXO é o robô, VERDE é você. */}
+              <div className={`atw-linha ${daLoja ? 'out' : 'in'}${doRobo ? ' robo' : ''}${cauda ? ' cauda' : ''}`}>
+                <div className="atw-bub">
+                  {doRobo && <div className="atw-robo-rotulo">🤖 Robô</div>}
+                  {/* Localização que o cliente mandou (mig 0238): o ponto exato
+                      da casa dele. Vale mais que qualquer endereço digitado —
+                      aqui ele vira endereço + pino com um clique. */}
+                  {m.lat != null && m.lng != null ? (
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>📍 Localização enviada</div>
+                      <a href={`https://www.google.com/maps?q=${m.lat},${m.lng}`} target="_blank" rel="noopener noreferrer">
+                        abrir no mapa
+                      </a>
+                      {onUsarLocalizacao && (
+                        <button type="button" className="atw-bub-acao"
+                          onClick={() => onUsarLocalizacao({ lat: Number(m.lat), lng: Number(m.lng) })}>
+                          Usar como endereço do cliente
+                        </button>
+                      )}
+                    </div>
+                  ) : m.texto}
+                  {/* Endereço escrito na conversa: um clique leva pro "Fechar o
+                      pedido". O mais novo já entra sozinho; o botão serve pra
+                      escolher outro (o cliente corrigiu, mandou dois). */}
+                  {!doRobo && m.lat == null && onUsarEndereco && (() => {
+                    const end = enderecoDoTexto(m.texto)
+                    return end && (
+                      <button type="button" className="atw-bub-acao" onClick={() => onUsarEndereco(end)}>
+                        📍 Usar como endereço da entrega
                       </button>
-                    )}
-                  </div>
-                ) : m.texto}
-                {/* Endereço escrito na conversa: um clique leva pro "Fechar o
-                    pedido". O mais novo já entra sozinho; o botão serve pra
-                    escolher outro (o cliente corrigiu, mandou dois). */}
-                {!doRobo && m.lat == null && onUsarEndereco && (() => {
-                  const end = enderecoDoTexto(m.texto)
-                  return end && (
-                    <button type="button" onClick={() => onUsarEndereco(end)}
-                      style={{
-                        display: 'block', marginTop: 6, padding: '6px 10px', borderRadius: 7,
-                        border: '1.5px solid #7c3aed', background: 'rgba(124,58,237,.15)',
-                        color: '#a78bfa', fontWeight: 700, fontSize: 11.5, cursor: 'pointer',
-                      }}>
-                      📍 Usar como endereço da entrega
-                    </button>
-                  )
-                })()}
-                {m.midia_path && (
-                  <MidiaDaMensagem path={m.midia_path} tipo={m.midia_tipo} />
-                )}
-                <div style={{ fontSize: 9.5, opacity: .65, marginTop: 3, textAlign: 'right' }}>
-                  {new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    )
+                  })()}
+                  {m.midia_path && (
+                    <MidiaDaMensagem path={m.midia_path} tipo={m.midia_tipo} />
+                  )}
+                  <span className="atw-meta"><span>{horaCurta(m.created_at)}</span></span>
                 </div>
               </div>
-            </div>
+            </Fragment>
           )
         })}
-        <div ref={fimRef} />
       </div>
 
-      {/* Saiu no WhatsApp ou não? Quem está atendendo precisa saber ANTES de
-          achar que avisou o cliente e tocar o pedido pra frente. */}
-      {aviso && (
-        <div style={{
-          fontSize: 11.5, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginTop: 6,
-          background: aviso.ok ? 'rgba(34,197,94,.12)' : 'rgba(234,179,8,.14)',
-          color: aviso.ok ? '#16a34a' : '#b45309',
-        }}>{aviso.txt}</div>
-      )}
+      {/* Entre as mensagens e a caixa de escrever: aviso de envio, robô, ações e
+          a gaveta da sacola. Some sozinho quando está vazio. */}
+      <div className="atw-acoes">
+        {/* Saiu no WhatsApp ou não? Quem está atendendo precisa saber ANTES de
+            achar que avisou o cliente e tocar o pedido pra frente. */}
+        {aviso && (
+          <div style={{
+            fontSize: 12, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginTop: 6,
+            background: aviso.ok ? 'rgba(34,197,94,.12)' : 'rgba(234,179,8,.14)',
+            color: aviso.ok ? '#16a34a' : '#b45309',
+          }}>{aviso.txt}</div>
+        )}
 
-      {/* O robô está fora desta conversa porque alguém assumiu. Fica dito em
-          uma linha; o botão de devolver desceu pra barra de ações. */}
-      {botPausado && roboLigado && (
-        <div style={{
-          marginTop: 8, padding: '6px 10px', borderRadius: 8,
-          background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
-          fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4,
-        }}>
-          🤖 O robô está calado nesta conversa — quem responde é você.
-        </div>
-      )}
-
-      {/* No PC a sacola mora NO PAINEL AO LADO (ver PainelSacola): montar
-          carrinho embaixo das mensagens empurra a conversa pra cima e o
-          atendente perde de vista o que o cliente pediu. Aqui fica só o botão
-          que abre. No celular não cabem dois painéis — lá continua embaixo. */}
-      {/* BARRA DE AÇÕES — os três numa linha só. Empilhados, eles empurravam a
-          conversa pra cima e comiam três faixas da tela; lado a lado sobra
-          espaço pras mensagens, que é o que a pessoa está lendo. No celular
-          eles quebram pra linha de baixo sozinhos em vez de espremer. */}
-      {(empresaId || roboLigado || onPedirLocalizacao) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
-          {empresaId && (
-            <button type="button" onClick={g ? onAbrirSacola : () => setSacolaAberta(v => !v)}
-              style={{
-                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
-                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
-                border: `1px ${sacola?.length ? 'solid' : 'dashed'} ${sacola?.length ? 'rgba(34,197,94,.6)' : 'var(--border, #2a2a3a)'}`,
-                background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
-                color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
-              }}>
-              {!g && sacolaAberta
-                ? '🛒 Fechar a sacola'
-                : sacola?.length ? `🛒 Sacola (${sacola.length})` : '🛒 Montar sacola'}
-            </button>
-          )}
-
-          {onPedirLocalizacao && thread.canal === 'whatsapp' && (
-            <button type="button" onClick={onPedirLocalizacao} disabled={enviando}
-              title="Pede o pininho do WhatsApp — endereço ditado erra número, o ponto não erra nada"
-              style={{
-                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10,
-                border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
-                color: 'var(--text-muted)', fontSize: g ? 13.5 : 12, fontWeight: 700,
-                lineHeight: 1.2, cursor: 'pointer',
-              }}>
-              📍 Pedir localização
-            </button>
-          )}
-
-          {/* Pausar sem sair do gestor (antes só dava pelo Portal → Conversas).
-              Pausa de vez, até alguém devolver: quem aperta aqui decidiu
-              atender essa pessoa na mão. */}
-          {/* Conversa que começou na Loja Online e continuou no WhatsApp fica
-              com o canal da primeira (lojaonline), mas o robô fala nela. Vale
-              o robô ter falado, não o canal. */}
-          {!botPausado && roboLigado && onPausarRobo
-            && (thread.canal === 'whatsapp' || (thread.msgs ?? []).some(m => m.bot)) && (
-            <button type="button" onClick={onPausarRobo}
-              title="O robô para de responder este cliente até você devolver a conversa"
-              style={{
-                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
-                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
-                border: '1px dashed rgba(245,158,11,.6)', background: 'transparent', color: '#f59e0b',
-              }}>
-              ⏸️ Pausar robô
-            </button>
-          )}
-
-          {botPausado && roboLigado && (
-            <button type="button" onClick={onDevolverAoRobo}
-              title="O robô volta a responder este cliente e continua de onde parou"
-              style={{
-                flex: '1 1 140px', padding: g ? '11px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
-                fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
-                border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.18)', color: '#a78bfa',
-              }}>
-              🤖 Devolver pro robô
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* GAVETA DA SACOLA (só no celular). Rola dentro dela mesma e nunca passa
-          de 58% da tela — o resto continua sendo a conversa. A volta fica
-          grudada no topo: de qualquer ponto da gaveta dá pra sair. */}
-      {!g && empresaId && sacolaAberta && (
-        <div style={{
-          marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)',
-          maxHeight: '58vh', overflowY: 'auto',
-        }}>
-          <button type="button" onClick={() => setSacolaAberta(false)}
-            style={{
-              position: 'sticky', top: 0, zIndex: 2, width: '100%', marginBottom: 8,
-              padding: '9px 10px', borderRadius: 10, cursor: 'pointer',
-              border: '1px solid var(--border, #2a2a3a)', background: 'var(--card, #14141f)',
-              color: 'var(--text)', fontSize: 12.5, fontWeight: 700,
-            }}>
-            ‹ Voltar pra conversa
-          </button>
-
-          <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola}
-            onEnviarCategoria={onEnviarCategoria} enviandoCategoria={enviandoCategoria} />
-
-          {sacola?.length > 0 && (
-            <>
-              <SacolaNoChat
-                roboLigado={roboLigado}
-                itens={sacola}
-                onQtd={onQtdSacola}
-                onQtdDireta={onQtdDiretaSacola}
-                onRemover={idx => onQtdSacola(idx, -999)}
-                onEditar={onEditarSacola}
-                onObs={onObsSacola}
-                // Mandou a lista pro cliente: a gaveta sai da frente sozinha,
-                // porque o passo seguinte é ler o que ele responde.
-                onEnviar={() => Promise.resolve(onEnviarSacola?.()).then(() => setSacolaAberta(false))}
-                enviando={enviandoSacola}
-              />
-              <FecharPedidoNoChat
-                key={thread.cliente_ref}
-                empresa={empresa}
-                telefone={thread.cliente_ref}
-                nomeThread={thread.cliente_nome}
-                itens={sacola}
-                onFinalizar={onFinalizarPedido}
-                salvando={salvandoPedido}
-                cadastroVersao={cadastroVersao}
-                pinChat={pinChat}
-                enderecoRobo={enderecoRobo}
-              />
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Caixa de resposta */}
-      <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)' }}>
-        <textarea
-          value={texto}
-          onChange={e => onTexto(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEnviar() } }}
-          placeholder="Escreva uma resposta..."
-          rows={g ? 2 : 1}
-          style={{
-            flex: 1, resize: 'none', maxHeight: g ? 140 : 90, padding: g ? '12px 14px' : '9px 11px', borderRadius: 10,
-            border: '1px solid var(--border, #2a2a3a)', background: 'var(--bg, #0f0f1a)',
-            color: 'var(--text)', fontSize: g ? 16.5 : 13.5, fontFamily: 'inherit',
-          }}
-        />
-        <button type="button" onClick={onEnviar} disabled={!texto.trim() || enviando}
-          style={{
-            flexShrink: 0, width: g ? 54 : 42, borderRadius: 10, border: 'none', cursor: texto.trim() ? 'pointer' : 'default',
-            background: texto.trim() ? '#7c3aed' : 'var(--border, #2a2a3a)', color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+        {/* O robô está fora desta conversa porque alguém assumiu. Fica dito em
+            uma linha; o botão de devolver desceu pra barra de ações. */}
+        {botPausado && roboLigado && (
+          <div style={{
+            marginTop: 8, padding: '6px 10px', borderRadius: 8,
+            background: 'rgba(124,58,237,.10)', border: '1px solid rgba(124,58,237,.35)',
+            fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4,
           }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-          </svg>
-        </button>
+            🤖 O robô está calado nesta conversa — quem responde é você.
+          </div>
+        )}
+
+        {/* No PC a sacola mora NO PAINEL AO LADO (ver PainelSacola): montar
+            carrinho embaixo das mensagens empurra a conversa pra cima e o
+            atendente perde de vista o que o cliente pediu. Aqui fica só o botão
+            que abre. No celular não cabem dois painéis — lá continua embaixo. */}
+        {/* BARRA DE AÇÕES — os botões numa linha só. Empilhados, eles empurravam a
+            conversa pra cima e comiam faixas da tela; lado a lado sobra espaço
+            pras mensagens. No celular quebram pra linha de baixo sozinhos. */}
+        {(empresaId || roboLigado || onPedirLocalizacao) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {empresaId && (
+              <button type="button" onClick={g ? onAbrirSacola : () => setSacolaAberta(v => !v)}
+                style={{
+                  flex: '1 1 140px', padding: g ? '10px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                  fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                  border: `1px ${sacola?.length ? 'solid' : 'dashed'} ${sacola?.length ? 'rgba(34,197,94,.6)' : 'var(--border, #2a2a3a)'}`,
+                  background: sacola?.length ? 'rgba(34,197,94,.10)' : 'transparent',
+                  color: sacola?.length ? '#22c55e' : 'var(--text-muted)',
+                }}>
+                {!g && sacolaAberta
+                  ? '🛒 Fechar a sacola'
+                  : sacola?.length ? `🛒 Sacola (${sacola.length})` : '🛒 Montar sacola'}
+              </button>
+            )}
+
+            {onPedirLocalizacao && thread.canal === 'whatsapp' && (
+              <button type="button" onClick={onPedirLocalizacao} disabled={enviando}
+                title="Pede o pininho do WhatsApp — endereço ditado erra número, o ponto não erra nada"
+                style={{
+                  flex: '1 1 140px', padding: g ? '10px 10px' : '9px 8px', borderRadius: 10,
+                  border: '1px dashed var(--border, #2a2a3a)', background: 'transparent',
+                  color: 'var(--text-muted)', fontSize: g ? 13.5 : 12, fontWeight: 700,
+                  lineHeight: 1.2, cursor: 'pointer',
+                }}>
+                📍 Pedir localização
+              </button>
+            )}
+
+            {/* Pausar sem sair do gestor (antes só dava pelo Portal → Conversas).
+                Pausa de vez, até alguém devolver: quem aperta aqui decidiu
+                atender essa pessoa na mão. */}
+            {/* Conversa que começou na Loja Online e continuou no WhatsApp fica
+                com o canal da primeira (lojaonline), mas o robô fala nela. Vale
+                o robô ter falado, não o canal. */}
+            {!botPausado && roboLigado && onPausarRobo
+              && (thread.canal === 'whatsapp' || (thread.msgs ?? []).some(m => m.bot)) && (
+              <button type="button" onClick={onPausarRobo}
+                title="O robô para de responder este cliente até você devolver a conversa"
+                style={{
+                  flex: '1 1 140px', padding: g ? '10px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                  fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                  border: '1px dashed rgba(245,158,11,.6)', background: 'transparent', color: '#f59e0b',
+                }}>
+                ⏸️ Pausar robô
+              </button>
+            )}
+
+            {botPausado && roboLigado && (
+              <button type="button" onClick={onDevolverAoRobo}
+                title="O robô volta a responder este cliente e continua de onde parou"
+                style={{
+                  flex: '1 1 140px', padding: g ? '10px 10px' : '9px 8px', borderRadius: 10, cursor: 'pointer',
+                  fontSize: g ? 13.5 : 12, fontWeight: 700, lineHeight: 1.2,
+                  border: '1px solid rgba(124,58,237,.6)', background: 'rgba(124,58,237,.18)', color: '#a78bfa',
+                }}>
+                🤖 Devolver pro robô
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* GAVETA DA SACOLA (só no celular). Rola dentro dela mesma e nunca passa
+            de 58% da tela — o resto continua sendo a conversa. A volta fica
+            grudada no topo: de qualquer ponto da gaveta dá pra sair. */}
+        {!g && empresaId && sacolaAberta && (
+          <div style={{
+            marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border, #2a2a3a)',
+            maxHeight: '58vh', overflowY: 'auto',
+          }}>
+            <button type="button" onClick={() => setSacolaAberta(false)}
+              style={{
+                position: 'sticky', top: 0, zIndex: 2, width: '100%', marginBottom: 8,
+                padding: '9px 10px', borderRadius: 10, cursor: 'pointer',
+                border: '1px solid var(--border, #2a2a3a)', background: 'var(--card, #14141f)',
+                color: 'var(--text)', fontSize: 12.5, fontWeight: 700,
+              }}>
+              ‹ Voltar pra conversa
+            </button>
+
+            <BuscaProdutoNoChat empresaId={empresaId} onEscolher={onEscolherProduto} onAvulso={onAvulsoSacola}
+              onEnviarCategoria={onEnviarCategoria} enviandoCategoria={enviandoCategoria} />
+
+            {sacola?.length > 0 && (
+              <>
+                <SacolaNoChat
+                  roboLigado={roboLigado}
+                  itens={sacola}
+                  onQtd={onQtdSacola}
+                  onQtdDireta={onQtdDiretaSacola}
+                  onRemover={idx => onQtdSacola(idx, -999)}
+                  onEditar={onEditarSacola}
+                  onObs={onObsSacola}
+                  // Mandou a lista pro cliente: a gaveta sai da frente sozinha,
+                  // porque o passo seguinte é ler o que ele responde.
+                  onEnviar={() => Promise.resolve(onEnviarSacola?.()).then(() => setSacolaAberta(false))}
+                  enviando={enviandoSacola}
+                />
+                <FecharPedidoNoChat
+                  key={thread.cliente_ref}
+                  empresa={empresa}
+                  telefone={thread.cliente_ref}
+                  nomeThread={thread.cliente_nome}
+                  itens={sacola}
+                  onFinalizar={onFinalizarPedido}
+                  salvando={salvandoPedido}
+                  cadastroVersao={cadastroVersao}
+                  pinChat={pinChat}
+                  enderecoRobo={enderecoRobo}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Caixa de resposta: arredondada, cresce com o texto, botão redondo. */}
+      <div className="atw-rodape">
+        <div className="atw-compor">
+          <textarea
+            ref={campoRef}
+            className="atw-campo"
+            value={texto}
+            onChange={e => onTexto(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEnviar() } }}
+            placeholder="Escreva uma mensagem"
+            rows={1}
+          />
+          <button type="button" className="atw-enviar" onClick={onEnviar}
+            disabled={!texto.trim() || enviando} aria-label="Enviar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -12111,9 +12097,14 @@ export default function PainelPedidos() {
               : 'min(50vw, calc(100vw - 80px))')
             : 'min(480px, calc(100vw - 64px))',
           background: 'var(--surface, #16161f)', borderLeft: '1px solid var(--border, #2a2a3a)',
-          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowY: 'auto', overflowX: 'hidden',
-          padding: telaGrande ? 22 : 16,
+          boxShadow: '-8px 0 24px rgba(0,0,0,.25)', overflowX: 'hidden',
+          // Mensagens: sem folga nas bordas e sem rolagem da gaveta — a lista e a
+          // conversa rolam cada uma por dentro, como no WhatsApp.
+          ...(painelDireito === 'chat'
+            ? { overflowY: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }
+            : { overflowY: 'auto', padding: telaGrande ? 22 : 16 }),
         }}>
+          {painelDireito !== 'chat' && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: 'var(--text)' }}>
               {painelDireito === 'impressora' ? 'Impressora'
@@ -12127,10 +12118,11 @@ export default function PainelPedidos() {
               ×
             </button>
           </div>
+          )}
 
           {/* Painel: Mensagens (chat App + Loja online) */}
           {painelDireito === 'chat' && chamados.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 12px 4px', flexShrink: 0, maxHeight: '40%', overflowY: 'auto' }}>
               {(() => {
                 // O sino só grita enquanto tem gente esperando de verdade.
                 // Depois que a loja clicou em "Responder aqui" em todos, o
@@ -12207,35 +12199,41 @@ export default function PainelPedidos() {
           )}
 
           {painelDireito === 'chat' && (() => {
-            // WHATSAPP WEB (25/10/2026): no computador a lista de conversas fica
-            // SEMPRE à vista, numa coluna estreita ao lado da conversa aberta.
-            // Antes ela sumia ao abrir alguém, e quem atendia tinha que voltar pra
-            // saber se outro cliente tinha falado — num horário de pico isso é
-            // cliente esperando sem ninguém saber. No celular continua uma tela de
-            // cada vez: lá não cabem as duas.
+            // WHATSAPP WEB / WHATSAPP DO CELULAR (18/11/2026).
+            // No computador a lista de conversas fica SEMPRE à vista, numa coluna
+            // ao lado da conversa aberta (como o WhatsApp Web; sem conversa aberta,
+            // o lado direito mostra um painel vazio). Antes ela sumia ao abrir
+            // alguém, e quem atendia tinha que voltar pra saber se outro cliente
+            // tinha falado — num horário de pico isso é cliente esperando sem
+            // ninguém saber. No celular continua uma tela de cada vez, como o
+            // WhatsApp do celular: lá não cabem as duas.
             const lista = (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className={`atw atw-emb atw-emb-lista${telaGrande ? ' col' : ''}`}>
+                <div className="atw-head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="atw-head-titulo">Mensagens</div>
+                    <div className="atw-head-sub">
+                      {chatThreads.length} conversa{chatThreads.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  <button type="button" className="atw-icone" onClick={() => setPainelDireito(null)} aria-label="Fechar" title="Fechar">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
+                  </button>
+                </div>
+
                 {/* Procurar conversa pelo número do cliente. A caixa mostra só
                     o dia de hoje; a busca vai no banco e traz os dias de trás. */}
-                <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted, #9aa0b5)' }} aria-hidden="true">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  </span>
+                <div className="atw-busca-caixa">
                   <input
                     type="search"
+                    className="atw-busca"
                     value={buscaChat}
                     onChange={e => setBuscaChat(e.target.value)}
-                    placeholder="Buscar conversa por número ou nome..."
-                    style={{
-                      width: '100%', padding: '9px 12px 9px 34px', borderRadius: 20,
-                      fontSize: telaGrande ? 15.5 : 14,
-                      border: '1.5px solid var(--border, #2a2a3a)', background: 'var(--surface, #16161f)',
-                      color: 'var(--text)', outline: 'none',
-                    }}
+                    placeholder="Buscar por número ou nome"
                   />
                 </div>
                 {buscaChatT && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '-2px 2px 2px' }}>
+                  <div className="atw-nota">
                     {buscandoChat
                       ? 'Procurando...'
                       : buscaChatT.length < 3
@@ -12243,63 +12241,55 @@ export default function PainelPedidos() {
                         : `${chatThreads.length} conversa${chatThreads.length === 1 ? '' : 's'} — inclui dias anteriores`}
                   </div>
                 )}
-                {chatThreads.length === 0 ? (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 12px', fontSize: 13 }}>
-                    {buscaChatT ? (
-                      <>Nenhuma conversa com <b>{buscaChatT}</b>.<br />
-                      Tente só os últimos números do telefone.</>
-                    ) : (
-                      <>Nenhuma conversa ainda.<br />
-                      Mensagens do app e da loja online aparecem aqui.</>
-                    )}
-                  </div>
-                ) : chatThreads.map(t => {
-                  const ultima = t.msgs[t.msgs.length - 1]
-                  const quando = new Date(ultima.created_at)
-                  // Conversa de outro dia (só aparece na busca): a hora sozinha
-                  // faria "14:20" de três semanas atrás passar por hoje.
-                  const deHoje = quando.toDateString() === new Date().toDateString()
-                  const hora = deHoje
-                    ? quando.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-                    : quando.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-                  const canalLbl = CANAL_LABEL[t.canal] ?? t.canal
-                  return (
-                    <button key={t.key} type="button" onClick={() => abrirThread(t)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
-                        border: '1px solid var(--border, #2a2a3a)', borderRadius: 10,
-                        padding: telaGrande ? '13px 15px' : '10px 12px',
-                        background: t.unread ? 'rgba(124,58,237,.08)' : 'transparent',
-                      }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: telaGrande ? 16.5 : 13.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {t.cliente_nome || telefoneBonito(t.cliente_ref) || 'Cliente'}
+
+                <div className="atw-rolagem">
+                  {chatThreads.length === 0 ? (
+                    <div className="atw-vazio">
+                      {buscaChatT ? (
+                        <>Nenhuma conversa com <b>{buscaChatT}</b>.<br />
+                        Tente só os últimos números do telefone.</>
+                      ) : (
+                        <>Nenhuma conversa ainda.<br />
+                        Mensagens do app, da loja online e do WhatsApp aparecem aqui.</>
+                      )}
+                    </div>
+                  ) : chatThreads.map(t => {
+                    const ultima = t.msgs[t.msgs.length - 1]
+                    const nomeT = t.cliente_nome || telefoneBonito(t.cliente_ref) || 'Cliente'
+                    // Conversa de outro dia (só aparece na busca): a hora sozinha
+                    // faria "14:20" de três semanas atrás passar por hoje.
+                    const deHoje = new Date(ultima.created_at).toDateString() === new Date().toDateString()
+                    const hora = deHoje ? horaCurta(ultima.created_at) : horaLista(ultima.created_at)
+                    const canalLbl = CANAL_LABEL[t.canal] ?? t.canal
+                    const previa = ultima.texto || (ultima.midia_tipo ? '📎 Arquivo' : '')
+                    return (
+                      <button key={t.key} type="button" onClick={() => abrirThread(t)}
+                        className={`atw-item${t.key === chatAberto ? ' ativo' : ''}`}>
+                        <span className="atw-av-wrap">
+                          <span className="atw-avatar" style={{ background: corAvatar(t.cliente_ref) }}>{inicialDe(nomeT)}</span>
                         </span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{hora}</span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 20, flexShrink: 0,
-                          background: t.canal === 'app' ? '#f97316' : '#3b82f6', color: '#fff',
-                        }}>{canalLbl}</span>
-                        <span style={{ fontSize: telaGrande ? 15 : 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                          {ultima.remetente === 'loja' ? (ultima.bot ? '🤖 ' : 'Você: ') : ''}{ultima.texto}
-                        </span>
-                        {t.unread > 0 && (
-                          <span style={{ flexShrink: 0, minWidth: 18, height: 18, borderRadius: 9, background: '#7c3aed', color: '#fff', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>
-                            {t.unread}
+                        <span className="atw-item-corpo">
+                          <span className="atw-item-linha">
+                            <span className={`atw-item-nome${t.unread ? ' forte' : ''}`}>{nomeT}</span>
+                            <span className={`atw-item-hora${t.unread ? ' nova' : ''}`}>{hora}</span>
                           </span>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
+                          <span className="atw-item-linha">
+                            <span className="atw-item-previa">
+                              <span className="atw-chip" style={{ background: t.canal === 'app' ? '#f97316' : t.canal === 'whatsapp' ? '#16a34a' : '#3b82f6' }}>{canalLbl}</span>
+                              <span>{ultima.remetente === 'loja' ? (ultima.bot ? '🤖 ' : 'Você: ') : ''}{previa}</span>
+                            </span>
+                            {t.unread > 0 && <span className="atw-badge">{t.unread}</span>}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             )
-            // Sem conversa aberta e so a lista — e o <ChatConversa> nem pode ser
-            // montado aqui: ele le thread.canal, e sem thread isso derruba a tela.
-            if (!threadAberta) return lista
-            const conversa = (
+            // O <ChatConversa> só pode ser montado com conversa aberta: ele lê
+            // thread.canal, e sem thread isso derruba a tela.
+            const conversa = threadAberta ? (
               <ChatConversa
                 thread={threadAberta}
                 texto={chatTexto}
@@ -12337,17 +12327,17 @@ export default function PainelPedidos() {
                 enviandoCategoria={enviandoLista}
                 roboLigado={roboLigado}
               />
-            )
-            if (!telaGrande) return conversa
+            ) : null
+            if (!telaGrande) return <div className="atw-emb-split">{conversa ?? lista}</div>
             return (
-              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-                <div style={{
-                  width: 236, flex: '0 0 236px', maxHeight: 'calc(100vh - 150px)', overflowY: 'auto',
-                  paddingRight: 10, borderRight: '1px solid var(--border, #2a2a3a)',
-                }}>
-                  {lista}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>{conversa}</div>
+              <div className="atw-emb-split">
+                {lista}
+                {conversa ?? (
+                  <div className="atw atw-emb-vazio">
+                    <b>Mensagens da loja</b>
+                    <span>Escolha uma conversa ao lado para responder.</span>
+                  </div>
+                )}
               </div>
             )
           })()}

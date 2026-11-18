@@ -24,6 +24,7 @@
   --atw-ativo: #f0f2f5;
   --atw-aviso-bg: #fff3c4;
   --atw-aviso-texto: #54410a;
+  --atw-robo: #e9e1fb;
 }
 [data-theme='dark'] .atw {
   --atw-head: #202c33;
@@ -42,6 +43,7 @@
   --atw-ativo: #2a3942;
   --atw-aviso-bg: #3b3513;
   --atw-aviso-texto: #f3e2a0;
+  --atw-robo: #3d2d6e;
 }
 
 /* ── Botão flutuante ─────────────────────────────────────────────────────── */
@@ -504,3 +506,82 @@
   cursor: pointer;
 }
 .atw-btn-largo:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Embutido no gestor (aba Mensagens do painel) ────────────────────────────
+   Mesma cara de WhatsApp, mas dentro da gaveta lateral em vez de tela cheia.
+   No computador: lista à esquerda e conversa à direita (WhatsApp Web). No
+   celular: uma de cada vez. */
+.atw-emb {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--atw-panel);
+  color: var(--atw-text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.atw-emb button { font-family: inherit; }
+.atw-emb .atw-head { padding-top: 10px; }
+.atw-emb-split { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.atw-emb-lista { width: 100%; }
+.atw-emb-lista.col { width: 340px; flex-shrink: 0; border-right: 1px solid var(--atw-border); }
+.atw-emb-conv { flex: 1; min-width: 0; }
+.atw-emb-vazio {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: var(--atw-bar);
+  color: var(--atw-sub);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.atw-emb-vazio b { color: var(--atw-text); font-size: 20px; font-weight: 500; }
+/* Faixa do "cadastrar cliente": some sozinha quando não tem nada dentro. */
+.atw-faixa {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--atw-bar);
+  border-bottom: 1px solid var(--atw-border);
+}
+.atw-faixa:empty { display: none; }
+/* Aviso, robô, ações e gaveta da sacola, entre as mensagens e a caixa de escrever. */
+.atw-acoes { background: var(--atw-bar); padding: 0 8px 6px; flex-shrink: 0; }
+.atw-acoes:empty { display: none; }
+.atw-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 20px;
+  color: #fff;
+}
+.atw-emb .atw-rodape { padding-top: 6px; }
+/* Fala do robô: roxo, pra quem atende saber de longe quem falou. */
+.atw-linha.out.robo .atw-bub { background: var(--atw-robo); }
+.atw-linha.out.robo.cauda .atw-bub::before { background: var(--atw-robo); }
+.atw-robo-rotulo { font-size: 11px; font-weight: 800; color: var(--atw-sub); margin-bottom: 2px; }
+.atw-bub-acao {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1.5px solid #7c3aed;
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+[data-theme='dark'] .atw-bub-acao { color: #c4b5fd; }
