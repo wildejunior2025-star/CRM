@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import './AtendimentoFWC.css'
 
 // ── Atendimento FWC ─────────────────────────────────────────────────────────
 //
@@ -12,6 +13,11 @@ import { supabase } from '../lib/supabaseClient'
 // 24h depois da ÚLTIMA mensagem da pessoa. Fora disso (ou pra puxar conversa
 // com quem nunca escreveu) só sai MODELO aprovado. A tela mostra qual dos dois
 // vale agora, em vez de deixar a pessoa digitar e levar erro.
+//
+// VISUAL (18/11/2026): refeito com cara de WhatsApp (lista com avatar, bolhas com
+// rabinho, hora e ✓✓ dentro da bolha, separador de dia, caixa de escrever
+// arredondada). A versão anterior usava fontes de ~22px e no celular era ruim de
+// usar. Estilos em AtendimentoFWC.css; a lógica abaixo não mudou.
 
 const JANELA_MS = 24 * 60 * 60 * 1000
 
@@ -33,6 +39,48 @@ function quando(iso) {
   const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   if (d.toDateString() === hoje.toDateString()) return hora
   return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hora}`
+}
+
+const horaCurta = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+// Hora na lista de conversas: hoje → "14:32", ontem → "Ontem", antes → "12/11/26".
+function horaLista(iso) {
+  const d = new Date(iso)
+  const hoje = new Date()
+  if (d.toDateString() === hoje.toDateString()) return horaCurta(iso)
+  const ontem = new Date()
+  ontem.setDate(hoje.getDate() - 1)
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
+// Separador de dia dentro da conversa.
+function diaRotulo(iso) {
+  const d = new Date(iso)
+  const hoje = new Date()
+  if (d.toDateString() === hoje.toDateString()) return 'Hoje'
+  const ontem = new Date()
+  ontem.setDate(hoje.getDate() - 1)
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+const CORES_AVATAR = ['#6d5ccf', '#0b8f7a', '#c2410c', '#2563eb', '#a21caf', '#b45309', '#0e7490', '#be123c']
+function corAvatar(chave) {
+  let h = 0
+  for (const ch of String(chave ?? '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return CORES_AVATAR[h % CORES_AVATAR.length]
+}
+function iniciais(titulo) {
+  const t = String(titulo ?? '').replace(/[^\p{L}\p{N} ]/gu, '').trim()
+  return (t[0] ?? '#')
+}
+
+function rotuloMidia(tipo) {
+  if (tipo === 'imagem') return '📷 Foto'
+  if (tipo === 'audio') return '🎤 Áudio'
+  if (tipo === 'video') return '🎥 Vídeo'
+  return '📎 Arquivo'
 }
 
 // Troca {{1}}, {{2}}… pelos valores digitados — é a prévia do que o lojista vai ler.
@@ -105,35 +153,42 @@ function Midia({ path, tipo }) {
     return () => { vivo = false }
   }, [path])
 
-  if (erro) return <div style={{ fontSize: 19.5, opacity: 0.7, marginTop: 4 }}>(não consegui abrir o arquivo)</div>
-  if (!url) return <div style={{ fontSize: 19.5, opacity: 0.7, marginTop: 4 }}>carregando…</div>
+  if (erro) return <div className="atw-midia-txt">(não consegui abrir o arquivo)</div>
+  if (!url) return <div className="atw-midia-txt">carregando…</div>
   if (tipo === 'imagem') {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginTop: 6 }}>
-        <img src={url} alt="Imagem enviada" loading="lazy"
-          style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, display: 'block' }} />
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <img className="atw-midia-img" src={url} alt="Imagem enviada" loading="lazy" />
       </a>
     )
   }
-  if (tipo === 'audio') return <audio src={url} controls preload="metadata" style={{ display: 'block', marginTop: 6, maxWidth: '100%' }} />
-  if (tipo === 'video') return <video src={url} controls preload="metadata" style={{ display: 'block', marginTop: 6, maxWidth: '100%', maxHeight: 260, borderRadius: 8 }} />
-  return (
-    <a href={url} target="_blank" rel="noopener noreferrer"
-      style={{ display: 'inline-block', marginTop: 6, fontSize: 20, color: '#60a5fa', textDecoration: 'underline' }}>
-      abrir arquivo
-    </a>
-  )
+  if (tipo === 'audio') return <audio src={url} controls preload="metadata" />
+  if (tipo === 'video') return <video src={url} controls preload="metadata" />
+  return <a href={url} target="_blank" rel="noopener noreferrer">abrir arquivo</a>
 }
 
 // ✓ saiu · ✓✓ entregue · ✓✓ azul leu · ⚠ não chegou (com o motivo da Meta).
 function StatusEnvio({ m }) {
   if (m.status === 'falhou') {
-    return <span title={m.erro || 'A Meta não entregou'} style={{ color: '#ef4444', fontWeight: 700 }}>⚠ não chegou</span>
+    return <span className="atw-tick falhou" title={m.erro || 'A Meta não entregou'}>⚠ não chegou</span>
   }
-  if (m.status === 'lido') return <span style={{ color: '#3b82f6', fontWeight: 700 }}>✓✓</span>
-  if (m.status === 'entregue') return <span>✓✓</span>
-  return <span>✓</span>
+  if (m.status === 'lido') return <span className="atw-tick lido">✓✓</span>
+  if (m.status === 'entregue') return <span className="atw-tick">✓✓</span>
+  return <span className="atw-tick">✓</span>
 }
+
+const IconeVoltar = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" /></svg>
+)
+const IconeFechar = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" /></svg>
+)
+const IconeNova = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-3 9h-4v4h-2v-4H7V9h4V5h2v4h4v2z" /></svg>
+)
+const IconeEnviar = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+)
 
 export default function AtendimentoFWC() {
   const larga = useTelaLarga()
@@ -153,7 +208,8 @@ export default function AtendimentoFWC() {
   const [modeloSel, setModeloSel] = useState(null)
   const [params, setParams] = useState([])
   const [agora, setAgora] = useState(() => Date.now())
-  const fimRef = useRef(null)
+  const corpoRef = useRef(null)
+  const campoRef = useRef(null)
 
   const carregar = useCallback(async () => {
     const { data } = await supabase.from('admin_chat')
@@ -269,9 +325,29 @@ export default function AtendimentoFWC() {
       .then(() => carregar())
   }, [aberto, atual?.chave, atual?.chaveTel, atual?.naoLidas, carregar])
 
+  // Sempre no fim da conversa (a mensagem mais nova). Rola só a caixa das
+  // mensagens — scrollIntoView puxava a página inteira no celular.
   useEffect(() => {
-    fimRef.current?.scrollIntoView({ block: 'end' })
+    const el = corpoRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [atual?.chave, atual?.msgs.length, aberto])
+
+  // Mensagens com o separador de dia e o "rabinho" (primeira bolha de cada
+  // sequência do mesmo lado) já resolvidos.
+  const msgsAtuais = atual?.msgs
+  const bolhas = useMemo(() => {
+    const out = []
+    let diaAnt = null
+    let remAnt = null
+    for (const m of msgsAtuais ?? []) {
+      const dia = new Date(m.created_at).toDateString()
+      const novoDia = dia !== diaAnt
+      out.push({ m, novoDia, cauda: novoDia || remAnt !== m.remetente })
+      diaAnt = dia
+      remAnt = m.remetente
+    }
+    return out
+  }, [msgsAtuais])
 
   // A janela de 24h é regra da Meta. No número do Evolution ela não existe:
   // escreve e vai, a qualquer hora, sem modelo aprovado.
@@ -306,6 +382,12 @@ export default function AtendimentoFWC() {
     abrirConversa(k)
   }
 
+  function ajustarAltura(el) {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+  }
+
   async function enviarTexto() {
     const t = texto.trim()
     if (!t || !atual || enviando) return
@@ -313,8 +395,11 @@ export default function AtendimentoFWC() {
     setAviso(null)
     const r = await chamar({ acao: 'enviar', telefone: atual.telefone, texto: t, canal: atual.canal })
     setEnviando(false)
-    if (r.ok) { setTexto(''); carregar() }
-    else setAviso(r.erro)
+    if (r.ok) {
+      setTexto('')
+      if (campoRef.current) campoRef.current.style.height = 'auto'
+      carregar()
+    } else setAviso(r.erro)
   }
 
   async function enviarModelo() {
@@ -348,143 +433,117 @@ export default function AtendimentoFWC() {
 
   const mostraLista = larga || !atual
   const mostraConversa = larga || !!atual
+  // No celular o Enter pula linha (quem envia é o botão); no computador Enter envia.
+  const enterEnvia = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches
 
   // ── Visual ────────────────────────────────────────────────────────────────
-  const botaoFlutuante = (
-    <button
-      type="button"
-      onClick={() => setAberto(true)}
-      aria-label={`Atendimento FWC${naoLidasTotal ? ` — ${naoLidasTotal} não lida(s)` : ''}`}
-      title="Atendimento FWC — conversas do número oficial"
-      style={{
-        position: 'fixed', right: 20, bottom: 20, zIndex: 900,
-        width: 58, height: 58, borderRadius: '50%', border: 'none', cursor: 'pointer',
-        background: '#16a34a', color: '#fff', fontSize: 26, lineHeight: 1,
-        boxShadow: '0 8px 24px rgba(0,0,0,.28)',
-        display: aberto ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      💬
-      {naoLidasTotal > 0 && (
-        <span style={{
-          position: 'absolute', top: -4, right: -4, minWidth: 22, height: 22, padding: '0 6px',
-          borderRadius: 11, background: '#ef4444', color: '#fff', fontSize: 20, fontWeight: 800,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--surface)',
-        }}>{naoLidasTotal > 99 ? '99+' : naoLidasTotal}</span>
-      )}
-    </button>
-  )
-
-  if (!aberto) return botaoFlutuante
+  if (!aberto) {
+    return (
+      <div className="atw">
+        <button
+          type="button"
+          className="atw-fab"
+          onClick={() => setAberto(true)}
+          aria-label={`Atendimento FWC${naoLidasTotal ? ` — ${naoLidasTotal} não lida(s)` : ''}`}
+          title="Atendimento FWC — conversas do número oficial"
+        >
+          💬
+          {naoLidasTotal > 0 && (
+            <span className="atw-fab-badge">{naoLidasTotal > 99 ? '99+' : naoLidasTotal}</span>
+          )}
+        </button>
+      </div>
+    )
+  }
 
   const lista = (
-    <div style={{
-      display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
-      width: larga ? 430 : '100%', flexShrink: 0,
-      borderRight: larga ? '1px solid var(--border)' : 'none',
-    }}>
-      <div style={{ padding: 10, display: 'flex', gap: 6 }}>
+    <div className="atw-lista">
+      <div className="atw-head">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="atw-head-titulo">Atendimento FWC</div>
+          <div className="atw-head-sub">{numeroFwc ? `${telefoneBonito(numeroFwc)} · ` : ''}só você responde, sem robô</div>
+        </div>
+        <button type="button" className="atw-icone"
+          onClick={() => { setEscolhendoNova((v) => !v); setBusca('') }}
+          aria-label={escolhendoNova ? 'Voltar às conversas' : 'Nova conversa'}
+          title={escolhendoNova ? 'Voltar às conversas' : 'Nova conversa'}>
+          {escolhendoNova ? <IconeVoltar /> : <IconeNova />}
+        </button>
+        <button type="button" className="atw-icone" onClick={() => setAberto(false)} aria-label="Fechar" title="Fechar">
+          <IconeFechar />
+        </button>
+      </div>
+
+      <div className="atw-busca-caixa">
         <input
+          className="atw-busca"
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           placeholder={escolhendoNova ? 'Buscar loja…' : 'Buscar conversa…'}
-          style={{
-            flex: 1, minWidth: 0, padding: '11px 12px', borderRadius: 8, fontSize: 21.5,
-            border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
-          }}
         />
-        <button
-          type="button"
-          onClick={() => { setEscolhendoNova((v) => !v); setBusca('') }}
-          style={{
-            padding: '8px 10px', borderRadius: 8, fontSize: 21, fontWeight: 700, cursor: 'pointer',
-            border: '1px solid var(--primary)', whiteSpace: 'nowrap',
-            background: escolhendoNova ? 'var(--primary)' : 'var(--primary-bg)',
-            color: escolhendoNova ? 'var(--primary-contrast)' : 'var(--primary)',
-          }}
-        >{escolhendoNova ? 'Voltar' : '+ Nova'}</button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      <div className="atw-rolagem">
         {escolhendoNova ? (
           <div>
-            <div style={{ padding: '4px 12px 10px', display: 'flex', gap: 6 }}>
+            <div className="atw-outro">
               <input
+                className="atw-busca"
                 value={outroNumero}
                 onChange={(e) => setOutroNumero(e.target.value)}
                 placeholder="Outro número: (84) 99999-0000"
                 inputMode="tel"
-                style={{
-                  flex: 1, minWidth: 0, padding: '7px 9px', borderRadius: 8, fontSize: 21,
-                  border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
-                }}
               />
-              <button type="button" onClick={() => comecarCom(outroNumero)}
-                style={{ padding: '7px 10px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 21, cursor: 'pointer' }}>
-                Abrir
-              </button>
+              <button type="button" className="atw-btn-verde" onClick={() => comecarCom(outroNumero)}>Abrir</button>
             </div>
-            <div style={{ padding: '0 12px 6px', fontSize: 18.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-              Lojas com telefone de contato
-            </div>
+            <div className="atw-subtitulo">Lojas com telefone de contato</div>
             {lojasComTelefone.length === 0 && (
-              <div style={{ padding: 12, fontSize: 21, color: 'var(--text-muted)' }}>Nenhuma loja com telefone de contato.</div>
+              <div className="atw-vazio">Nenhuma loja com telefone de contato.</div>
             )}
             {lojasComTelefone.map((e) => (
-              <button key={e.id} type="button" onClick={() => comecarCom(e.telefone_contato, e)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', border: 'none',
-                  borderBottom: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer',
-                }}>
-                <div style={{ fontSize: 22.5, fontWeight: 600 }}>{e.nome}</div>
-                <div style={{ fontSize: 19.5, color: 'var(--text-muted)' }}>{telefoneBonito(e.telefone_contato)}</div>
+              <button key={e.id} type="button" className="atw-item" onClick={() => comecarCom(e.telefone_contato, e)}>
+                <span className="atw-avatar" style={{ background: corAvatar(e.id) }}>{iniciais(e.nome)}</span>
+                <span className="atw-item-corpo">
+                  <span className="atw-item-nome">{e.nome}</span>
+                  <span className="atw-item-previa">{telefoneBonito(e.telefone_contato)}</span>
+                </span>
               </button>
             ))}
           </div>
         ) : (
           <>
             {listaFiltrada.length === 0 && (
-              <div style={{ padding: 16, fontSize: 21.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              <div className="atw-vazio">
                 {conversas.length === 0
                   ? 'Nenhuma conversa ainda. Quando um lojista escrever pro número oficial, ou responder a cobrança, aparece aqui.'
                   : 'Nada encontrado.'}
               </div>
             )}
             {listaFiltrada.map((c) => {
-              const ativo = c.chave === sel
+              const u = c.ultima
+              const previa = u.texto || (u.midia_tipo ? rotuloMidia(u.midia_tipo) : '')
               return (
-                <button key={c.chave} type="button" onClick={() => abrirConversa(c.chave)}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '14px 14px', border: 'none',
-                    borderBottom: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text)',
-                    background: ativo ? 'var(--primary-bg)' : 'transparent',
-                  }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {/* Bolinha do número que a pessoa chamou. Sem ela, duas
+                <button key={c.chave} type="button" className={`atw-item${c.chave === sel ? ' ativo' : ''}`} onClick={() => abrirConversa(c.chave)}>
+                  <span className="atw-av-wrap">
+                    <span className="atw-avatar" style={{ background: corAvatar(c.chaveTel) }}>{iniciais(c.titulo)}</span>
+                    {/* A bolinha mostra qual número da FWC a pessoa chamou. Sem ela, duas
                         conversas do mesmo nome ficariam iguais na lista. */}
-                    <span title={c.canal === 'evolution' ? 'Chamou o 99912-0349' : 'Chamou o número oficial'}
-                      style={{
-                        width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                        background: c.canal === 'evolution' ? '#16a34a' : '#2563eb',
-                      }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 22.5, fontWeight: c.naoLidas ? 800 : 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.titulo}
+                    <span className="atw-canal" style={{ background: c.canal === 'evolution' ? '#25d366' : '#2563eb' }}
+                      title={c.canal === 'evolution' ? 'Chamou o 99912-0349' : 'Chamou o número oficial'} />
+                  </span>
+                  <span className="atw-item-corpo">
+                    <span className="atw-item-linha">
+                      <span className={`atw-item-nome${c.naoLidas ? ' forte' : ''}`}>{c.titulo}</span>
+                      <span className={`atw-item-hora${c.naoLidas ? ' nova' : ''}`}>{horaLista(u.created_at)}</span>
                     </span>
-                    <span style={{ fontSize: 18, color: 'var(--text-muted)', flexShrink: 0 }}>{quando(c.ultima.created_at)}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 20, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.ultima.remetente === 'fwc' ? 'Você: ' : ''}{c.ultima.texto}
-                    </span>
-                    {c.naoLidas > 0 && (
-                      <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: '#16a34a', color: '#fff', fontSize: 18.5, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {c.naoLidas}
+                    <span className="atw-item-linha">
+                      <span className="atw-item-previa">
+                        {u.remetente === 'fwc' && <StatusEnvio m={u} />}
+                        <span>{previa}</span>
                       </span>
-                    )}
-                  </div>
-                  {c.empresa && c.nomePerfil && c.nomePerfil !== c.empresa.nome && (
-                    <div style={{ fontSize: 18, color: 'var(--text-muted)', marginTop: 1 }}>WhatsApp: {c.nomePerfil}</div>
-                  )}
+                      {c.naoLidas > 0 && <span className="atw-badge">{c.naoLidas}</span>}
+                    </span>
+                  </span>
                 </button>
               )
             })}
@@ -495,105 +554,94 @@ export default function AtendimentoFWC() {
   )
 
   const conversa = atual ? (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+    <section className="atw-conv">
+      <div className="atw-head">
         {!larga && (
-          <button type="button" onClick={() => setSel(null)} aria-label="Voltar pra lista"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', fontSize: 22, lineHeight: 1, padding: 0 }}>‹</button>
+          <button type="button" className="atw-icone" onClick={() => setSel(null)} aria-label="Voltar pra lista">
+            <IconeVoltar />
+          </button>
         )}
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atual.titulo}</div>
-          <div style={{ fontSize: 19.5, color: 'var(--text-muted)' }}>
+        <span className="atw-avatar p" style={{ background: corAvatar(atual.chaveTel) }}>{iniciais(atual.titulo)}</span>
+        <div className="atw-conv-info">
+          <div className="atw-conv-nome">{atual.titulo}</div>
+          <div className="atw-conv-sub">
             {telefoneBonito(atual.telefone)}{atual.empresa ? ' · lojista' : ''}
-            {' · '}
-            <span style={{ fontWeight: 700, color: ehEvolution ? '#16a34a' : '#2563eb' }}>
-              {ehEvolution ? 'chamou o 99912-0349' : 'chamou o oficial'}
-            </span>
+            {' · '}{ehEvolution ? 'chamou o 99912-0349' : 'chamou o oficial'}
           </div>
         </div>
+        {larga && (
+          <button type="button" className="atw-icone" onClick={() => setAberto(false)} aria-label="Fechar" title="Fechar">
+            <IconeFechar />
+          </button>
+        )}
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px' }}>
-        {atual.msgs.length === 0 && (
-          <div style={{ margin: 'auto', textAlign: 'center', fontSize: 21, color: 'var(--text-muted)', maxWidth: 320, lineHeight: 1.5 }}>
+      <div className="atw-corpo" ref={corpoRef}>
+        {bolhas.length === 0 && (
+          <div className="atw-sistema">
             Conversa nova. Pra escrever primeiro, o WhatsApp oficial exige um <b>modelo aprovado</b> — escolha um aí embaixo.
           </div>
         )}
-        {atual.msgs.map((m) => {
+        {bolhas.map(({ m, novoDia, cauda }) => {
           const daFwc = m.remetente === 'fwc'
           return (
-            <div key={m.id} style={{ display: 'flex', justifyContent: daFwc ? 'flex-end' : 'flex-start' }}>
-              <div style={{
-                maxWidth: '86%', padding: '10px 14px', borderRadius: 14, fontSize: 22.5, lineHeight: 1.4,
-                background: daFwc ? 'rgba(34,197,94,.16)' : 'var(--bg)',
-                border: daFwc ? '1px solid rgba(34,197,94,.45)' : '1px solid var(--border)',
-                borderBottomRightRadius: daFwc ? 3 : 13, borderBottomLeftRadius: daFwc ? 13 : 3,
-                color: 'var(--text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}>
-                {m.tipo === 'modelo' && (
-                  <div style={{ fontSize: 16.5, fontWeight: 800, opacity: 0.75, marginBottom: 2 }}>📋 Modelo</div>
-                )}
-                {m.texto}
-                {m.midia_path && <Midia path={m.midia_path} tipo={m.midia_tipo} />}
-                <div style={{ fontSize: 16.5, opacity: 0.7, marginTop: 3, textAlign: 'right', display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
-                  <span>{quando(m.created_at)}</span>
-                  {daFwc && <StatusEnvio m={m} />}
+            <Fragment key={m.id}>
+              {novoDia && <div className="atw-dia"><span>{diaRotulo(m.created_at)}</span></div>}
+              <div className={`atw-linha ${daFwc ? 'out' : 'in'}${cauda ? ' cauda' : ''}`}>
+                <div className="atw-bub">
+                  {m.tipo === 'modelo' && <div className="atw-modelo-rotulo">📋 Modelo</div>}
+                  {m.midia_path && <Midia path={m.midia_path} tipo={m.midia_tipo} />}
+                  {m.texto}
+                  <span className="atw-meta">
+                    <span>{horaCurta(m.created_at)}</span>
+                    {daFwc && <StatusEnvio m={m} />}
+                  </span>
                 </div>
               </div>
-            </div>
+            </Fragment>
           )
         })}
-        <div ref={fimRef} />
       </div>
 
-      <div style={{ borderTop: '1px solid var(--border)', padding: '8px 12px 12px' }}>
-        {aviso && (
-          <div style={{ fontSize: 20, fontWeight: 600, padding: '6px 9px', borderRadius: 8, marginBottom: 8, background: 'rgba(234,179,8,.14)', color: '#b45309', lineHeight: 1.4 }}>
-            {aviso}
-          </div>
-        )}
+      <div className="atw-rodape">
+        {aviso && <div className="atw-erro">{aviso}</div>}
 
         {janelaAberta ? (
           <>
-            <div style={{ fontSize: 18.5, color: 'var(--text-muted)', marginBottom: 6 }}>
-              Pode responder livre até {quando(new Date(janelaAte).toISOString())} (24h da última mensagem dele).
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            {!ehEvolution && (
+              <div className="atw-nota">
+                Pode responder livre até {quando(new Date(janelaAte).toISOString())} (24h da última mensagem dele).
+              </div>
+            )}
+            <div className="atw-compor">
               <textarea
+                ref={campoRef}
+                className="atw-campo"
                 value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarTexto() } }}
-                placeholder="Escreva a resposta… (Enter envia, Shift+Enter pula linha)"
-                rows={2}
-                style={{
-                  flex: 1, minWidth: 0, resize: 'vertical', padding: '11px 12px', borderRadius: 10, fontSize: 22.5,
-                  border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'inherit',
-                }}
+                rows={1}
+                onChange={(e) => { setTexto(e.target.value); ajustarAltura(e.target) }}
+                onKeyDown={(e) => { if (enterEnvia && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviarTexto() } }}
+                placeholder="Mensagem"
               />
-              <button type="button" onClick={enviarTexto} disabled={enviando || !texto.trim()}
-                style={{
-                  padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 22.5,
-                  background: '#16a34a', color: '#fff', cursor: enviando || !texto.trim() ? 'default' : 'pointer',
-                  opacity: enviando || !texto.trim() ? 0.55 : 1,
-                }}>{enviando ? '…' : 'Enviar'}</button>
+              <button type="button" className="atw-enviar" onClick={enviarTexto}
+                disabled={enviando || !texto.trim()} aria-label="Enviar">
+                <IconeEnviar />
+              </button>
             </div>
           </>
         ) : (
-          <div>
-            <div style={{ fontSize: 19.5, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>
+          <div className="atw-modelos">
+            <div className="atw-nota" style={{ padding: 0, textAlign: 'left' }}>
               {atual.ultimaCliente
                 ? 'Passou de 24h desde a última mensagem dele: agora só dá pra mandar um modelo aprovado. Quando ele responder, a conversa livre abre de novo.'
                 : 'Ele ainda não escreveu pra FWC: o primeiro contato tem que ser um modelo aprovado.'}
             </div>
             {modelos === null ? (
-              <div style={{ fontSize: 21, color: 'var(--text-muted)' }}>Buscando os modelos aprovados…</div>
+              <div className="atw-nota" style={{ padding: 0 }}>Buscando os modelos aprovados…</div>
             ) : modelos.length === 0 ? (
-              <div style={{ fontSize: 21, color: 'var(--text-muted)' }}>
-                Nenhum modelo aprovado na conta. Crie no Gerenciador do WhatsApp da Meta (categoria Utilidade).
-                <button type="button" onClick={() => { setModelos(null); buscarModelos() }}
-                  style={{ marginLeft: 6, background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 700, padding: 0 }}>
-                  buscar de novo
-                </button>
+              <div className="atw-nota" style={{ padding: 0, textAlign: 'left' }}>
+                Nenhum modelo aprovado na conta. Crie no Gerenciador do WhatsApp da Meta (categoria Utilidade).{' '}
+                <button type="button" className="atw-link" onClick={() => { setModelos(null); buscarModelos() }}>buscar de novo</button>
               </div>
             ) : (
               <>
@@ -604,10 +652,6 @@ export default function AtendimentoFWC() {
                     setModeloSel(m)
                     setParams(m ? Array.from({ length: m.campos }, () => '') : [])
                   }}
-                  style={{
-                    width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 21.5,
-                    border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
-                  }}
                 >
                   <option value="">Escolha o modelo…</option>
                   {modelos.map((m) => (
@@ -617,76 +661,45 @@ export default function AtendimentoFWC() {
                   ))}
                 </select>
                 {modeloSel && (
-                  <div style={{ marginTop: 8 }}>
+                  <>
                     {params.map((p, i) => (
                       <input
                         key={i}
                         value={p}
                         onChange={(e) => setParams((ps) => ps.map((v, j) => (j === i ? e.target.value : v)))}
                         placeholder={`Campo {{${i + 1}}}`}
-                        style={{
-                          display: 'block', width: '100%', boxSizing: 'border-box', marginBottom: 6, padding: '7px 9px',
-                          borderRadius: 8, fontSize: 21.5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
-                        }}
                       />
                     ))}
-                    <div style={{
-                      fontSize: 21, lineHeight: 1.45, padding: '8px 10px', borderRadius: 10, marginBottom: 8,
-                      background: 'rgba(34,197,94,.10)', border: '1px dashed rgba(34,197,94,.5)', color: 'var(--text)', whiteSpace: 'pre-wrap',
-                    }}>
+                    <div className="atw-previa">
                       {modeloSel.cabecalho && <div style={{ fontWeight: 700, marginBottom: 4 }}>{modeloSel.cabecalho}</div>}
                       {montarTexto(modeloSel.corpo, params)}
-                      {modeloSel.rodape && <div style={{ fontSize: 18.5, opacity: 0.7, marginTop: 4 }}>{modeloSel.rodape}</div>}
-                      {modeloSel.botoes.length > 0 && (
-                        <div style={{ fontSize: 19.5, marginTop: 6, color: 'var(--text-muted)' }}>Botões: {modeloSel.botoes.join(' · ')}</div>
-                      )}
+                      {modeloSel.rodape && <small>{modeloSel.rodape}</small>}
+                      {modeloSel.botoes.length > 0 && <small>Botões: {modeloSel.botoes.join(' · ')}</small>}
                     </div>
-                    <button type="button" onClick={enviarModelo} disabled={enviando}
-                      style={{
-                        width: '100%', padding: '10px 14px', borderRadius: 10, border: 'none', fontWeight: 700, fontSize: 22.5,
-                        background: '#16a34a', color: '#fff', cursor: enviando ? 'default' : 'pointer', opacity: enviando ? 0.6 : 1,
-                      }}>{enviando ? 'Enviando…' : 'Enviar modelo'}</button>
-                  </div>
+                    <button type="button" className="atw-btn-largo" onClick={enviarModelo} disabled={enviando}>
+                      {enviando ? 'Enviando…' : 'Enviar modelo'}
+                    </button>
+                  </>
                 )}
               </>
             )}
           </div>
         )}
       </div>
-    </div>
+    </section>
   ) : (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 21.5, lineHeight: 1.5 }}>
-      Escolha uma conversa, ou toque em <b>&nbsp;+ Nova&nbsp;</b> pra falar com um lojista.
+    <div className="atw-conv-vazia">
+      Escolha uma conversa, ou toque no ícone de nova conversa pra falar com um lojista.
     </div>
   )
 
   return (
-    <>
-      <div onClick={() => setAberto(false)}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', zIndex: 950 }} />
-      <div role="dialog" aria-label="Atendimento FWC"
-        style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 960,
-          width: larga ? 'min(1500px, 96vw)' : '100vw',
-          background: 'var(--surface)', color: 'var(--text)', borderLeft: '1px solid var(--border)',
-          boxShadow: '-12px 0 40px rgba(0,0,0,.25)', display: 'flex', flexDirection: 'column',
-        }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '1px solid var(--border)', background: '#16a34a', color: '#fff' }}>
-          <span style={{ fontSize: 20 }}>💬</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 25, fontWeight: 800 }}>Atendimento FWC</div>
-            <div style={{ fontSize: 19.5, opacity: 0.9 }}>
-              Os dois números da FWC{numeroFwc ? ` · ${telefoneBonito(numeroFwc)}` : ''} · só você responde, sem robô
-            </div>
-          </div>
-          <button type="button" onClick={() => setAberto(false)} aria-label="Fechar"
-            style={{ background: 'rgba(255,255,255,.18)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: 8, fontSize: 18, cursor: 'pointer' }}>✕</button>
-        </div>
-        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          {mostraLista && lista}
-          {mostraConversa && conversa}
-        </div>
+    <div className="atw">
+      <div className="atw-fundo" onClick={() => setAberto(false)} />
+      <div className="atw-panel" role="dialog" aria-label="Atendimento FWC">
+        {mostraLista && lista}
+        {mostraConversa && conversa}
       </div>
-    </>
+    </div>
   )
 }
