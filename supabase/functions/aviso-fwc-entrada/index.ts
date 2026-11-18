@@ -60,13 +60,29 @@ function horaFortaleza(): number {
   }).format(new Date()))
 }
 
+// CHAVE DE LIGA/DESLIGA DA RESPOSTA AUTOMÁTICA (18/11/2026).
+// config_global.aviso_fwc_resposta_auto = "desligada" corta as DUAS mensagens
+// automáticas ("Oi! Aqui é o Wilde, da FWC Inter. Já te atendo!..." e a de 5 min
+// depois). A conversa continua entrando no Atendimento FWC e o aviso no celular
+// do dono continua saindo. Sem a chave (ou com outro valor) fica ligada, como era.
+//
+// Por que desligar: sem anúncio rodando, quem escreve pro 99912-0349 é gente que a
+// FWC mesma procurou (cobrança de mensalidade). Teve caso do robô de uma loja
+// responder a cobrança como se fosse cliente, e a resposta automática responder de
+// volta ao robô. Voltar a ligar: apagar a chave ou pôr "ligada".
+function respostaAutoDesligada(cfg: Record<string, string>): boolean {
+  return ["desligada", "desligado", "off", "false", "0", "nao", "não"].includes(
+    String(cfg.aviso_fwc_resposta_auto ?? "").trim().toLowerCase(),
+  )
+}
+
 const ok = (data: unknown = { ok: true }, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } })
 
 // deno-lint-ignore-next-line no-explicit-any
 async function config(sb: any): Promise<Record<string, string>> {
   const { data } = await sb.from("config_global").select("chave, valor")
-    .in("chave", ["admin_sender_instance", "aviso_fwc_destino", "aviso_fwc_token"])
+    .in("chave", ["admin_sender_instance", "aviso_fwc_destino", "aviso_fwc_token", "aviso_fwc_resposta_auto"])
   const cfg: Record<string, string> = {}
   for (const r of data ?? []) cfg[r.chave] = String(r.valor ?? "").trim()
   return cfg
@@ -236,6 +252,7 @@ serve(async (req) => {
     // Chamado pelo cron a cada minuto: manda a segunda mensagem pra quem
     // ficou no vácuo depois do "Com quem eu falo?".
     if (body?.action === "followup") {
+      if (respostaAutoDesligada(cfg)) return ok({ enviados: 0, motivo: "resposta automática desligada" })
       const hora = horaFortaleza()
       if (hora < 7 || hora >= 22) return ok({ enviados: 0, motivo: "noite" })
       const agora = Date.now()
@@ -335,7 +352,7 @@ serve(async (req) => {
     // Resposta automática pro contato, antes do aviso (quem chamou não pode
     // ficar no vácuo enquanto o Wilde não vê).
     const janelaResp = JANELA_RESPOSTA_H * 3600_000
-    if (ha(ultimo?.respondido_em) > janelaResp && ha(ultimo?.humano_em) > janelaResp) {
+    if (!respostaAutoDesligada(cfg) && ha(ultimo?.respondido_em) > janelaResp && ha(ultimo?.humano_em) > janelaResp) {
       const r = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instancia}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
