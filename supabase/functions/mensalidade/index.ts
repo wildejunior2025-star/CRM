@@ -208,6 +208,45 @@ async function enviarEvolution(sb: any, telefone: string, texto: string) {
   return { erro: null, telefone: d }
 }
 
+// A loja pode ter MAIS DE UM responsável pela mensalidade: sócios, ou o dono
+// que paga mas não mexe no sistema. A lista nova (zap_telefones) manda; se ela
+// estiver vazia, cai no número antigo (zap_telefone), que é o que as lojas
+// cadastradas antes de 18/11/2026 têm.
+//
+// Normaliza e tira repetido de propósito: (84) 98765-4116 e 5584987654116 são
+// o MESMO telefone, e a pessoa não pode receber a mesma cobrança duas vezes.
+function numerosDaLoja(c: any, escolhidos?: unknown): string[] {
+  const brutos: unknown[] = Array.isArray(escolhidos) ? escolhidos
+    : escolhidos ? [escolhidos]
+    : (Array.isArray(c?.zap_telefones) && c.zap_telefones.length ? c.zap_telefones : [c?.zap_telefone])
+  const lista: string[] = []
+  for (const t of brutos) {
+    let d = String(t ?? "").replace(/\D/g, "")
+    if (d.length < 10) continue
+    if (!d.startsWith("55")) d = "55" + d
+    if (!lista.includes(d)) lista.push(d)
+  }
+  return lista
+}
+
+// Manda o mesmo texto pra cada responsável, com um respiro entre um e outro:
+// despejar o mesmo texto em rajada é o jeito mais rápido de o número da FWC
+// cair como spam. Falhar pra um não cancela os outros.
+async function enviarParaTodos(sb: any, numeros: string[], texto: string) {
+  const ok: string[] = [], falhas: string[] = []
+  for (const n of numeros) {
+    if (ok.length || falhas.length) await new Promise(r => setTimeout(r, 1500))
+    const r: any = await enviarEvolution(sb, n, texto)
+    if (r.erro) falhas.push(`${n}: ${r.erro}`)
+    else ok.push(r.telefone)
+  }
+  // Só conta como falha se NINGUÉM recebeu. Se um dos dois recebeu, o recado
+  // chegou na loja — marcar como falha faria o aviso sair tudo de novo amanhã
+  // pra quem já leu.
+  const resumo = [ok.length ? `pro ${ok.join(", ")}` : "", falhas.length ? `(falhou em ${falhas.join("; ")})` : ""].filter(Boolean).join(" ")
+  return { ok, falhas, resumo, erro: ok.length ? null : (falhas[0] ?? "Essa loja não tem telefone cadastrado.") }
+}
+
 function textoLink(nome: string | undefined, token: string, lista: any[], vencida: boolean) {
   const total = lista.reduce((s: number, c: any) => s + Number(c.valor), 0)
   return `Olá, ${nome ?? "tudo bem"}! Aqui é a FWC Inter. 👋\n\n` +
@@ -224,10 +263,11 @@ function textoLink(nome: string | undefined, token: string, lista: any[], vencid
 async function cronLinkWhatsApp(sb: any) {
   const hoje = hojeBR()
   const { data: cfgs } = await sb.from("mensalidade_config")
-    .select("empresa_id, link_token, zap_telefone, empresas(nome)").eq("ativa", true).eq("zap_auto", true)
+    .select("empresa_id, link_token, zap_telefone, zap_telefones, empresas(nome)").eq("ativa", true).eq("zap_auto", true)
   const resumo: unknown[] = []
   for (const c of cfgs ?? []) {
-    if (!c.zap_telefone) continue
+    const numeros = numerosDaLoja(c)
+    if (!numeros.length) continue
     await conferirPendentes(sb, c.empresa_id)
     const { data: abertas } = await sb.from("mensalidade_cobrancas")
       .select("id, vencimento, referencia, valor").eq("empresa_id", c.empresa_id).eq("status", "aberta").lte("vencimento", hoje).order("vencimento")
@@ -237,11 +277,11 @@ async function cronLinkWhatsApp(sb: any) {
       .eq("empresa_id", c.empresa_id).eq("cobranca_id", chave.id).eq("tipo", "whatsapp_link_auto").limit(1).maybeSingle()
     if (jaFoi) continue
     const total = abertas.reduce((s: number, x: any) => s + Number(x.valor), 0)
-    const envio: any = await enviarEvolution(sb, c.zap_telefone, textoLink(c.empresas?.nome, c.link_token, abertas, true))
+    const envio: any = await enviarParaTodos(sb, numeros, textoLink(c.empresas?.nome, c.link_token, abertas, true))
     await sb.from("mensalidade_avisos").insert({
       empresa_id: c.empresa_id, cobranca_id: chave.id, tipo: envio.erro ? "whatsapp_link_falha" : "whatsapp_link_auto",
       quem: "WhatsApp da FWC (automático)",
-      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado pro ${c.zap_telefone} (${valorBr(total)})`,
+      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado ${envio.resumo} (${valorBr(total)})`,
     }).then(() => {}, () => {})
     resumo.push({ loja: c.empresas?.nome, erro: envio.erro })
     // Espaça os envios: número da FWC não é Cloud API, sem pressa.
@@ -269,7 +309,7 @@ async function cronVespera(sb: any) {
   const hoje = hojeBR()
   const amanha = somaDiasYmd(hoje, 1)
   const { data: cfgs } = await sb.from("mensalidade_config")
-    .select("empresa_id, link_token, zap_telefone, carencia_dias, prazo_ate, empresas(nome, telefone_contato, horarios_funcionamento, feriados_fecha)")
+    .select("empresa_id, link_token, zap_telefone, zap_telefones, carencia_dias, prazo_ate, empresas(nome, telefone_contato, horarios_funcionamento, feriados_fecha)")
     .eq("ativa", true)
 
   const resumo: unknown[] = []
@@ -298,8 +338,10 @@ async function cronVespera(sb: any) {
       .eq("empresa_id", c.empresa_id).eq("cobranca_id", vencida.id).eq("tipo", "whatsapp_vespera").limit(1).maybeSingle()
     if (jaFoi) continue
 
-    const telefone = c.zap_telefone || c.empresas?.telefone_contato
-    if (!telefone) continue
+    // Sem ninguém cadastrado na cobrança, vale o telefone de contato da loja.
+    const numeros = numerosDaLoja(c)
+    const destinos = numeros.length ? numeros : numerosDaLoja(null, c.empresas?.telefone_contato)
+    if (!destinos.length) continue
 
     const { data: abertas } = await sb.from("mensalidade_cobrancas")
       .select("referencia, valor").eq("empresa_id", c.empresa_id).eq("status", "aberta").lte("vencimento", hoje)
@@ -313,12 +355,12 @@ async function cronVespera(sb: any) {
       `Dá pra resolver agora, em um minuto, pelo PIX deste link:\n${APP_URL}/pagar/${c.link_token}\n\n` +
       `Assim que o pagamento cair, libera sozinho. Qualquer coisa é só chamar aqui.`
 
-    const envio: any = await enviarEvolution(sb, telefone, texto)
+    const envio: any = await enviarParaTodos(sb, destinos, texto)
     await sb.from("mensalidade_avisos").insert({
       empresa_id: c.empresa_id, cobranca_id: vencida.id,
       tipo: envio.erro ? "whatsapp_vespera_falha" : "whatsapp_vespera",
       quem: "WhatsApp da FWC (véspera 22h)",
-      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Último aviso pro ${telefone} (${valorBr(total)}, trava ${dataBr(amanha)})`,
+      detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Último aviso ${envio.resumo} (${valorBr(total)}, trava ${dataBr(amanha)})`,
     }).then(() => {}, () => {})
     resumo.push({ loja: c.empresas?.nome, trava: amanha, erro: envio.erro })
     await new Promise(r => setTimeout(r, 4000))
@@ -449,6 +491,7 @@ Deno.serve(async (req) => {
       if (!bearer) return json({ error: "Entre de novo: a sessão expirou." }, 401)
       const comAChave = createClient(SUPABASE_URL, bearer)
       const { error: semPoder } = await comAChave.auth.admin.listUsers({ page: 1, perPage: 1 })
+      let quem = "WhatsApp da FWC (reenvio manual)", quemId: string | null = null
       if (semPoder) {
         // Não é a chave de serviço. Pode ser o Super ADM pelo navegador, que é
         // de onde o botão "Mandar o link agora" chama — e o navegador NUNCA
@@ -460,8 +503,10 @@ Deno.serve(async (req) => {
         // seria o mesmo que aceitar crachá escrito à mão).
         const { data: u } = await sb.auth.getUser(bearer)
         if (!u?.user) return json({ error: "Entre de novo: a sessão expirou." }, 401)
-        const { data: perfil } = await sb.from("profiles").select("perfil").eq("id", u.user.id).maybeSingle()
+        const { data: perfil } = await sb.from("profiles").select("id, nome, perfil").eq("id", u.user.id).maybeSingle()
         if (perfil?.perfil !== "super_admin") return json({ error: "Só o Super ADM pode mandar cobrança." }, 403)
+        quem = `${perfil.nome ?? "Super ADM"} (Super ADM)`
+        quemId = perfil.id
       }
 
       // A tela do Super ADM manda a loja (empresa_id); o script de manutenção
@@ -472,15 +517,21 @@ Deno.serve(async (req) => {
       if (!loja) return json({ error: "Link não encontrado." }, 404)
 
       const { data: cfg } = await sb.from("mensalidade_config")
-        .select("zap_telefone, link_token, empresas(nome, telefone_contato)").eq("empresa_id", loja.empresa_id).maybeSingle()
-      const telefone = body?.telefone || cfg?.zap_telefone || (cfg?.empresas as any)?.telefone_contato
-      if (!telefone) return json({ error: "Essa loja não tem telefone cadastrado." }, 400)
+        .select("zap_telefone, zap_telefones, link_token, empresas(nome, telefone_contato)").eq("empresa_id", loja.empresa_id).maybeSingle()
+      // A tela manda a lista que está na frente dos olhos (telefones); o script
+      // antigo manda um só (telefone); sem nada, vale quem está cadastrado.
+      const cadastrados = numerosDaLoja(cfg, body?.telefones ?? body?.telefone)
+      const destinos = cadastrados.length ? cadastrados : numerosDaLoja(null, (cfg?.empresas as any)?.telefone_contato)
+      if (!destinos.length) return json({ error: "Essa loja não tem telefone cadastrado." }, 400)
 
       const hoje = hojeBR()
-      const { data: abertas } = await sb.from("mensalidade_cobrancas")
-        .select("referencia, valor, vencimento").eq("empresa_id", loja.empresa_id).eq("status", "aberta")
-        .lte("vencimento", hoje).order("vencimento")
-      if (!abertas?.length) return json({ error: "Essa loja não tem nada em aberto." }, 400)
+      const { data: todasAbertas } = await sb.from("mensalidade_cobrancas")
+        .select("id, referencia, valor, vencimento").eq("empresa_id", loja.empresa_id).eq("status", "aberta").order("vencimento")
+      // Vencidas na frente. Se não tem vencida, manda a próxima — quem quer
+      // pagar adiantado também precisa do link.
+      const vencidas = (todasAbertas ?? []).filter((x: any) => x.vencimento <= hoje)
+      const abertas = vencidas.length ? vencidas : (todasAbertas ?? []).slice(0, 1)
+      if (!abertas.length) return json({ error: "Essa loja não tem nada em aberto." }, 400)
 
       const total = abertas.reduce((s: number, x: any) => s + Number(x.valor), 0)
       const recado = String(body?.obs ?? "").trim()
@@ -492,25 +543,25 @@ Deno.serve(async (req) => {
         `No app do banco escolha *PIX → Copia e Cola* e cole o código (não é pra digitar chave). ` +
         `Assim que o pagamento cair, libera sozinho.`
 
-      const envio: any = await enviarEvolution(sb, telefone, texto)
+      const envio: any = await enviarParaTodos(sb, destinos, texto)
       await sb.from("mensalidade_avisos").insert({
-        empresa_id: loja.empresa_id, cobranca_id: null,
-        tipo: envio.erro ? "whatsapp_manual_falha" : "whatsapp_manual",
-        quem: "WhatsApp da FWC (reenvio manual)",
-        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link reenviado pro ${envio.telefone ?? telefone} (${valorBr(total)})`,
+        empresa_id: loja.empresa_id, cobranca_id: abertas[0].id, profile_id: quemId,
+        tipo: envio.erro ? "whatsapp_manual_falha" : "whatsapp_manual", quem,
+        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link reenviado ${envio.resumo} (${valorBr(total)})`,
       }).then(() => {}, () => {})
 
       if (envio.erro) return json({ error: envio.erro }, 502)
 
-      // Entra também no Atendimento FWC. Sem isto a conversa fica pela metade:
-      // a loja responde a uma mensagem que não está na tela de quem atende, e
-      // quem lê o chat não entende do que ela está falando.
-      await sb.from("admin_chat").insert({
-        telefone: envio.telefone, empresa_id: loja.empresa_id, canal: "evolution",
+      // Entra também no Atendimento FWC, uma conversa por responsável. Sem isto
+      // a conversa fica pela metade: a loja responde a uma mensagem que não
+      // está na tela de quem atende, e quem lê o chat não entende do que ela
+      // está falando.
+      await sb.from("admin_chat").insert(envio.ok.map((n: string) => ({
+        telefone: n, empresa_id: loja.empresa_id, canal: "evolution",
         remetente: "fwc", tipo: "texto", texto, status: "enviado", lida: true,
-      }).then(() => {}, () => {})
+      }))).then(() => {}, () => {})
 
-      return json({ ok: true, loja: (cfg?.empresas as any)?.nome, para: envio.telefone, total, texto })
+      return json({ ok: true, loja: (cfg?.empresas as any)?.nome, para: envio.ok, falhas: envio.falhas, total, texto })
     }
 
     // ── Página pública do link de pagamento (sem login; o token é a chave) ───
@@ -543,34 +594,10 @@ Deno.serve(async (req) => {
 
 
     // ── Super ADM: manda o link de pagamento pelo WhatsApp da FWC ────────────
-    if (action === "enviar_link") {
-      const tk = (req.headers.get("Authorization") ?? "").replace("Bearer ", "")
-      const { data: { user: su } } = await sb.auth.getUser(tk)
-      if (!su) return json({ error: "Faça login de novo." }, 401)
-      const { data: sp } = await sb.from("profiles").select("id, nome, perfil").eq("id", su.id).maybeSingle()
-      if (sp?.perfil !== "super_admin") return json({ error: "Só o Super ADM." }, 403)
-      const empId = String(body?.empresa_id ?? "")
-      const tel = String(body?.telefone ?? "").replace(/\D/g, "")
-      if (tel.length < 10) return json({ error: "Digite o número com DDD." }, 400)
-      const { data: cfg } = await sb.from("mensalidade_config").select("link_token, empresas(nome)").eq("empresa_id", empId).maybeSingle()
-      if (!cfg) return json({ error: "Essa loja não tem cobrança configurada." }, 400)
-      const hoje = hojeBR()
-      const { data: abertas } = await sb.from("mensalidade_cobrancas")
-        .select("id, vencimento, referencia, valor").eq("empresa_id", empId).eq("status", "aberta").order("vencimento")
-      const vencidas = (abertas ?? []).filter((c: any) => c.vencimento <= hoje)
-      const lista = vencidas.length ? vencidas : (abertas ?? []).slice(0, 1)
-      if (!lista.length) return json({ error: "Não há mensalidade em aberto." }, 400)
-      const total = lista.reduce((s: number, c: any) => s + Number(c.valor), 0)
-      const texto = textoLink(cfg.empresas?.nome, cfg.link_token, lista, vencidas.length > 0)
-      const envio: any = await enviarEvolution(sb, tel, texto)
-      await sb.from("mensalidade_avisos").insert({
-        empresa_id: empId, cobranca_id: lista[0].id, tipo: "whatsapp_link", profile_id: sp.id,
-        quem: `${sp.nome ?? "Super ADM"} (Super ADM)`,
-        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link enviado pro ${tel} (${valorBr(total)})`,
-      }).then(() => {}, () => {})
-      if (envio.erro) return json({ error: `Não consegui enviar: ${envio.erro}` }, 502)
-      return json({ ok: true, telefone: envio.telefone })
-    }
+    // (Havia aqui um SEGUNDO bloco "enviar_link", escrito depois. Como o de
+    // cima casa primeiro, este nunca rodava — e era o único que aceitava o
+    // Super ADM logado. Era essa a causa do "Não autorizado" de 18/11. Os dois
+    // viraram um só lá em cima.)
 
     // ── Daqui pra baixo: só o ADMIN logado da loja ───────────────────────────
     const token = (req.headers.get("Authorization") ?? "").replace("Bearer ", "")

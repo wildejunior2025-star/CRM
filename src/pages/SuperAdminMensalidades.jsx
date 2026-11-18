@@ -340,7 +340,7 @@ function Detalhe({ l, hoje, recarregar }) {
             Cobrar no WhatsApp
           </a>
         )}
-        {cfg?.link_token && <CobrarWhatsApp key={`${e.id}-${cfg.zap_auto}-${cfg.zap_telefone}`} loja={e} cfg={cfg} temAberta={l.abertas.length > 0} recarregar={recarregar} telInicial={tel} />}
+        {cfg?.link_token && <CobrarWhatsApp key={`${e.id}-${cfg.zap_auto}-${(cfg.zap_telefones ?? [cfg.zap_telefone]).join()}`} loja={e} cfg={cfg} temAberta={l.abertas.length > 0} recarregar={recarregar} telInicial={tel} />}
         <div style={{ ...subtitulo, marginTop: 14 }}>Dar prazo</div>
         <div style={duas}>
           <input style={campo} type="date" value={prazo} onChange={ev => setPrazo(ev.target.value)} />
@@ -411,36 +411,74 @@ function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
     const d = String(t ?? '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '').slice(0, 11)
     return d.length > 6 ? `(${d.slice(0, 2)}) ${d.slice(2, d.length - 4)}-${d.slice(-4)}` : d.length > 2 ? `(${d.slice(0, 2)}) ${d.slice(2)}` : d
   }
+  // Só os dígitos, sem o 55 do país (quem digita copiando do WhatsApp traz o 55
+  // junto, e aí (84) 9999-9999 e 5584999999999 virariam dois cadastros do mesmo
+  // telefone — duas cobranças pra mesma pessoa).
+  const soDigitos = t => {
+    let d = String(t ?? '').replace(/\D/g, '')
+    if (d.startsWith('55') && d.length > 11) d = d.slice(2)
+    return d.slice(0, 11)
+  }
   const [ligado, setLigado] = useState(!!cfg.zap_auto)
-  const [numero, setNumero] = useState(mascara(cfg.zap_telefone || telInicial))
+  // Lista nova; nas lojas antigas, o número único vira o primeiro da lista.
+  const [numeros, setNumeros] = useState(() => {
+    const brutos = cfg.zap_telefones?.length ? cfg.zap_telefones : [cfg.zap_telefone || telInicial]
+    return [...new Set(brutos.map(soDigitos).filter(d => d.length >= 10))]
+  })
+  const [novo, setNovo] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [res, setRes] = useState(null)   // { ok, texto }
-  const digitos = numero.replace(/\D/g, '')
-  const numeroOk = digitos.length >= 10
+  const novoOk = soDigitos(novo).length >= 10
+  const temNumero = numeros.length > 0
+
+  function adicionar() {
+    const d = soDigitos(novo)
+    if (d.length < 10) return
+    if (numeros.includes(d)) { setNovo(''); setRes({ ok: false, texto: 'Esse número já está na lista.' }); return }
+    setNumeros([...numeros, d]); setNovo(''); setRes(null)
+  }
 
   async function salvar() {
     setSalvando(true); setRes(null)
     const { error } = await supabase.from('mensalidade_config')
-      .update({ zap_auto: ligado, zap_telefone: digitos || null, atualizado_em: new Date().toISOString() }).eq('empresa_id', loja.id)
+      .update({
+        zap_auto: ligado,
+        zap_telefones: numeros.length ? numeros : null,
+        // zap_telefone continua existindo (é o que o código antigo lê): fica
+        // sempre com o primeiro da lista.
+        zap_telefone: numeros[0] ?? null,
+        atualizado_em: new Date().toISOString(),
+      }).eq('empresa_id', loja.id)
     setSalvando(false)
     if (error) { setRes({ ok: false, texto: error.message }); return }
-    setRes({ ok: true, texto: ligado ? 'Ligado: o link sai sozinho às 8h quando a cobrança vencer.' : 'Desligado.' })
+    setRes({
+      ok: true,
+      texto: ligado
+        ? `Ligado: o link sai sozinho às 8h pra ${numeros.length} ${numeros.length === 1 ? 'número' : 'números'} quando a cobrança vencer.`
+        : 'Desligado.',
+    })
     recarregar()
   }
 
   async function enviarAgora() {
-    if (!window.confirm(`Mandar o link de pagamento agora pro ${numero}?`)) return
+    const lista = numeros.map(mascara).join(', ')
+    if (!window.confirm(`Mandar o link de pagamento agora pra ${numeros.length === 1 ? lista : `${numeros.length} números: ${lista}`}?`)) return
     setEnviando(true); setRes(null)
     const { data: { session } } = await supabase.auth.getSession()
     try {
       const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mensalidade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
-        body: JSON.stringify({ action: 'enviar_link', empresa_id: loja.id, telefone: numero }),
+        body: JSON.stringify({ action: 'enviar_link', empresa_id: loja.id, telefones: numeros }),
       }).then(x => x.json())
       if (r?.error) setRes({ ok: false, texto: r.error })
-      else { setRes({ ok: true, texto: `Enviado pro ${mascara(r.para ?? digitos)} ✓` }); recarregar() }
+      else {
+        const foram = (r.para ?? []).map(mascara).join(', ')
+        const falhou = (r.falhas ?? []).length ? ` · não foi em ${r.falhas.length}` : ''
+        setRes({ ok: true, texto: `Enviado pro ${foram} ✓${falhou}` })
+        recarregar()
+      }
     } catch {
       setRes({ ok: false, texto: 'Sem resposta do servidor.' })
     }
@@ -454,17 +492,34 @@ function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
         <input type="checkbox" checked={ligado} onChange={ev => setLigado(ev.target.checked)} style={{ width: 18, height: 18 }} />
         Mandar o link do PIX sozinho
       </label>
-      <label style={rotulo}>Número que recebe
-        <input style={campo} inputMode="tel" placeholder="(84) 99999-9999" value={numero} onChange={ev => setNumero(mascara(ev.target.value))} />
-      </label>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
-        Sai pelo WhatsApp da FWC, às 8h, uma vez por cobrança vencida. Quando a loja paga, para sozinho.
+      <div style={rotulo}>Quem recebe a cobrança</div>
+      {numeros.map(d => (
+        <div key={d} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 10px', marginBottom: 4, borderRadius: 8, border: '1px solid var(--border)' }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700 }}>{mascara(d)}</span>
+          <button type="button" title="Tirar da lista" onClick={() => { setNumeros(numeros.filter(x => x !== d)); setRes(null) }}
+            style={{ ...botaoPequeno, color: '#dc2626' }}>Tirar</button>
+        </div>
+      ))}
+      {!temNumero && (
+        <div style={{ fontSize: 12.5, color: '#d97706', marginBottom: 6 }}>Nenhum responsável cadastrado.</div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+        <input style={{ ...campo, flex: 1 }} inputMode="tel" placeholder="(84) 99999-9999" value={novo}
+          onChange={ev => setNovo(mascara(ev.target.value))}
+          onKeyDown={ev => { if (ev.key === 'Enter') { ev.preventDefault(); adicionar() } }} />
+        <button type="button" disabled={!novoOk} onClick={adicionar}
+          style={{ ...botaoPequeno, opacity: novoOk ? 1 : 0.5, whiteSpace: 'nowrap' }}>+ Adicionar</button>
       </div>
-      <button type="button" disabled={salvando || (ligado && !numeroOk)} onClick={salvar}
-        style={{ ...botao, background: '#16a34a', opacity: salvando || (ligado && !numeroOk) ? 0.5 : 1 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '8px 0' }}>
+        Pode cadastrar mais de um responsável (sócios, ou quem paga sem mexer no sistema): todos recebem a mesma
+        cobrança. Sai pelo WhatsApp da FWC, às 8h, uma vez por cobrança vencida. Quando a loja paga, para sozinho.
+        <strong> Depois de mexer na lista, clique em Salvar.</strong>
+      </div>
+      <button type="button" disabled={salvando || (ligado && !temNumero)} onClick={salvar}
+        style={{ ...botao, background: '#16a34a', opacity: salvando || (ligado && !temNumero) ? 0.5 : 1 }}>
         {salvando ? 'Salvando…' : 'Salvar'}
       </button>
-      {temAberta && numeroOk && (
+      {temAberta && temNumero && (
         <button type="button" disabled={enviando} onClick={enviarAgora}
           style={{ ...botaoPequeno, width: '100%', marginTop: 6, padding: '7px 0' }}>
           {enviando ? 'Enviando…' : 'Mandar o link agora (teste)'}
