@@ -446,12 +446,29 @@ Deno.serve(async (req) => {
       // A API de admin do auth é o teste de verdade: ela recusa qualquer chave
       // que não seja service role, com erro.
       const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
-      if (!bearer) return json({ error: "Não autorizado" }, 401)
+      if (!bearer) return json({ error: "Entre de novo: a sessão expirou." }, 401)
       const comAChave = createClient(SUPABASE_URL, bearer)
       const { error: semPoder } = await comAChave.auth.admin.listUsers({ page: 1, perPage: 1 })
-      if (semPoder) return json({ error: "Não autorizado" }, 401)
+      if (semPoder) {
+        // Não é a chave de serviço. Pode ser o Super ADM pelo navegador, que é
+        // de onde o botão "Mandar o link agora" chama — e o navegador NUNCA
+        // pode carregar a chave de serviço. 18/11: o botão dava "Não
+        // autorizado" pra todo mundo porque só a chave passava aqui.
+        //
+        // getUser confere a ASSINATURA do token no servidor do auth (esta
+        // função roda sem verify_jwt, então ler o "role" do crachá sem conferir
+        // seria o mesmo que aceitar crachá escrito à mão).
+        const { data: u } = await sb.auth.getUser(bearer)
+        if (!u?.user) return json({ error: "Entre de novo: a sessão expirou." }, 401)
+        const { data: perfil } = await sb.from("profiles").select("perfil").eq("id", u.user.id).maybeSingle()
+        if (perfil?.perfil !== "super_admin") return json({ error: "Só o Super ADM pode mandar cobrança." }, 403)
+      }
 
-      const loja: any = await lojaDoLink(sb, String(body?.token ?? ""))
+      // A tela do Super ADM manda a loja (empresa_id); o script de manutenção
+      // manda o token do link. Os dois chegam na mesma loja.
+      const loja: any = body?.empresa_id
+        ? { empresa_id: String(body.empresa_id) }
+        : await lojaDoLink(sb, String(body?.token ?? ""))
       if (!loja) return json({ error: "Link não encontrado." }, 404)
 
       const { data: cfg } = await sb.from("mensalidade_config")
@@ -480,7 +497,7 @@ Deno.serve(async (req) => {
         empresa_id: loja.empresa_id, cobranca_id: null,
         tipo: envio.erro ? "whatsapp_manual_falha" : "whatsapp_manual",
         quem: "WhatsApp da FWC (reenvio manual)",
-        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link reenviado pro ${telefone} (${valorBr(total)})`,
+        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Link reenviado pro ${envio.telefone ?? telefone} (${valorBr(total)})`,
       }).then(() => {}, () => {})
 
       if (envio.erro) return json({ error: envio.erro }, 502)

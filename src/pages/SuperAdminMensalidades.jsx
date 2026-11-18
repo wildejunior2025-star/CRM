@@ -440,7 +440,7 @@ function CobrarWhatsApp({ loja, cfg, temAberta, recarregar, telInicial }) {
         body: JSON.stringify({ action: 'enviar_link', empresa_id: loja.id, telefone: numero }),
       }).then(x => x.json())
       if (r?.error) setRes({ ok: false, texto: r.error })
-      else { setRes({ ok: true, texto: `Enviado pro ${mascara(r.telefone)} ✓` }); recarregar() }
+      else { setRes({ ok: true, texto: `Enviado pro ${mascara(r.para ?? digitos)} ✓` }); recarregar() }
     } catch {
       setRes({ ok: false, texto: 'Sem resposta do servidor.' })
     }
