@@ -95,6 +95,25 @@ async function marcarStatus(sb: any, cfg: any, status: string, erro: string | nu
   await (cfg.id ? upd.eq("id", cfg.id) : upd.eq("empresa_id", cfg.empresa_id))
 }
 
+// O iFood às vezes devolve o pedido SEM lançamentos (billingEntries vazio,
+// saleBalance 0) mesmo já tendo mandado certo antes. Gravar isso por cima
+// zerava o "verdinho" da tela Pedidos (bug visto em 14/11 na Zebu).
+// Regra: resposta vazia não substitui venda que já tem saldo gravado.
+async function semVaziasPorCima(sb: any, cfg: any, linhas: any[]) {
+  const vazias = linhas.filter((l) => l.sem_lancamentos).map((l) => l.venda_id)
+  const comSaldo = new Set<string>()
+  for (let i = 0; i < vazias.length; i += 200) {
+    const { data, error } = await sb.from("ifood_vendas").select("venda_id")
+      .eq("empresa_id", cfg.empresa_id).in("venda_id", vazias.slice(i, i + 200))
+      .not("saldo", "is", null).neq("saldo", 0)
+    if (error) throw new Error(`conferir vendas vazias: ${error.message}`)
+    for (const r of data ?? []) comSaldo.add(r.venda_id)
+  }
+  return linhas
+    .filter((l) => !(l.sem_lancamentos && comSaldo.has(l.venda_id)))
+    .map(({ sem_lancamentos: _, ...l }) => l)
+}
+
 // ── Rotina completa de uma loja do iFood ──────────────────────────────────────
 // Loja grande (centenas de pedidos por semana) estoura o tempo da função: a
 // Zebu sozinha dá ~4 mil lançamentos em 14 dias. Então a varredura anda da
@@ -137,7 +156,7 @@ async function sincronizarLoja(sb: any, getToken: GetToken, cfg: any, dias: numb
     }
 
     await gravarEmLotes(sb, "ifood_eventos_financeiros", [...eventos.values()], "empresa_id,chave")
-    await gravarEmLotes(sb, "ifood_vendas", [...vendas.values()], "empresa_id,venda_id")
+    await gravarEmLotes(sb, "ifood_vendas", await semVaziasPorCima(sb, cfg, [...vendas.values()]), "empresa_id,venda_id")
     await gravarEmLotes(sb, "ifood_liquidacao_semanas", semanasLiq, "empresa_id,merchant_id,semana_ini")
     await gravarEmLotes(sb, "ifood_liquidacoes", titulos, "empresa_id,chave")
     res.lancamentos = eventos.size

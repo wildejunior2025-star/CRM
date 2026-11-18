@@ -57,7 +57,10 @@ export function linhasDeVendas(cfg: any, vendas: any[]) {
         .map((m: any) => `${METODO[m?.method] ?? m?.method ?? "?"} (${RESPONSAVEL[m?.liability] ?? m?.liability ?? "?"})`)
         .join(", ") || null,
       comissoes_taxas: redondo(taxas),
-      saldo: numOuNull(v?.billingSummary?.saleBalance),
+      // Sem lançamentos o iFood ainda não fechou o pedido (ou respondeu vazio):
+      // o saleBalance vem 0 e não é zero de verdade — fica pendente (null).
+      saldo: entradas.length ? numOuNull(v?.billingSummary?.saleBalance) : null,
+      sem_lancamentos: entradas.length === 0,
       bruto: v,
       sincronizado_em: new Date().toISOString(),
     })
