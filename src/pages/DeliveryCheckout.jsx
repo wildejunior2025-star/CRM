@@ -2407,6 +2407,10 @@ export default function DeliveryCheckout() {
           cep: form.cep, rua: form.rua.trim(), numero: form.numero.trim(),
           complemento: form.complemento.trim(), estado: form.estado, cidade: form.cidade, bairro: form.bairro.trim(),
         }))
+        // O rascunho lembra endereço e nome pra próxima compra, mas a observação
+        // é DESTE pedido: se ficasse, o pedido seguinte já abria com o recado
+        // antigo e ele saía de novo na comanda (Zebu, 18/11).
+        localStorage.setItem('fwc_checkout_draft', JSON.stringify({ form: { ...form, observacoes: '' }, tipo }))
       } catch { /* ok */ }
     }
 
