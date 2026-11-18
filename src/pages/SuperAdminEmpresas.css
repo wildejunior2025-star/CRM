@@ -251,6 +251,27 @@
 }
 .emp-remoto-copiar { font-size: 11px; font-weight: 700; color: var(--primary); }
 
+/* Checklist de instalação: o botão mostra quanto falta, pra não esquecer nada. */
+.emp-checklist {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.emp-checklist:hover { border-color: var(--primary); }
+.emp-checklist strong { font-size: 12px; font-weight: 800; color: var(--primary); font-variant-numeric: tabular-nums; }
+.emp-checklist.completo strong { color: var(--success); }
+
 .emp-acoes { display: flex; gap: 8px; align-items: stretch; }
 .emp-acoes .btn { padding: 9px 14px; }
 .emp-acessar { flex: 1; font-weight: 800; }

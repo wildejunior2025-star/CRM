@@ -4,6 +4,10 @@ import { hojeBR } from '../lib/feriados'
 import { faseDaMensalidade, periodoTexto } from '../lib/mensalidade'
 import { supabase } from '../lib/supabaseClient'
 import { MODULOS, BLOQUEADO } from '../lib/modulos'
+import { CHECKLIST_INSTALACAO, TOTAL_ITENS_CHECKLIST } from '../lib/checklistInstalacao'
+import ChecklistInstalacao from '../components/ChecklistInstalacao'
+
+const CHAVES_CHECKLIST = new Set(CHECKLIST_INSTALACAO.flatMap(g => g.itens.map(i => i.key)))
 import '../components/Page.css'
 import './SuperAdminEmpresas.css'
 
@@ -121,6 +125,9 @@ export default function SuperAdminEmpresas() {
   const [cobrancaMsg, setCobrancaMsg] = useState({}) // { [empresaId]: 'ok' | 'erro: ...' }
 
   // Modal de funcionalidades (módulos) liga/desliga por loja
+  // Checklist de instalação (mig 0456): quantos itens cada loja já marcou.
+  const [checklistCont, setChecklistCont] = useState({}) // { [empresaId]: n }
+  const [checklistModal, setChecklistModal] = useState(null) // { id, nome }
   const [modulosModal, setModulosModal] = useState(null) // { id, nome }
   const [modulosForm, setModulosForm]   = useState({})   // { [key]: bool }
   // Serviço extra, DESLIGADO por padrão (mig 0449). Fica fora de MODULOS porque lá
@@ -248,12 +255,18 @@ export default function SuperAdminEmpresas() {
 
     // Gera as semanas que já venceram antes de mostrar quem está devendo.
     await supabase.rpc('mensalidade_atualizar_todas')
-    const [empresasRes, profilesRes, cfgRes, cobRes] = await Promise.all([
+    const [empresasRes, profilesRes, cfgRes, cobRes, chkRes] = await Promise.all([
       supabase.from('empresas').select('*').order('nome'),
       supabase.from('profiles').select('empresa_id'),
       supabase.from('mensalidade_config').select('*'),
       supabase.from('mensalidade_cobrancas').select('empresa_id, vencimento, valor').eq('status', 'aberta').order('vencimento'),
+      supabase.from('empresa_checklist').select('empresa_id, item'),
     ])
+    const chk = {}
+    for (const r of chkRes.data ?? []) {
+      if (CHAVES_CHECKLIST.has(r.item)) chk[r.empresa_id] = (chk[r.empresa_id] ?? 0) + 1
+    }
+    setChecklistCont(chk)
     setMensCfg(Object.fromEntries((cfgRes.data ?? []).map(c => [c.empresa_id, c])))
     const porLoja = {}
     for (const c of cobRes.data ?? []) (porLoja[c.empresa_id] ??= []).push(c)
@@ -635,6 +648,19 @@ export default function SuperAdminEmpresas() {
                   </button>
                 ))}
 
+                {(() => {
+                  const feitosN = checklistCont[emp.id] ?? 0
+                  const completo = feitosN >= TOTAL_ITENS_CHECKLIST
+                  return (
+                    <button type="button" className={`emp-checklist${completo ? ' completo' : ''}`}
+                      onClick={() => setChecklistModal({ id: emp.id, nome: emp.nome })}
+                      title="Abrir o checklist de instalação desta loja">
+                      <span>📋 Checklist de instalação</span>
+                      <strong>{completo ? '✓ completo' : `${feitosN}/${TOTAL_ITENS_CHECKLIST}`}</strong>
+                    </button>
+                  )
+                })()}
+
                 <div className="emp-acoes">
                   <button className="btn btn-primary emp-acessar" disabled={savingId === emp.id} onClick={() => acessarEmpresa(emp)}>
                     {savingId === emp.id ? 'Entrando…' : 'Entrar na loja'}
@@ -880,6 +906,14 @@ export default function SuperAdminEmpresas() {
             </div>
           </div>
         </div>
+      )}
+
+      {checklistModal && (
+        <ChecklistInstalacao
+          empresa={checklistModal}
+          onFechar={() => setChecklistModal(null)}
+          onMudou={(id, n) => setChecklistCont(prev => ({ ...prev, [id]: n }))}
+        />
       )}
 
       {/* Modal de funcionalidades (módulos) liga/desliga por loja */}
