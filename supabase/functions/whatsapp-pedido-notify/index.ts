@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { respirarAntesDeEnviar } from "../_shared/ritmoWhatsapp.ts"
 
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
@@ -198,26 +199,33 @@ serve(async (req) => {
     if (novo_status === "entregue") {
       try {
         const { data: cb } = await supabase.rpc("pedido_cashback", { p_pedido_id: pedido_id })
-        if (cb?.ativo && cb?.token) {
-          const link   = `https://lojaonline.fwcinter.com/c/${cb.token}`
+        if (cb?.ativo) {
+          // SEM TOKEN NAO VAI LINK (mig 0455). O banco so devolve o token
+          // quando a conta e mesmo desta loja E a loja usa o link do
+          // cliente. Mandar assim mesmo era pior que nao mandar: a Iris
+          // (16/11) recebeu da CDBom um link que abria "A loja nao esta
+          // usando o link do cliente agora", porque o token era do Zebu.
+          // Quem ganhou cashback continua sabendo do credito - so nao
+          // recebe um endereco que nao abre.
+          const link   = cb?.token ? `https://lojaonline.fwcinter.com/c/${cb.token}` : null
           const ganhou = Number(cb.ganhou ?? 0)
           const reais  = (v: number) => Number(v ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })
 
-          mensagem += ganhou > 0
-            ? [
-                "",
-                `🎁 *Voce ganhou R$ ${reais(ganhou)} de cashback!*`,
-                `Seu saldo na loja: *R$ ${reais(cb.saldo)}*. E so avisar na hora de pagar que a gente desconta.`,
-                "",
-                "Veja seu saldo e indique amigos pra ganhar mais:",
-                link,
-              ].join("\n")
-            : [
-                "",
-                `🎟️ *Indique e ganhe ${Number(cb.pct_indicacao ?? 0).toLocaleString("pt-BR")}%*`,
-                "Chame um amigo pelo seu link: quando ele fizer a primeira compra, voces dois ganham credito aqui.",
-                link,
-              ].join("\n")
+          if (ganhou > 0) {
+            mensagem += [
+              "",
+              `🎁 *Voce ganhou R$ ${reais(ganhou)} de cashback!*`,
+              `Seu saldo na loja: *R$ ${reais(cb.saldo)}*. E so avisar na hora de pagar que a gente desconta.`,
+              ...(link ? ["", "Veja seu saldo e indique amigos pra ganhar mais:", link] : []),
+            ].join("\n")
+          } else if (link) {
+            mensagem += [
+              "",
+              `🎟️ *Indique e ganhe ${Number(cb.pct_indicacao ?? 0).toLocaleString("pt-BR")}%*`,
+              "Chame um amigo pelo seu link: quando ele fizer a primeira compra, voces dois ganham credito aqui.",
+              link,
+            ].join("\n")
+          }
         }
       } catch (e) {
         // Aviso de pedido nao pode cair por causa do cashback.
@@ -259,6 +267,13 @@ serve(async (req) => {
       messageId = envio.id
     } else {
       try {
+        // FREIO DE RITMO (19/11/2026). Só no cano Evolution — o Cloud é a via
+        // oficial da Meta e não precisa disso. Quando a loja confirma vários
+        // pedidos de uma vez, os avisos saíam todos no mesmo segundo, pra
+        // números diferentes: é o carimbo de robô que custou 24h de restrição
+        // à CDBom. Aqui sem tempo de digitação, que aviso de pedido é hora
+        // marcada; o que vale é não sair tudo colado.
+        await respirarAntesDeEnviar(supabase, String(pedido.empresa_id), phoneWpp, false)
         const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },

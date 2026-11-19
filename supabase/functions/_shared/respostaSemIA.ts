@@ -21,6 +21,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // deno-lint-ignore-file no-explicit-any
+import { respirarAntesDeEnviar } from "./ritmoWhatsapp.ts"
+
 type Sb = any
 type Enviar = (texto: string) => Promise<unknown>
 // Espelho da fala do robô na aba Mensagens do gestor. Cada cano tem o seu (a
@@ -1399,6 +1401,11 @@ export async function responderSemIA({
     const excecoes = await carregarExcecoes(supabase, empresaId)
 
     const responder = async (texto: string) => {
+      // FREIO DE RITMO (19/11/2026). Antes daqui a resposta saía instantânea, e
+      // num horário movimentado o mesmo texto com o mesmo link varria vários
+      // números em segundos — foi o que custou 24h de restrição à CDBom. O
+      // freio dá o tempo de digitação e separa um número do outro.
+      await respirarAntesDeEnviar(supabase, empresaId, phone)
       await enviar(texto)
       await supabase.from("whatsapp_conversas").insert({
         empresa_id: empresaId, phone, role: "assistant", content: texto,

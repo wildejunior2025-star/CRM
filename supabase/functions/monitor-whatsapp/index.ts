@@ -74,6 +74,35 @@ async function surdezDaLoja(supabase: any, empresaId: string): Promise<string | 
   return `${pedidos} pedido(s) em ${HORAS_SURDO}h e nenhuma mensagem de cliente`
 }
 
+/**
+ * "Está acelerando demais": o aviso que faltava em 19/11/2026.
+ *
+ * Nesse dia a CDBom levou 24h de restrição da Meta por "mensagens automáticas
+ * ou em massa". Não foi disparo — foi atendimento normal num horário de pico,
+ * com a resposta automática do catálogo (texto e link idênticos) saindo pra 11
+ * números diferentes em 40 minutos, três deles em 49 segundos. O freio de
+ * ritmo (_shared/ritmoWhatsapp.ts) nasceu pra impedir a rajada; este aqui é
+ * pra AVISAR quando mesmo assim o volume subir — antes de a Meta avisar.
+ *
+ * O número de corte veio da medição, não de chute: em 30 dias, a janela de 10
+ * minutos mais cheia de toda a rede foi do Agv Grill, com 14 números. Então 18
+ * é acima do que qualquer loja já fez atendendo normal.
+ */
+const NUMEROS_10MIN_DEMAIS = 18
+
+// deno-lint-ignore no-explicit-any
+async function correndoDemais(supabase: any, empresaId: string): Promise<string | null> {
+  const desde = new Date(Date.now() - 10 * 60_000).toISOString()
+  const { data } = await supabase.from("whatsapp_conversas")
+    .select("phone")
+    .eq("empresa_id", empresaId).eq("role", "assistant").is("origem", null)
+    .gte("created_at", desde).limit(500)
+  const linhas = Array.isArray(data) ? data : []
+  const numeros = new Set(linhas.map((l: any) => String(l.phone ?? "").replace(/\D/g, "").slice(-8))).size
+  if (numeros < NUMEROS_10MIN_DEMAIS) return null
+  return `${linhas.length} mensagens automáticas pra ${numeros} números em 10 minutos`
+}
+
 // A Meta entrega o celular BR sem o 9º dígito, mas pra ENVIAR costuma exigir.
 function numeroBr(n: string): string {
   const d = String(n ?? "").replace(/\D/g, "")
@@ -233,6 +262,7 @@ serve(async (req) => {
     const resultado: Record<string, unknown>[] = []
     const caiu: string[] = []        // como aparece na mensagem (com o tempo parado)
     const surdas: string[] = []      // conectadas, vendendo, e sem ouvir ninguém
+    const arriscadas: string[] = []  // mandando rápido demais, a caminho de uma punição da Meta
     const caiuLojas: string[] = []   // só o nome, pra marcar o avisado_em
     const voltou: string[] = []
     let servidorFora = 0
@@ -246,6 +276,20 @@ serve(async (req) => {
       if (estado === "aberto" && alvo.empresa_id) {
         const surdez = await surdezDaLoja(supabase, alvo.empresa_id)
         if (surdez) { estado = "surdo"; detalhe = surdez }
+      }
+
+      // Risco de punição fica FORA do estado (caiu/surdo): a loja acelerada
+      // está conectada e funcionando, e virar "estado" aqui bagunçaria o
+      // aviso de queda. Vai em lista própria, no máximo de 6 em 6 horas pra
+      // não apitar o celular a cada rodada de 5 minutos.
+      if (alvo.empresa_id) {
+        const corrida = await correndoDemais(supabase, alvo.empresa_id)
+        if (corrida) {
+          const { data: primeiraVez } = await supabase.rpc("robo_avisar_uma_vez", {
+            p_empresa_id: alvo.empresa_id, p_chave: "loja", p_marca: "ritmo", p_minutos: 360,
+          })
+          if (primeiraVez === true) arriscadas.push(`${alvo.loja} — ${corrida}`)
+        }
       }
 
       const { data: antes } = await supabase.from("monitor_whatsapp")
@@ -305,6 +349,20 @@ serve(async (req) => {
         "no Super ADM → WhatsApp."
     }
     if (avisoSurdas) texto = texto ? `${texto}\n\n———\n\n${avisoSurdas}` : avisoSurdas
+
+    // Loja acelerada. Vai junto com o resto, mas é problema de outra natureza:
+    // aqui o número está ótimo — o risco é a Meta achar que ele é um robô de
+    // spam e restringir, como aconteceu com a CDBom em 19/11/2026.
+    if (arriscadas.length) {
+      const avisoRitmo = "🐌 *Loja mandando rápido demais*\n\n" +
+        arriscadas.map(l => `• ${l}`).join("\n") +
+        "\n\nNesse ritmo a Meta pode restringir o número por 24h (ou mais) por " +
+        "\"mensagens automáticas ou em massa\". Vale conferir se não tem resposta " +
+        "automática repetindo à toa.\n" +
+        "👉 Super ADM → WhatsApp da loja, desligar a resposta do catálogo até entender."
+      texto = texto ? `${texto}\n\n———\n\n${avisoRitmo}` : avisoRitmo
+    }
+
     if (voltou.length && !texto) {
       texto = "✅ *WhatsApp normalizado*\n\n" + voltou.map(l => `• ${l}`).join("\n") +
         "\n\nVoltou a enviar e receber."
@@ -323,7 +381,7 @@ serve(async (req) => {
       }
     }
 
-    return json({ ok: true, checadas: alvos.length, servidor_fora: servidorFora, caiu, surdas, voltou, envio, resultado })
+    return json({ ok: true, checadas: alvos.length, servidor_fora: servidorFora, caiu, surdas, arriscadas, voltou, envio, resultado })
   } catch (e) {
     console.error("[monitor] erro:", e)
     return json({ ok: false, erro: String(e).slice(0, 300) }, 500)
