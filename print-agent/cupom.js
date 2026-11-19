@@ -440,9 +440,17 @@ function qrCode(dados, escalaMax = 6) {
       if (dado[my * tam + mx]) img[y * bytesLinha + (x >> 3)] |= 0x80 >> (x & 7)
     }
   }
-  // GS v 0 m xL xH yL yH + bitmap (m=0: densidade normal)
-  const cab = Buffer.from([GS, 0x76, 0x30, 0x00, bytesLinha & 0xff, (bytesLinha >> 8) & 0xff, linhas & 0xff, (linhas >> 8) & 0xff])
-  return Buffer.concat([cab, img])
+  // GS v 0 m xL xH yL yH + bitmap (m=0: densidade normal). Mandado em faixas de
+  // 64 linhas: termica barata tem buffer pequeno e engasga/ignora imagem grande de
+  // uma vez; faixa colada na outra sai continua, sem emenda visivel.
+  const FAIXA = 64
+  const outs = []
+  for (let y0 = 0; y0 < linhas; y0 += FAIXA) {
+    const h = Math.min(FAIXA, linhas - y0)
+    outs.push(Buffer.from([GS, 0x76, 0x30, 0x00, bytesLinha & 0xff, (bytesLinha >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff]))
+    outs.push(img.subarray(y0 * bytesLinha, (y0 + h) * bytesLinha))
+  }
+  return Buffer.concat(outs)
 }
 
 // Chave de acesso legivel: 44 digitos viram 11 grupos de 4. Cliente que vai
