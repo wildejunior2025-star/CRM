@@ -51,8 +51,14 @@ export default function CozinhaRequisicao({ empresaId }) {
   const [salvando, setSalvando] = useState(false)
   const [ultima, setUltima] = useState(null)       // última entrega do cozinheiro escolhido (pra repetir)
 
+  // Dia em que a comida saiu. Normalmente hoje; a Victoria (AGV, 19/11) recebeu proteina ontem e so lembrou
+  // de lancar hoje, entao da pra escolher ontem (ou outro dia ate 30 dias atras). Mig 0459.
+  const [dataEntrega, setDataEntrega] = useState(hoje)
   const [aberta, setAberta] = useState(null)       // entrega expandida
   const [sobra, setSobra] = useState(null)         // { id, valores: { itemId: texto } }
+
+  // Quem abre a aba "Ontem" quer lancar de ontem: o seletor acompanha a aba.
+  useEffect(() => { setDataEntrega(periodo === 'ontem' ? somaDias(hoje, -1) : hoje) }, [periodo, hoje])
 
   const [de, ate] = useMemo(() => {
     if (periodo === 'ontem') return [somaDias(hoje, -1), somaDias(hoje, -1)]
@@ -181,13 +187,18 @@ export default function CozinhaRequisicao({ empresaId }) {
     if (!prontas.length) { setErro('Coloque a quantidade de pelo menos um item.'); return }
     const falta = prontas.filter(l => num(l.qtd) > (porId.get(l.id)?.saldo ?? 0))
     if (falta.length && !window.confirm(`Atenção: o estoque não cobre ${falta.map(l => porId.get(l.id).nome).join(', ')}.\n\nEntregar mesmo assim (o saldo fica negativo)?`)) return
+    if (!dataEntrega || dataEntrega > hoje) { setErro('Escolha o dia da entrega (hoje ou antes).'); return }
     setSalvando(true)
     try {
       const { error } = await supabase.rpc('requisitar_insumos', {
-        p: { [funcId.startsWith('f:') ? 'funcionario_id' : 'profile_id']: funcId.slice(2), observacao: obs, itens: prontas.map(l => ({ id: l.id, quantidade: num(l.qtd) })) },
+        p: { [funcId.startsWith('f:') ? 'funcionario_id' : 'profile_id']: funcId.slice(2), data: dataEntrega, observacao: obs, itens: prontas.map(l => ({ id: l.id, quantidade: num(l.qtd) })) },
       })
       if (error) throw error
       setLinhas([]); setObs(''); setBusca('')
+      // Vai pra aba do dia lancado, pra ela ver que entrou no lugar certo.
+      if (dataEntrega === hoje) setPeriodo('hoje')
+      else if (dataEntrega === somaDias(hoje, -1)) setPeriodo('ontem')
+      else setPeriodo('7d')
       await carregar()
     } catch (e) {
       setErro(recadoDeErro(e, 'entregar à cozinha'))
@@ -289,9 +300,23 @@ export default function CozinhaRequisicao({ empresaId }) {
       })()}
 
       {/* ── Nova entrega ── */}
-      {periodo === 'hoje' && (
+      {(
         <div style={{ ...cartao, padding: 14, marginBottom: 14 }}>
           <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>🍳 Nova entrega à cozinha</h3>
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>QUE DIA FOI A ENTREGA?</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+            <button type="button" style={pilula(dataEntrega === hoje)} onClick={() => setDataEntrega(hoje)}>Hoje</button>
+            <button type="button" style={pilula(dataEntrega === somaDias(hoje, -1))} onClick={() => setDataEntrega(somaDias(hoje, -1))}>Ontem</button>
+            <input type="date" value={dataEntrega} max={hoje} min={somaDias(hoje, -30)}
+              onChange={e => e.target.value && setDataEntrega(e.target.value)}
+              style={{ ...campo, padding: '8px 10px', fontSize: 14 }} aria-label="Outro dia" />
+            {dataEntrega !== hoje && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#b45309' }}>
+                Vai entrar em {diaTxt(dataEntrega)} (o estoque também)
+              </span>
+            )}
+          </div>
 
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>QUEM PEDIU?</div>
           {funcs.length === 0 && !carregando && (
