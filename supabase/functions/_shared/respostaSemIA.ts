@@ -21,7 +21,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // deno-lint-ignore-file no-explicit-any
-import { respirarAntesDeEnviar } from "./ritmoWhatsapp.ts"
+import { respirarAntesDeEnviar, pegarAVez } from "./ritmoWhatsapp.ts"
+import { umaDas, versoesDoModelo, PRIMEIRA_FALA, NAO_SEI, CHAMEI_ALGUEM, SEM_AUDIO } from "./falasVariadas.ts"
 
 type Sb = any
 type Enviar = (texto: string) => Promise<unknown>
@@ -1401,10 +1402,15 @@ export async function responderSemIA({
     const excecoes = await carregarExcecoes(supabase, empresaId)
 
     const responder = async (texto: string) => {
-      // FREIO DE RITMO (19/11/2026). Antes daqui a resposta saía instantânea, e
-      // num horário movimentado o mesmo texto com o mesmo link varria vários
-      // números em segundos — foi o que custou 24h de restrição à CDBom. O
-      // freio dá o tempo de digitação e separa um número do outro.
+      // FREIO DE RITMO (19/11/2026). Num horário movimentado o mesmo texto com
+      // o mesmo link varria vários números em segundos — foi o que custou 24h
+      // de restrição à CDBom. Se a vaga da loja não estiver livre, a resposta
+      // ENTRA NA FILA e sai na vez dela: ninguém deixa de receber.
+      const naFila = await pegarAVez(supabase, empresaId, phone, texto, "robo")
+      if (naFila) {
+        console.log("[ritmo] na fila até", naFila.toISOString(), phone)
+        return true   // o carteiro (whatsapp-fila) manda, grava e espelha
+      }
       await respirarAntesDeEnviar(supabase, empresaId, phone)
       await enviar(texto)
       await supabase.from("whatsapp_conversas").insert({
@@ -1424,9 +1430,7 @@ export async function responderSemIA({
     if (ehAudio) {
       if (!(await reservarAviso(supabase, empresaId, phone, "audio", 60))) return false
       return await responder(
-        `Oi! 😊 Por aqui eu ainda não consigo ouvir áudio.${NL}` +
-        `Me escreve rapidinho o que você precisa que eu já te respondo!${NL}${NL}` +
-        `Se preferir, o cardápio tá aqui: ${link}`,
+        `${umaDas(SEM_AUDIO)}${NL}${NL}Se preferir, o cardápio tá aqui: ${link}`,
       )
     }
 
@@ -1695,7 +1699,7 @@ export async function responderSemIA({
     if (pediuFalarComGente(mensagem)) {
       if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
       await abrirChamado(supabase, empresaId, phone, mensagem)
-      return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
+      return await responder(umaDas(CHAMEI_ALGUEM))
     }
 
     // 2c) PERGUNTOU DO PEDIDO QUE JÁ FEZ ("meu pedido #1024", "cadê?"). Vem
@@ -1801,7 +1805,7 @@ export async function responderSemIA({
       // pessoa — e a loja via o sino tocar duas vezes pelo mesmo cliente.
       if (!(await reservarAviso(supabase, empresaId, phone, "chamado", 60))) return false
       await abrirChamado(supabase, empresaId, phone, mensagem)
-      return await responder("Já chamei alguém aqui da loja pra falar com você. 🙌 Só um instante!")
+      return await responder(umaDas(CHAMEI_ALGUEM))
     }
 
     // 5b) PEDIDO EM ANDAMENTO: a saudação com o cardápio não vai, ponto. Quem
@@ -1845,10 +1849,17 @@ export async function responderSemIA({
         console.log("[link] outro webhook já está mandando a primeira fala:", phone)
         return false
       }
-      const modelo = String(cfg.resposta_link_texto ?? "")
+      // A FALA VARIA (19/11/2026). Mandar a MESMA frase, com os mesmos emojis,
+      // pra dezenas de números é o carimbo de robô que custou 24h de restrição
+      // à CDBom — 79 vezes a mesma mensagem em 3 dias. Agora sorteia entre as
+      // versões: as que a loja escreveu (separadas por uma linha com ---) ou,
+      // se ela não escreveu nenhuma, as do padrão. O conteúdo é idêntico em
+      // todas; o que muda é o jeito de dizer.
+      const escritas = versoesDoModelo(String(cfg.resposta_link_texto ?? ""))
+      const modelo = escritas.length ? umaDas(escritas) : umaDas(PRIMEIRA_FALA)
       // Só vai no banco atrás do nome se o texto pedir — loja que tirou o
       // {nome} não paga por uma consulta que não vai usar.
-      const querNome = (modelo.trim() || TEXTO_PRIMEIRA_FALA_PADRAO).includes("{nome}")
+      const querNome = modelo.includes("{nome}")
       const nome = querNome ? await primeiroNomeDoCliente(supabase, empresaId, phone) : ""
       return await responder(montarPrimeiraFala(modelo, nome, link, horarioDeHoje(empresa, excecoes)))
     }
@@ -1877,7 +1888,7 @@ export async function responderSemIA({
     })
 
     if (!(await reservarAviso(supabase, empresaId, phone, "oferece-atendente", 60))) return false
-    return await responder(`Essa eu não sei te responder por aqui. 😅 Quer que eu ${MARCA_ATENDENTE} pra te ajudar?`)
+    return await responder(umaDas(NAO_SEI(MARCA_ATENDENTE)))
   } catch (e) {
     console.error("[link] falhou:", e)
     return false

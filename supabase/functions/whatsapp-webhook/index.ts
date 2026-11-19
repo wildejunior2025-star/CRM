@@ -6,6 +6,7 @@ import {
   comoFicaNoDia, carregarExcecoes, hojeNaLoja, daquiADias,
 } from "../_shared/respostaSemIA.ts"
 import { guardarMidiaDoChat } from "../_shared/midiaDoChat.ts"
+import { espelharNoChat } from "../_shared/espelhoChat.ts"
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? ""
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
@@ -3565,65 +3566,8 @@ function limparRestosInternos(txt: string): string {
 }
 
 // ── serve ────────────────────────────────────────────────────────────────────
-// Espelha a mensagem no chat do painel (a aba Mensagens), pra loja atender tudo
-// num lugar só — WhatsApp e link da Loja Online na mesma conversa.
-//
-// Se o cliente já tinha falado pelo link, a mensagem entra NAQUELA conversa,
-// não numa nova: duas linhas do mesmo cliente fariam o atendente responder na
-// errada e o cliente receber pela metade. O casamento é pelos 8 últimos
-// dígitos, porque o WhatsApp entrega o número com e sem o 9 do celular.
-async function espelharNoChat(
-  supabase: any, empresaId: string, phone: string, texto: string,
-  remetente: "cliente" | "loja", bot = false,
-  // Localização que veio na mensagem (mig 0238). O WhatsApp manda lat/lng no
-  // pininho e a gente jogava fora: virava o texto "📍 Localização" e pronto.
-  // Guardada, ela vira o ponto da entrega com um clique no gestor.
-  coords: { lat: number; lng: number } | null = null,
-  // Foto/áudio já guardados no bucket (mig 0242). A conversa fica pra sempre;
-  // o arquivo, 24 horas.
-  midia: { path: string; tipo: string; expiraEm: string } | null = null,
-) {
-  try {
-    const digitos = String(phone ?? "").replace(/\D/g, "")
-    const chave = digitos.slice(-8)
-    if (!empresaId || !chave || !texto) return
-    const { data: existente } = await supabase
-      .from("mensagens_chat")
-      .select("canal, cliente_ref, cliente_nome")
-      .eq("empresa_id", empresaId)
-      .like("cliente_ref", `%${chave}`)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    let nome = existente?.cliente_nome ?? null
-    if (!nome) {
-      const { data: cli } = await supabase
-        .from("clientes").select("nome")
-        .eq("empresa_id", empresaId)
-        .like("telefone_digitos", `%${chave}`)
-        .limit(1).maybeSingle()
-      nome = cli?.nome ?? null
-    }
-    await supabase.from("mensagens_chat").insert({
-      empresa_id: empresaId,
-      canal: existente?.canal ?? "whatsapp",
-      cliente_ref: existente?.cliente_ref ?? digitos,
-      cliente_nome: nome,
-      remetente,
-      texto,
-      // Fala do robô entra como da loja (é o lado direito da conversa), mas
-      // marcada: quem atende precisa saber o que já foi respondido por ele.
-      bot,
-      lat: coords?.lat ?? null,
-      lng: coords?.lng ?? null,
-      midia_path:      midia?.path ?? null,
-      midia_tipo:      midia?.tipo ?? null,
-      midia_expira_em: midia?.expiraEm ?? null,
-    })
-  } catch (_e) {
-    // O espelho é bônus: se falhar, o atendimento pelo WhatsApp segue igual.
-  }
-}
+// O espelho da conversa no gestor mora em _shared/espelhoChat.ts desde
+// 19/11/2026: a fila de envio também precisa dele.
 
 // O que guardar da mensagem quando o robô está desligado: o texto, quando é
 // texto; uma marca curta quando é áudio, foto ou figurinha. O suficiente pra

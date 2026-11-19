@@ -5,6 +5,21 @@
 // enxerga o `src/`; quem mexer numa, mexe na outra — o que a loja vê na prévia
 // tem que ser LETRA POR LETRA o que o cliente recebe.
 
+/**
+ * A loja pode escrever VÁRIAS versões da mesma mensagem, separadas por uma
+ * linha só com `---`, e o robô sorteia uma a cada cliente (19/11/2026).
+ * Repetir a mesma frase pra dezenas de números é o que faz o WhatsApp achar
+ * que o número é robô de spam — foi assim que a Meta restringiu uma loja.
+ *
+ * Gêmeo de `versoesDoModelo` em `_shared/falasVariadas.ts`.
+ */
+export function versoesDoModelo(modelo) {
+  const texto = String(modelo ?? '')
+  if (!texto.trim()) return []
+  const partes = texto.split(/\n\s*---+\s*\n/).map(p => p.trim()).filter(Boolean)
+  return partes.length ? partes : [texto.trim()]
+}
+
 export const TEXTO_PRIMEIRA_FALA_PADRAO = [
   'Oi {nome}! 👋',
   'Para entrega ou retirada, é só acessar nossa loja online 👇',

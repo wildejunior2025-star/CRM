@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
-import { respirarAntesDeEnviar } from "../_shared/ritmoWhatsapp.ts"
+import { pegarAVez } from "../_shared/ritmoWhatsapp.ts"
 
 const EVOLUTION_API_URL = (Deno.env.get("EVOLUTION_API_URL") ?? "").replace(/\/$/, "")
 const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY") ?? ""
@@ -273,7 +273,18 @@ serve(async (req) => {
         // números diferentes: é o carimbo de robô que custou 24h de restrição
         // à CDBom. Aqui sem tempo de digitação, que aviso de pedido é hora
         // marcada; o que vale é não sair tudo colado.
-        await respirarAntesDeEnviar(supabase, String(pedido.empresa_id), phoneWpp, false)
+        // FILA (19/11/2026). Quando a loja confirma varios pedidos de uma vez,
+        // os avisos saiam todos no mesmo segundo, pra numeros diferentes: e o
+        // carimbo de robo que custou 24h de restricao a CDBom. Se a vaga da
+        // loja nao estiver livre, o aviso entra na fila e sai na vez dele --
+        // atrasa alguns segundos, mas o cliente recebe.
+        const naFila = await pegarAVez(
+          supabase, String(pedido.empresa_id), phoneWpp, mensagem, "pedido")
+        if (naFila) {
+          console.log("[notify] aviso na fila ate", naFila.toISOString(), phoneWpp)
+          return new Response(JSON.stringify({ ok: true, fila: naFila }),
+            { headers: { "Content-Type": "application/json" } })
+        }
         const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${waCfg.instance_name}`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },

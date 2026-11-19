@@ -13,91 +13,81 @@
 // (24/10) e ela funcionou direitinho — o que não existia era limite pra LOJA
 // INTEIRA, que é onde a rajada aparece.
 //
-// O QUE ELE FAZ
-//   1. Duas mensagens automáticas pra NÚMEROS DIFERENTES nunca saem coladas:
-//      guarda um intervalo mínimo entre elas.
-//   2. Dá um tempo de digitação antes de responder. Resposta em 300 ms é
-//      carimbo de robô; alguns segundos é gente.
+// NINGUÉM DEIXA DE RECEBER. A primeira versão disto segurava a resposta
+// dormindo dentro do webhook, por até 20 s. Funcionava, mas prendia a chamada
+// e, se o Evolution desistisse de esperar, a mensagem se perdia. Agora o que
+// não cabe agora entra NA FILA (mig 0459) e sai na vez dele, pelo carteiro
+// `whatsapp-fila`. Espera, mas vai.
 //
 // O QUE ELE NÃO FAZ
 //   - Não segura mensagem que a LOJA digitou (origem = "loja"). Aquilo é gente
 //     de verdade respondendo e não pode esperar.
 //   - Não segura a segunda mensagem pra MESMA pessoa: no meio de uma conversa,
-//     duas falas seguidas é o normal. Segurar 20 s ali deixaria o robô estranho
-//     sem ganhar nada — a rajada que pega mal é a que varre vários números.
+//     duas falas seguidas é o normal. Segurar ali deixaria o robô estranho sem
+//     ganhar nada — a rajada que pega mal é a que varre vários números.
 
-type Sb = {
-  from: (t: string) => any
-}
+// deno-lint-ignore-file no-explicit-any
 
 /** Intervalo mínimo entre duas automáticas pra números DIFERENTES. */
-const INTERVALO_MS = 20_000
-/** Teto da espera. Aviso de pedido é hora marcada: não pode ficar preso. */
-const TETO_MS = 20_000
+export const INTERVALO_SEG = 20
 /** Tempo de digitação, pra resposta não sair instantânea. */
 const HUMANO_MIN_MS = 1_500
 const HUMANO_MAX_MS = 5_000
 
-const dormir = (ms: number) => new Promise(r => setTimeout(r, ms));
+const dormir = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /**
- * Última mensagem AUTOMÁTICA que a loja mandou, e pra quem.
- * Janela curta de propósito: só interessa o que acabou de sair.
+ * Tenta a vaga da loja AGORA.
+ *
+ * @returns null  → pode mandar na hora (é o caso da esmagadora maioria:
+ *                  a média da rede é 3 automáticas por 10 minutos).
+ *          Date  → não cabia; já está na fila, e sai nesse horário.
  */
-async function ultimaAutomatica(
-  supabase: Sb, empresaId: string,
-): Promise<{ quando: number; phone: string } | null> {
+export async function pegarAVez(
+  supabase: any, empresaId: string, phone: string, texto: string, tipo = "robo",
+): Promise<Date | null> {
+  if (!empresaId || !texto) return null
   try {
-    const desde = new Date(Date.now() - 3 * 60_000).toISOString()
-    const { data } = await supabase.from("whatsapp_conversas")
-      .select("created_at, phone")
-      .eq("empresa_id", empresaId).eq("role", "assistant").is("origem", null)
-      .gte("created_at", desde)
-      .order("created_at", { ascending: false }).limit(1)
-    const linha = Array.isArray(data) ? data[0] : null
-    if (!linha?.created_at) return null
-    return { quando: Date.parse(String(linha.created_at)), phone: String(linha.phone ?? "") }
+    const { data, error } = await supabase.rpc("whatsapp_fila_agendar", {
+      p_empresa: empresaId, p_phone: phone, p_texto: texto,
+      p_tipo: tipo, p_intervalo: INTERVALO_SEG,
+    })
+    if (error) {
+      // Freio é proteção, não é portão: quebrou, manda na hora. Cliente sem
+      // resposta é pior do que o risco de uma mensagem fora de ritmo.
+      console.error("[ritmo] fila falhou, mandando direto:", error.message)
+      return null
+    }
+    return data ? new Date(String(data)) : null
   } catch (e) {
-    // Freio é proteção, não é portão: se não dá pra consultar, deixa passar.
-    console.error("[ritmo] não consegui olhar o histórico, liberando:", e)
+    console.error("[ritmo] fila quebrou, mandando direto:", e)
     return null
   }
+}
+
+/**
+ * O tempo de digitação, pra resposta não sair em 300 ms. Só isso — o
+ * espaçamento entre números diferentes é da fila.
+ *
+ * @param humano  false nos avisos de pedido: ali o cliente está esperando a
+ *                informação, não uma conversa.
+ */
+export async function respirarAntesDeEnviar(
+  _supabase: any, _empresaId: string, _phone: string, humano = true,
+): Promise<void> {
+  if (!humano) return
+  await dormir(HUMANO_MIN_MS + Math.random() * (HUMANO_MAX_MS - HUMANO_MIN_MS))
 }
 
 /** Os 8 últimos dígitos, que é como o resto do sistema compara telefone. */
 const chave8 = (t: string) => String(t ?? "").replace(/\D/g, "").slice(-8)
 
 /**
- * Espera o tempo necessário antes de uma mensagem AUTOMÁTICA sair.
- *
- * @param humano  false nos avisos de pedido: ali o cliente está esperando a
- *                informação, não uma conversa. O espaçamento continua valendo.
- */
-export async function respirarAntesDeEnviar(
-  supabase: Sb, empresaId: string, phone: string, humano = true,
-): Promise<void> {
-  if (!empresaId) return
-  const ultima = await ultimaAutomatica(supabase, empresaId)
-
-  let espera = 0
-  if (ultima && chave8(ultima.phone) !== chave8(phone)) {
-    // Outro número recebeu agora há pouco: completa o intervalo.
-    espera = INTERVALO_MS - (Date.now() - ultima.quando)
-  }
-  if (humano) {
-    espera += HUMANO_MIN_MS + Math.random() * (HUMANO_MAX_MS - HUMANO_MIN_MS)
-  }
-
-  espera = Math.min(Math.max(espera, 0), TETO_MS)
-  if (espera > 0) await dormir(espera)
-}
-
-/**
  * Quantas automáticas a loja mandou nos últimos N minutos, e pra quantos
  * números. É o que o vigia (monitor-whatsapp) usa pra avisar ANTES da punição.
  */
 export async function ritmoDaLoja(
-  supabase: Sb, empresaId: string, minutos = 60,
+  supabase: any, empresaId: string, minutos = 60,
 ): Promise<{ mensagens: number; numeros: number }> {
   try {
     const desde = new Date(Date.now() - minutos * 60_000).toISOString()

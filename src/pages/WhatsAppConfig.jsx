@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { conectarWhatsAppCloud } from '../lib/waEmbeddedSignup'
 import { useAuth } from '../hooks/useAuth'
-import { TEXTO_PRIMEIRA_FALA_PADRAO, montarPrimeiraFala, horarioDeHojeDaGrade } from '../lib/primeiraFala'
+import { TEXTO_PRIMEIRA_FALA_PADRAO, montarPrimeiraFala, horarioDeHojeDaGrade, versoesDoModelo } from '../lib/primeiraFala'
 import '../components/Page.css'
 import './WhatsAppConfig.css'
 
@@ -1257,6 +1257,16 @@ export default function WhatsAppConfig() {
                 onChange={e => setLinkTexto(e.target.value)}
                 placeholder={TEXTO_PRIMEIRA_FALA_PADRAO}
               />
+              {/* Repetir a MESMA frase pra dezenas de clientes é o que faz o
+                  WhatsApp achar que o número é robô de spam — foi assim que a
+                  Meta restringiu uma loja em 19/11/2026. Com mais de uma
+                  versão, o robô sorteia. Quem escrever só uma continua com a
+                  dela, intacta. */}
+              <p className="wa-hint">
+                💡 Escreva <strong>mais de uma versão</strong> da mensagem, separando cada uma por uma linha
+                só com <code>---</code>. O robô sorteia uma a cada cliente, e assim o WhatsApp não acha
+                que o seu número é um robô de propaganda. Se deixar só uma, ela é usada sempre.
+              </p>
 
               <div className="wa-primeira-fala-acoes">
                 <button
@@ -1448,7 +1458,10 @@ export default function WhatsAppConfig() {
                     <div className="wa-previa-titulo">{caso.titulo}</div>
                     <div className="wa-previa-balao">
                       {montarPrimeiraFala(
-                        linkTexto,
+                        // A previa mostra a PRIMEIRA versao. Com varias, o
+                        // robo sorteia; mostrar o texto com o --- no meio
+                        // faria a loja achar que o cliente recebe assim.
+                        versoesDoModelo(linkTexto)[0] ?? linkTexto,
                         caso.nome,
                         // Número de exemplo, não o de ninguém: aqui ficava o
                         // celular do dono da FWC aparecendo na prévia de TODAS
