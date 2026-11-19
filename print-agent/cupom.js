@@ -413,21 +413,36 @@ function montarComandaMesa({ nomeLoja = '', numero = '?', area = '', atendente =
 }
 
 
-// ── QR Code na propria termica ──────────────────────────────────
-// A impressora desenha o QR sozinha (GS ( k). Mandar como imagem exigiria
-// rasterizar aqui e sairia borrado em 80mm; o nativo sai limpo e e aceito pelo
-// leitor de qualquer celular. Tamanho 6 da um quadrado de ~3,5cm, que e o que
-// cabe na bobina e ainda le com a camera tremendo na mao do cliente.
-function qrCode(dados, tamanho = 6) {
-  const d = Buffer.from(String(dados || ''), 'latin1')
-  const n = d.length + 3
-  return Buffer.concat([
-    Buffer.from([GS, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]), // modelo 2
-    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, tamanho]),    // tamanho do modulo
-    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31]),       // correcao de erro M
-    Buffer.from([GS, 0x28, 0x6B, n & 0xff, (n >> 8) & 0xff, 0x31, 0x50, 0x30]), d, // guarda
-    Buffer.from([GS, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]),       // imprime
-  ])
+// ── QR Code como IMAGEM ─────────────────────────────────────────
+// Antes mandava o comando nativo de QR (GS ( k). Algumas termicas (a da CDBom)
+// nao entendem e imprimem os dados como texto ("210https://..."), sem desenhar o
+// QR. Como imagem (GS v 0) qualquer termica aceita. A matriz vem da lib `qrcode`
+// e cada modulo vira um quadrado de `escala` x `escala` pontos.
+const QRCodeLib = require('qrcode')
+function qrCode(dados, escalaMax = 6) {
+  const qr = QRCodeLib.create(String(dados || ''), { errorCorrectionLevel: 'M' })
+  const tam = qr.modules.size
+  const dado = qr.modules.data
+  const borda = 4                                  // area branca em volta (exigida pelo leitor)
+  const total = tam + borda * 2
+  // Cabe em ~320 pontos (bobina de 58 mm tem 384): escolhe a maior escala que couber.
+  const escala = Math.max(2, Math.min(escalaMax, Math.floor(320 / total)))
+  const larg = total * escala
+  const bytesLinha = Math.ceil(larg / 8)
+  const linhas = total * escala
+  const img = Buffer.alloc(bytesLinha * linhas, 0)
+  for (let y = 0; y < linhas; y++) {
+    const my = Math.floor(y / escala) - borda
+    if (my < 0 || my >= tam) continue
+    for (let x = 0; x < larg; x++) {
+      const mx = Math.floor(x / escala) - borda
+      if (mx < 0 || mx >= tam) continue
+      if (dado[my * tam + mx]) img[y * bytesLinha + (x >> 3)] |= 0x80 >> (x & 7)
+    }
+  }
+  // GS v 0 m xL xH yL yH + bitmap (m=0: densidade normal)
+  const cab = Buffer.from([GS, 0x76, 0x30, 0x00, bytesLinha & 0xff, (bytesLinha >> 8) & 0xff, linhas & 0xff, (linhas >> 8) & 0xff])
+  return Buffer.concat([cab, img])
 }
 
 // Chave de acesso legivel: 44 digitos viram 11 grupos de 4. Cliente que vai
@@ -443,6 +458,14 @@ function chaveEmGrupos(chave) {
 //
 // Serve tanto pra 1a via (logo depois de emitir) quanto pra 2a (reimpressao do
 // historico) — a unica diferenca e o aviso no rodape.
+// Nome da forma de pagamento como o cliente le na nota (nada de codigo interno).
+function formaFiscal(f) {
+  const k = String(f || '').toLowerCase()
+  const m = { pix: 'Pix', pix_entrega: 'Pix', online: 'Pix', dinheiro: 'Dinheiro', credito: 'Cartao de credito',
+    debito: 'Cartao de debito', cartao: 'Cartao', vale: 'Vale', pluxee: 'Pluxee', alelo: 'Alelo', vr: 'VR', ticket: 'Ticket' }
+  return m[k] || String(f)
+}
+
 function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
   const e = empresa || {}
   const n = nota || {}
@@ -483,7 +506,7 @@ function montarDanfeNfce({ nota, empresa, itens, segundaVia }) {
   // "0,398 itens", que nao quer dizer nada pra quem le o cupom.
   parts.push(kv('Qtd. total de itens', String(lista.length)))
   parts.push(BOLD(1), SIZE(0x01), kv('VALOR TOTAL', money(n.valor_total)), SIZE(0), BOLD(0))
-  if (n.forma_pagamento) parts.push(kv('Forma de pagamento', String(n.forma_pagamento)))
+  if (n.forma_pagamento) parts.push(kv('Forma de pagamento', formaFiscal(n.forma_pagamento)))
   // Lei 12.741/2012: o consumidor tem que ver quanto de imposto vai no que pagou.
   if (n.tributos_valor != null) {
     parts.push(linha('Tributos totais incidentes (Lei 12.741/12):'))
