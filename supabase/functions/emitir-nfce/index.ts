@@ -298,12 +298,14 @@ async function registrarEmpresa(sb: any, empresaId: string, senhaCert: string, d
     cnpj,
     inscricao_estadual: soDigitos(fis.inscricao_estadual) || undefined,
     regime_tributario: fis.regime_tributario === "normal" ? 3 : 1, // 1=Simples, 3=Normal
-    logradouro: emp.endereco || undefined,
-    numero: emp.numero || undefined,
-    bairro: emp.bairro || undefined,
+    // Endereco do emitente na nota: o da loja, a nao ser que a loja emita por um CNPJ
+    // cadastrado em outro endereco (mig 0459: CDBom, fabrica x loja).
+    logradouro: fis.emitente_endereco || emp.endereco || undefined,
+    numero: fis.emitente_numero || emp.numero || undefined,
+    bairro: fis.emitente_bairro || emp.bairro || undefined,
     municipio: emp.cidade || undefined,
     uf: emp.estado || undefined,
-    cep: soDigitos(emp.cep) || undefined,
+    cep: soDigitos(fis.emitente_cep || emp.cep) || undefined,
     email: emp.email_contato || undefined,
     telefone: soDigitos(emp.telefone_contato) || undefined,
     habilita_nfce: true,

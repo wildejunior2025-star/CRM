@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../hooks/useAuth'
 import { fwcFetch } from '../lib/appFwc'
+import { empresaParaNota } from '../lib/empresaParaNota'
 import './RaioEntrega.css'
 
 const fmtBRL = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -156,8 +157,7 @@ export default function NotasFiscais() {
         }))
         forma = ped?.forma_pagamento ?? null
       }
-      const { data: emp } = await supabase.from('empresas')
-        .select('nome, razao_social, cnpj, endereco, numero, bairro, cidade, estado').eq('id', profile.empresa_id).maybeSingle()
+      const emp = await empresaParaNota(supabase, profile.empresa_id)
 
       const r = await fwcFetch('/api/imprimir-nfce', {
         method: 'POST',

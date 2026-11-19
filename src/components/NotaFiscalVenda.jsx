@@ -12,6 +12,7 @@
 // Os itens vêm no formato de quem tem: o normalizador abaixo acerta.
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { empresaParaNota } from '../lib/empresaParaNota'
 import { fwcFetch } from '../lib/appFwc'
 
 // Cada tela guarda o item com o nome de coluna dela. Aqui vira um formato só —
@@ -94,8 +95,7 @@ export default function NotaFiscalVenda({ empresaId, venda, compacto = false }) 
   async function imprimir(n, segundaVia) {
     setMsg(null)
     try {
-      const { data: emp } = await supabase.from('empresas')
-        .select('nome, razao_social, cnpj, endereco, numero, bairro, cidade, estado').eq('id', empresaId).maybeSingle()
+      const emp = await empresaParaNota(supabase, empresaId)
       const r = await fwcFetch('/api/imprimir-nfce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

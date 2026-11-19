@@ -1,4 +1,5 @@
 import { fwcFetch } from '../lib/appFwc'
+import { empresaParaNota } from '../lib/empresaParaNota'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { supabase, fetchAll } from '../lib/supabaseClient'
@@ -645,8 +646,7 @@ function NotaFiscalDoPedido({ pedido }) {
       const itens = (Array.isArray(pedido.itens) ? pedido.itens : []).map(i => ({
         nome: i.nome ?? i.descricao, quantidade: i.quantidade ?? i.qtd ?? 1, preco: i.preco_unitario ?? i.preco ?? 0,
       }))
-      const { data: emp } = await supabase.from('empresas')
-        .select('nome, razao_social, cnpj, endereco, numero, bairro, cidade, estado').eq('id', empresa.id).maybeSingle()
+      const emp = await empresaParaNota(supabase, empresa.id)
       const r = await fwcFetch('/api/imprimir-nfce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
