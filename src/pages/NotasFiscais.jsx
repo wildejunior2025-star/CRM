@@ -34,6 +34,21 @@ export default function NotasFiscais() {
   const [carregando, setCarregando] = useState(true)
   const [ocupado, setOcupado] = useState(null) // id da nota em ação, ou 'zip'
   const [msg, setMsg] = useState(null)
+  // Imprimir o cupom na termica quando a nota e emitida a mao (ligado por padrao).
+  const [imprimirAoEmitir, setImprimirAoEmitir] = useState(true)
+
+  useEffect(() => {
+    if (!profile?.empresa_id) return
+    supabase.from('empresa_fiscal').select('nfce_imprimir_ao_emitir').eq('empresa_id', profile.empresa_id).maybeSingle()
+      .then(({ data }) => setImprimirAoEmitir(data?.nfce_imprimir_ao_emitir !== false))
+  }, [profile?.empresa_id])
+
+  async function trocarImprimirAoEmitir(valor) {
+    setImprimirAoEmitir(valor)
+    const { error } = await supabase.from('empresa_fiscal').update({ nfce_imprimir_ao_emitir: valor }).eq('empresa_id', profile.empresa_id)
+    if (error) { setImprimirAoEmitir(!valor); setMsg({ ok: false, txt: 'Não consegui salvar: ' + error.message }) }
+    else setMsg({ ok: true, txt: valor ? 'Cupom volta a imprimir quando a nota é emitida à mão.' : 'Cupom não imprime mais ao emitir a nota. A nota sai do mesmo jeito.' })
+  }
 
   async function carregar() {
     if (!profile?.empresa_id) return
@@ -246,6 +261,13 @@ export default function NotasFiscais() {
           </button>
           <button className="btn btn-secondary btn-sm" disabled={!notas.length} onClick={baixarPlanilha}>⬇ Planilha (.xlsx)</button>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 12 }}>
+          <input type="checkbox" checked={imprimirAoEmitir} onChange={e => trocarImprimirAoEmitir(e.target.checked)} />
+          Imprimir o cupom na térmica quando a nota é emitida à mão
+        </label>
+        <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+          Desmarcado, a nota sai normalmente e o papel não. A nota automática nunca imprime. Para imprimir depois, use o botão Imprimir ao lado da nota.
+        </p>
         {msg && (
           <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'var(--success-bg)' : 'var(--danger-bg)', color: msg.ok ? 'var(--success)' : 'var(--danger)' }}>
             {msg.txt}
