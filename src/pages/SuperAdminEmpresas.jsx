@@ -33,7 +33,7 @@ const emptyForm = {
   telefone_contato: '',
   plano: 'padrao',
   valor_mensalidade: '',
-  taxa_plataforma: '5',
+  taxa_plataforma: '0',
   cor_primaria: '#863bff',
   logo_url: '',
   dominio_personalizado: '',
@@ -304,7 +304,7 @@ export default function SuperAdminEmpresas() {
       telefone_contato: empresa.telefone_contato ?? '',
       plano: empresa.plano ?? 'padrao',
       valor_mensalidade: empresa.valor_mensalidade ?? '',
-      taxa_plataforma: empresa.taxa_plataforma ?? '5',
+      taxa_plataforma: empresa.taxa_plataforma ?? '0',
       cor_primaria: empresa.cor_primaria ?? '#863bff',
       logo_url: empresa.logo_url ?? '',
       dominio_personalizado: empresa.dominio_personalizado ?? '',
@@ -330,7 +330,7 @@ export default function SuperAdminEmpresas() {
       telefone_contato: form.telefone_contato || null,
       plano: form.plano,
       valor_mensalidade: form.valor_mensalidade === '' ? 0 : Number(form.valor_mensalidade),
-      taxa_plataforma: form.taxa_plataforma === '' ? 5 : Number(form.taxa_plataforma),
+      taxa_plataforma: form.taxa_plataforma === '' ? 0 : Number(form.taxa_plataforma),
       cor_primaria: form.cor_primaria || null,
       logo_url: form.logo_url || null,
       dominio_personalizado: form.dominio_personalizado || null,
@@ -425,7 +425,7 @@ export default function SuperAdminEmpresas() {
 
   function abrirEditTaxa(emp) {
     setEditandoTaxaId(emp.id)
-    setTaxaTemp(String(Number(emp.taxa_plataforma ?? 5)))
+    setTaxaTemp(String(Number(emp.taxa_plataforma ?? 0)))
     setTimeout(() => taxaInputRef.current?.select(), 30)
   }
 
@@ -633,7 +633,7 @@ export default function SuperAdminEmpresas() {
                     </div>
                   ) : (
                     <button type="button" onClick={() => abrirEditTaxa(emp)} title="Mudar a taxa da plataforma">
-                      <strong>{Number(emp.taxa_plataforma ?? 5).toFixed(1)}%</strong>
+                      <strong>{Number(emp.taxa_plataforma ?? 0).toFixed(1)}%</strong>
                       <span>taxa</span>
                     </button>
                   )}
@@ -763,7 +763,7 @@ export default function SuperAdminEmpresas() {
                     name="taxa_plataforma"
                     value={form.taxa_plataforma}
                     onChange={handleChange}
-                    placeholder="5"
+                    placeholder="0"
                   />
                 </div>
 

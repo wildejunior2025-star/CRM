@@ -9,6 +9,16 @@ import { exigeCodigoEntrega, novoCodigoEntrega } from '../lib/codigoEntrega'
 import { ehDividido, textoPagamento } from '../lib/pagamentoPartes'
 import { IFOOD_COMISSAO_PCT, IFOOD_TRANSACAO_PCT, lojaEntregou } from '../lib/ifoodLiquido'
 
+// Quanto sobra do pedido pra loja.
+//
+// `taxa_plataforma` está ZERADA em todas as lojas desde 19/11/2026 (mig 0460):
+// a porcentagem foi criada pensando num aplicativo próprio da FWC que nunca
+// entrou no ar — a cobrança de verdade é mensalidade. Enquanto ficou ligada,
+// descontava 5% até da taxa de entrega (dinheiro do motoboy) e de venda em
+// dinheiro/PIX na entrega, onde a FWC não encosta no dinheiro. O campo segue
+// existindo e editável no Super ADM, pra quando alguma loja de fato pagar %.
+//
+// iFood é outra conta: o líquido vem do saldo real da API financeira deles.
 function calcLiquidoPorPedido(pedido, taxaPlataforma, ifoodSaldos = {}) {
   const total = Number(pedido.total || 0)
   if (pedido.origem === 'ifood') {
@@ -28,7 +38,7 @@ function calcLiquidoPorPedido(pedido, taxaPlataforma, ifoodSaldos = {}) {
       ? itens + (daLoja ? te : 0) - il - com - trans
       : total - com
   }
-  return total * (1 - (taxaPlataforma ?? 5) / 100)
+  return total * (1 - (taxaPlataforma ?? 0) / 100)
 }
 
 const TIMER_LIMITE_MS = 7 * 60 * 1000 // 7 minutos
@@ -962,7 +972,7 @@ export default function PedidosDelivery() {
   // Paginação: 10 por página (a pessoa pode estender pra 30) + navegação.
   const [porPagina, setPorPagina] = useState(10)
   const [pagina, setPagina] = useState(1)
-  const [taxaPlataforma, setTaxaPlataforma] = useState(5)
+  const [taxaPlataforma, setTaxaPlataforma] = useState(0)
   const [pedidoDetalhe, setPedidoDetalhe] = useState(null)
   // { id do entregador: nome } - so pra escrever o nome na lista. Os pedidos ja
   // trazem `entregador_id`; o que faltava era o nome.
@@ -1053,7 +1063,7 @@ export default function PedidosDelivery() {
         .select('taxa_plataforma')
         .eq('id', empresa.id)
         .single()
-      setTaxaPlataforma(emp?.taxa_plataforma ?? 5)
+      setTaxaPlataforma(emp?.taxa_plataforma ?? 0)
     }
     buscarTaxa()
   }, [empresa])
