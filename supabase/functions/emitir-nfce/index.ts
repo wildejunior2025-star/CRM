@@ -469,6 +469,17 @@ async function emitir(sb: any, pedidoId: string, cpf?: string, comandaId?: strin
       fiscalPorProduto[p.id] = f
     }
   }
+  // TRAVA (18/11/2026, CDBom): com `exigir_ncm_produto` ligado, item sem NCM no cadastro não
+  // cai no NCM padrão da loja (que seria de produto fabricado): a nota não sai e o pedido
+  // fica pendente de classificação. `pendente_classificacao` é lido pelo robô (nfce-auto)
+  // pra não tentar de novo nem avisar o dono a cada pedido.
+  if (fis.exigir_ncm_produto) {
+    const semNcm = itensPed.filter((it) => !ncmPorProduto[String(it.produto_id ?? it.id ?? "")])
+    if (semNcm.length) {
+      const nomes = [...new Set(semNcm.map((it) => String(it.nome ?? it.descricao ?? "item")))].slice(0, 5).join(", ")
+      return { ok: false, pendente_classificacao: true, error: `Sem classificação fiscal (NCM) no cadastro: ${nomes}. A nota fica pendente até o contador classificar esses produtos.` }
+    }
+  }
   const fiscalDoItem = (it: any) => fiscalPorProduto[String(it.produto_id ?? it.id ?? "")] ?? {}
 
   const uf = String(emp?.estado ?? "RN").toUpperCase()

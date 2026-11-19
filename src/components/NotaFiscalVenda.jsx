@@ -73,7 +73,10 @@ export default function NotaFiscalVenda({ empresaId, venda, compacto = false }) 
       const resp = await r.json()
       if (resp?.ok || resp?.ja_emitida) {
         setMsg({ ok: true, txt: resp?.ja_emitida ? 'Esta venda já tem nota.' : 'Nota autorizada!' })
-        if (resp?.nota && !resp?.ja_emitida) await imprimir(resp.nota, false)
+        if (resp?.nota && !resp?.ja_emitida) {
+          const { data: cfgF } = await supabase.from('empresa_fiscal').select('nfce_imprimir_ao_emitir').eq('empresa_id', empresaId).maybeSingle()
+          if (cfgF?.nfce_imprimir_ao_emitir !== false) await imprimir(resp.nota, false)
+        }
       } else if (resp?.status === 'processando') {
         setMsg({ ok: true, txt: 'Enviada. Aguardando a SEFAZ autorizar — veja em instantes.' })
       } else {

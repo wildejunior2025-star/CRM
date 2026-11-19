@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
         if (ensaio) { resumo.push({ loja: nome, id: c.id, tipo: c.tipo, origem: c.rotulo, emitiria: true }); continue }
 
         emitidas++
-        let ok = false, erro = ""
+        let ok = false, erro = "", pendente = false
         try {
           const r = await fetch(`${SUPABASE_URL}/functions/v1/emitir-nfce`, {
             method: "POST",
@@ -162,12 +162,15 @@ Deno.serve(async (req) => {
           })
           const d = await r.json().catch(() => ({}))
           ok = d?.ok === true
+          pendente = d?.pendente_classificacao === true
           erro = String(d?.mensagem ?? d?.error ?? `HTTP ${r.status}`).slice(0, 300)
         } catch (e) { erro = String(e).slice(0, 300) }
 
         if (ok) { resumo.push({ loja: nome, id: c.id, emitida: true }); continue }
 
-        const n = (t?.tentativas ?? 0) + 1
+        // Item sem classificação fiscal (loja com a trava ligada): não adianta tentar de novo
+        // nem avisar o dono a cada pedido. Marca como desistiu+avisado e segue.
+        const n = pendente ? MAX_TENTATIVAS : (t?.tentativas ?? 0) + 1
         const desistiu = n >= MAX_TENTATIVAS
         const proxima = new Date(Date.now() + n * 5 * 60 * 1000).toISOString()   // 5, 10, 15 min
         // Indice unico PARCIAL nao serve de alvo do upsert: insere ou atualiza na mao.
@@ -179,11 +182,12 @@ Deno.serve(async (req) => {
             pedido_id: c.tipo === "pedido" ? c.id : null,
             comanda_id: c.tipo === "comanda" ? c.id : null,
             tentativas: n, ultimo_erro: erro, proxima_em: proxima, desistiu,
+            ...(pendente ? { avisado: true } : {}),
           })
         }
-        resumo.push({ loja: nome, id: c.id, emitida: false, tentativa: n, erro })
+        resumo.push({ loja: nome, id: c.id, emitida: false, tentativa: n, erro, ...(pendente ? { pendente_classificacao: true } : {}) })
 
-        if (desistiu && !t?.avisado) {
+        if (desistiu && !pendente && !t?.avisado) {
           await sb.from("nfce_auto_tentativas").update({ avisado: true })
             .eq(c.tipo === "pedido" ? "pedido_id" : "comanda_id", c.id)
           await avisarDono(sb,

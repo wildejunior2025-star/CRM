@@ -106,7 +106,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
     // valer, e mostrar um campo so fazia a tela mentir sobre qual esta em uso.
     csc_homologacao: '', csc_id_homologacao: '', csc_producao: '', csc_id_producao: '',
     ncm_padrao: '21069090', cfop_padrao: '5102', csosn_padrao: '102', origem_padrao: '0',
-    nfce_auto: false, nfce_auto_formas: [], nfce_auto_espera_min: 2,
+    nfce_auto: false, nfce_auto_formas: [], nfce_auto_espera_min: 2, nfce_imprimir_ao_emitir: true,
   })
   const [fiscalSalvando, setFiscalSalvando] = useState(false)
   const [fiscalMsg, setFiscalMsg] = useState(null) // { tipo, texto }
@@ -199,6 +199,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
       nfce_auto: fiscalCfg.nfce_auto,
       nfce_auto_formas: fiscalCfg.nfce_auto_formas,
       nfce_auto_espera_min: Math.max(1, Number(fiscalCfg.nfce_auto_espera_min) || 2),
+      nfce_imprimir_ao_emitir: fiscalCfg.nfce_imprimir_ao_emitir !== false,
     })
     setFiscalSalvando(false)
     setFiscalMsg(error
@@ -455,6 +456,7 @@ export default function MinhaLoja({ secao = 'loja' }) {
           nfce_auto: data.nfce_auto ?? false,
           nfce_auto_formas: data.nfce_auto_formas ?? [],
           nfce_auto_espera_min: data.nfce_auto_espera_min ?? 2,
+          nfce_imprimir_ao_emitir: data.nfce_imprimir_ao_emitir ?? true,
         })
         setCertNome(data.certificado_nome ?? '')
         setCertRegistrada(data.focus_registrada ?? false)
@@ -2054,6 +2056,20 @@ export default function MinhaLoja({ secao = 'loja' }) {
               </p>
             </>
           )}
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 4px' }}>Papel do cupom fiscal</h3>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+            <input
+              type="checkbox"
+              checked={fiscalCfg.nfce_imprimir_ao_emitir !== false}
+              onChange={e => setFiscalCfg({ ...fiscalCfg, nfce_imprimir_ao_emitir: e.target.checked })}
+            />
+            Imprimir o cupom na térmica quando a nota é emitida à mão
+          </label>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 4px' }}>
+            Desmarcado, a nota sai normalmente mas o papel não. A nota automática nunca imprime. Para
+            imprimir uma nota depois, use o botão Imprimir ao lado dela.
+          </p>
 
           <button type="submit" className="btn btn-primary" disabled={fiscalSalvando} style={{ marginTop: 16 }}>
             {fiscalSalvando ? 'Salvando...' : 'Salvar dados fiscais'}

@@ -621,7 +621,10 @@ function NotaFiscalDoPedido({ pedido }) {
       if (resp?.ok || resp?.ja_emitida) {
         setMsg({ ok: true, txt: resp?.ja_emitida ? 'Este pedido já tem nota.' : 'Nota autorizada!' })
         // Cupom fiscal direto na térmica; se o app da impressora não estiver aberto, avisa.
-        if (resp?.nota && !resp?.ja_emitida) await imprimir(resp.nota, false)
+        if (resp?.nota && !resp?.ja_emitida) {
+          const { data: cfgF } = await supabase.from('empresa_fiscal').select('nfce_imprimir_ao_emitir').eq('empresa_id', empresa.id).maybeSingle()
+          if (cfgF?.nfce_imprimir_ao_emitir !== false) await imprimir(resp.nota, false)
+        }
       } else if (resp?.status === 'processando') {
         setMsg({ ok: true, txt: 'Enviada. Aguardando a SEFAZ autorizar — veja de novo em instantes.' })
       } else {
