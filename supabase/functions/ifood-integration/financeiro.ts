@@ -26,6 +26,8 @@ type GetToken = (sb: any, cfg: any) => Promise<string>
 // Rotina de todas as lojas não roda de novo antes disto (protege o limite de
 // chamadas do iFood de quem chamar a função repetidamente).
 const INTERVALO_MIN_MS = 30 * 60 * 1000
+// Loja que sincronizou ok há menos que isto fica fora das rodadas de repescagem.
+const REPESCAGEM_MS = 20 * 60 * 60 * 1000
 
 // ── Quem está chamando ────────────────────────────────────────────────────────
 export async function podeMexerNaEmpresa(req: Request, sb: any, empresaId: string): Promise<boolean> {
@@ -199,7 +201,16 @@ export async function runFinanceiroSync(
   let lojas = await lojasDoIfood(sb, opts.empresaId)
   if (!opts.empresaId) {
     const limite = Date.now() - INTERVALO_MIN_MS
-    lojas = lojas.filter((c: any) => !c.financeiro_sync_em || new Date(c.financeiro_sync_em).getTime() < limite)
+    const hojeOk = Date.now() - REPESCAGEM_MS
+    const quando = (c: any) => c.financeiro_sync_em ? new Date(c.financeiro_sync_em).getTime() : 0
+    lojas = lojas
+      .filter((c: any) => quando(c) < limite)
+      // Repescagem (07:15 e 08:15): loja que já sincronizou ok hoje não roda de novo.
+      .filter((c: any) => !(c.financeiro_status === "ok" && quando(c) > hojeOk))
+      // Quem deu erro ou está há mais tempo sem atualizar vai primeiro — antes a
+      // ordem era fixa e o Zebu (a maior) ficava de fora quando o tempo acabava.
+      .sort((a: any, b: any) =>
+        (a.financeiro_status === "ok" ? 1 : 0) - (b.financeiro_status === "ok" ? 1 : 0) || quando(a) - quando(b))
   }
 
   // Orçamento de tempo compartilhado: com várias lojas, o que não couber nesta
