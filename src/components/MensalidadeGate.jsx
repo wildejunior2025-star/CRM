@@ -17,7 +17,12 @@ const PUBLICAS = ['/login', '/cadastro', '/reset-password', '/entrar', '/termos'
   '/lojas', '/loja/', '/checkout', '/pedido/', '/mesa/', '/c/', '/ver/', '/meus-pedidos', '/super-admin', '/pagar/']
 const FUNCIONARIOS = ['garcom', 'cozinheiro', 'entregador', 'vendedor']
 
-export default function MensalidadeGate() {
+// academia: mesma regra das lojas no academia.fwcinter.com (19/11/2026). O professor
+// conta como equipe, e a recepção (tablet do reconhecimento facial) e a porta ficam
+// livres: travar a catraca pararia os alunos por uma conta que não é deles.
+const ROTAS_LIVRES_ACADEMIA = ['/recepcao', '/porta']
+
+export default function MensalidadeGate({ academia = false }) {
   const { profile, empresa, voltarSuperAdmin } = useAuth()
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -29,8 +34,9 @@ export default function MensalidadeGate() {
 
   const perfil = profile?.perfil
   const admin = perfil === 'admin'
-  const participa = !!empresa?.id && (admin || FUNCIONARIOS.includes(perfil))
+  const participa = !!empresa?.id && (admin || FUNCIONARIOS.includes(perfil) || (academia && perfil === 'professor'))
   const publica = PUBLICAS.some(p => pathname.startsWith(p))
+    || (academia && ROTAS_LIVRES_ACADEMIA.some(p => pathname.startsWith(p)))
   const impersonando = typeof localStorage !== 'undefined' && !!localStorage.getItem('crm_superadmin_backup')
 
   const carregar = useCallback(async () => {
@@ -88,7 +94,7 @@ export default function MensalidadeGate() {
           <li>Valor: <strong>{Number(situacao.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong> por {periodoTexto(situacao.periodicidade)}{situacao.periodicidade === 'quinzenal' ? ' (vence dia 1 e dia 15)' : ''}.</li>
           <li>No dia do vencimento aparece um aviso aqui no sistema, e a FWC avisa no WhatsApp.</li>
           <li>Depois do vencimento, a loja tem <strong>{situacao.carencia_dias} dia(s) de funcionamento</strong> pra pagar.</li>
-          <li>Passado esse prazo, na abertura do dia seguinte o sistema fica <strong>bloqueado por um aviso de pagamento</strong> até pagar, e os funcionários ficam sem acesso. Pedidos, iFood, Loja Online e robô continuam chegando.</li>
+          <li>Passado esse prazo, na abertura do dia seguinte o sistema fica <strong>bloqueado por um aviso de pagamento</strong> até pagar, e a equipe fica sem acesso. {academia ? 'A recepção e a catraca continuam funcionando para os alunos.' : 'Pedidos, iFood, Loja Online e robô continuam chegando.'}</li>
           <li>Dá pra pagar no PIX ou deixar no cartão, cobrando sozinho.</li>
         </ul>
         <button type="button" style={botao} onClick={async () => { await supabase.rpc('mensalidade_aceitar_termo'); carregar() }}>
@@ -144,8 +150,8 @@ export default function MensalidadeGate() {
               ainda dá tempo de pagar sem ninguém parar — e é exatamente isso
               que faz ele pagar agora. */}
           {estado.travaEquipe
-            ? 'O acesso fica bloqueado até o pagamento. Os pedidos continuam chegando, mas a equipe está sem acesso ao sistema.'
-            : 'Os pedidos continuam chegando normalmente. Se não for pago até a loja abrir, a equipe fica sem acesso ao sistema.'}
+            ? `O acesso fica bloqueado até o pagamento. ${academia ? 'A recepção segue liberando os alunos' : 'Os pedidos continuam chegando'}, mas a equipe está sem acesso ao sistema.`
+            : `${academia ? 'A recepção segue liberando os alunos' : 'Os pedidos continuam chegando normalmente'}. Se não for pago até ${academia ? 'a academia abrir' : 'a loja abrir'}, a equipe fica sem acesso ao sistema.`}
         </div>
         <MensalidadePagamento situacao={situacao} empresaId={empresa?.id} onPago={carregar} />
         {/* Sem "Já paguei": o Wilde tirou (13/09) — o PIX libera sozinho, e o botão

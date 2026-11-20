@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabaseClient'
 import TecladoPin from './TecladoPin'
 import './academia.css'
 import BotaoAbrirCatraca from './BotaoAbrirCatraca'
+import MensalidadeGate from '../../components/MensalidadeGate'
 
 // academia.fwcinter.com — sistema da academia (mig 0276).
 //   /           → alunos (cadastro com foto do rosto)
@@ -219,6 +220,8 @@ function LogoutBotao() {
 export default function AcademiaApp() {
   return (
     <BrowserRouter>
+      {/* Mesma trava de mensalidade das lojas (aviso/pop-up do admin, equipe suspensa) */}
+      <MensalidadeGate academia />
       <Portaria />
     </BrowserRouter>
   )
