@@ -442,7 +442,7 @@ Deno.serve(async (req) => {
     const idMp = url.searchParams.get("data.id") ?? url.searchParams.get("id") ?? body?.data?.id
     // O aviso do MP também traz "action" ("payment.created") — por isso a
     // conferência é contra as ações desta função, e não pela presença do campo.
-    const ACOES = ["cron", "cron_link", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao", "link_info", "link_pix", "link_status", "enviar_link"]
+    const ACOES = ["cron", "cron_link", "agradecer", "status", "pix", "cartao_chave", "assinar", "cancelar_cartao", "link_info", "link_pix", "link_status", "enviar_link"]
     if (tipoMp && idMp && !ACOES.includes(body?.action)) {
       if (!MP_TOKEN) return json({ ok: true })
       if (tipoMp === "payment") {
@@ -469,6 +469,59 @@ Deno.serve(async (req) => {
     if (action === "cron") return json({ ok: true, avisos: await cronDiario(sb) })
     if (action === "cron_link") return json({ ok: true, envios: await cronLinkWhatsApp(sb) })
     if (action === "cron_vespera") return json({ ok: true, envios: await cronVespera(sb) })
+
+    // ── Agradecimento quando a mensalidade é paga (20/11/2026, pedido do Wilde) ─
+    // Chamado pelo gatilho trg_agradecer_pagamento (mig 0461) na hora em que a
+    // cobrança vira 'paga' — PIX, cartão da assinatura ou baixa à mão: todos
+    // passam por essa virada. Só manda pra loja com cobrança por WhatsApp ligada
+    // (zap_auto), a mesma que já recebe o link. A chave é o mesmo token do aviso
+    // da FWC (config_global.aviso_fwc_token), no ?token= — não é relé aberto.
+    if (action === "agradecer") {
+      const { data: tk } = await sb.from("config_global").select("valor").eq("chave", "aviso_fwc_token").maybeSingle()
+      if (!tk?.valor || url.searchParams.get("token") !== tk.valor) return json({ error: "Não autorizado." }, 401)
+      const { data: cb } = await sb.from("mensalidade_cobrancas")
+        .select("id, empresa_id, referencia, valor, valor_pago, status").eq("id", String(body?.cobranca_id ?? "")).maybeSingle()
+      if (!cb || cb.status !== "paga") return json({ ok: true, ignorado: "cobrança não está paga" })
+
+      const { data: cfg } = await sb.from("mensalidade_config")
+        .select("zap_auto, zap_telefone, zap_telefones, empresas(nome)").eq("empresa_id", cb.empresa_id).maybeSingle()
+      if (!cfg?.zap_auto) return json({ ok: true, ignorado: "loja sem cobrança por WhatsApp ligada" })
+      const numeros = numerosDaLoja(cfg)
+      if (!numeros.length) return json({ ok: true, ignorado: "sem telefone" })
+
+      // Uma vez por cobrança; e uma vez só quando um pagamento quita várias de uma vez.
+      const { data: jaFoi } = await sb.from("mensalidade_avisos").select("id, cobranca_id, created_at")
+        .eq("empresa_id", cb.empresa_id).eq("tipo", "whatsapp_obrigado").order("created_at", { ascending: false }).limit(5)
+      const recente = Date.now() - 3 * 60 * 1000
+      if ((jaFoi ?? []).some((a: any) => a.cobranca_id === cb.id || new Date(a.created_at).getTime() > recente)) {
+        return json({ ok: true, ignorado: "já agradecido" })
+      }
+
+      const hoje = hojeBR()
+      const { data: aindaVencidas } = await sb.from("mensalidade_cobrancas")
+        .select("referencia, valor").eq("empresa_id", cb.empresa_id).eq("status", "aberta").lte("vencimento", hoje)
+      const texto =
+        `✅ *Pagamento recebido com sucesso!*\n\n` +
+        `Obrigado, ${(cfg.empresas as any)?.nome ?? "tudo bem"}! Recebemos o pagamento de ${valorBr(Number(cb.valor_pago ?? cb.valor))} (${cb.referencia}). 🙏\n\n` +
+        ((aindaVencidas ?? []).length
+          ? `Ainda ficou em aberto: ${(aindaVencidas ?? []).map((x: any) => `${x.referencia} (${valorBr(x.valor)})`).join(", ")}.`
+          : `Está tudo certo, seu sistema segue liberado.`) +
+        `\n\nQualquer dúvida é só chamar aqui. FWC Inter 💜`
+
+      const envio: any = await enviarParaTodos(sb, numeros, texto)
+      await sb.from("mensalidade_avisos").insert({
+        empresa_id: cb.empresa_id, cobranca_id: cb.id, tipo: envio.erro ? "whatsapp_obrigado_falha" : "whatsapp_obrigado",
+        quem: "WhatsApp da FWC (agradecimento automático)",
+        detalhe: envio.erro ? `Falhou: ${envio.erro}` : `Agradecimento ${envio.resumo} (${cb.referencia})`,
+      }).then(() => {}, () => {})
+      if (!envio.erro) {
+        await sb.from("admin_chat").insert(envio.ok.map((n: string) => ({
+          telefone: n, empresa_id: cb.empresa_id, canal: "evolution",
+          remetente: "fwc", tipo: "texto", texto, status: "enviado", lida: true,
+        }))).then(() => {}, () => {})
+      }
+      return json({ ok: !envio.erro, para: envio.ok, falhas: envio.falhas })
+    }
 
     // ── Reenviar o link de pagamento pra UMA loja, com um recado opcional ────
     // Nasceu em 21/10/2026: o Zebu respondeu a cobrança dizendo que o PIX não
