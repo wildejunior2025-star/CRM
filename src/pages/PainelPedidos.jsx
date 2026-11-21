@@ -24,6 +24,7 @@ import { marcarPortalNoGestor } from '../lib/portalNoGestor'
 import ModalMapaEndereco from '../components/ModalMapaEndereco'
 import 'leaflet/dist/leaflet.css'   // mapa da posição do entregador (mig 0245)
 import Caixa from './Caixa'
+import { useVoltarFecha } from '../hooks/useVoltarFecha'
 
 // "558498180774" -> "(84) 9818-0774"
 function foneBonito(p) {
@@ -286,6 +287,7 @@ function TimerRegressivo({ createdAt, aguardandoDesde, onExpirado }) {
 
 // ── Modal de recusa ─────────────────────────────────────────
 function ModalRecusa({ pedido, onConfirmar, onFechar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [motivo, setMotivo] = useState('')
   const [enviando, setEnviando] = useState(false)
 
@@ -364,6 +366,7 @@ function ModalRecusa({ pedido, onConfirmar, onFechar }) {
 const PRESETS_PREPARO = [10, 15, 20, 30, 45, 60]
 
 function ModalAceitar({ pedido, onConfirmar, onFechar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [min, setMin] = useState(30)
   const [salvando, setSalvando] = useState(false)
   // Horário previsto calculado fora do render (Date.now é impuro em render)
@@ -463,6 +466,7 @@ const MSGS_RAPIDAS = [
 ]
 
 function ModalMensagem({ pedido, onEnviar, onFechar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [texto, setTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState(null)
@@ -600,6 +604,7 @@ function draftClienteTemEndereco(form) {
 
 // ── Cadastro rápido de cliente no balcão ──
 function ModalNovoCliente({ empresa, initialNome = '', initialTel = '', onFechar, onSalvo }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   // Cadastro de balcão: nome, telefone e endereço, numa tela só.
   //
   // Antes eram duas etapas com a ficha comercial inteira — tipo de cliente,
@@ -846,6 +851,7 @@ function linhasDaSacola(itens) {
 // coberta, quem atende não conseguia ler o que o cliente tinha pedido e
 // escolhia de cabeça.
 function ModalComplementos({ produto, onFechar, onConfirmar, iniciais = [], embutido = false, onEnviarLista, enviandoLista = false }) {
+  useVoltarFecha(!embutido, onFechar) // botão voltar do celular fecha esta janela (embutido não é janela)
   const grupos = produto.grupos ?? []
   // A escolha é { grupoId: { opcaoId: quantidade } }. No grupo comum a
   // quantidade é sempre 1 e o que vale é estar ou não na lista; no grupo de
@@ -1613,6 +1619,7 @@ function lerDraftVenda(empresaId) {
  * se começa a mandar o pedido errado pra pessoa errada.
  */
 function ModalVenda({ empresa, onFechar, onCriado, pedidoEdicao = null, embutido = false, prefill = null, onEnviarCategoria = null, onEnviarLista = null, enviandoLista = false }) {
+  useVoltarFecha(!embutido, onFechar) // botão voltar do celular fecha esta janela (embutido não é janela)
   const editando = !!pedidoEdicao
   // Rascunho só vale pra venda nova (não pra edição de pedido existente)
   const draft = (editando || prefill) ? null : lerDraftVenda(empresa?.id)
@@ -3777,6 +3784,7 @@ const paraNum = (v) => Math.round(parseFloat(String(v ?? '').replace(',', '.')) 
 const paraTxt = (n) => (Number.isFinite(n) ? n.toFixed(2).replace('.', ',') : '')
 
 function ModalTrocaPagamento({ pedido, onFechar, onSalvar, saldoAtivo }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [forma, setForma] = useState(pedido?.forma_pagamento && pedido.forma_pagamento !== 'dividido' ? pedido.forma_pagamento : 'dinheiro')
   const [troco, setTroco] = useState(pedido?.troco_para ? String(pedido.troco_para).replace('.', ',') : '')
   const [salvando, setSalvando] = useState(false)
@@ -3940,6 +3948,7 @@ function ModalTrocaPagamento({ pedido, onFechar, onSalvar, saldoAtivo }) {
 // Desconto no pedido de delivery. "Tirar a taxa" é o caso do cliente fixo; o
 // campo livre serve pra qualquer outro valor. Digitar 0 desfaz o desconto.
 function ModalDesconto({ pedido, onFechar, onSalvar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [valor, setValor] = useState(Number(pedido?.desconto) > 0 ? paraTxt(Number(pedido.desconto)) : '')
   const [salvando, setSalvando] = useState(false)
   if (!pedido) return null
@@ -5298,6 +5307,7 @@ function PosicaoDoEntregador({ pos, agora, onAbrir }) {
 // Mapa com o motoboy, a loja e as entregas que ele está levando. Mesmo Leaflet +
 // OpenStreetMap do resto do sistema (sem chave paga, sem cobrança por acesso).
 function ModalMapaEntregador({ entregador, pos, paradas = [], empresa, agora, onFechar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const divRef = useRef(null)
   const mapRef = useRef(null)
   useEffect(() => {
@@ -5603,6 +5613,7 @@ const PERIODOS_ENT = [['hoje', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias'], ['
 // Igual ao motoboy na entrega — só conclui se o código bater com o do pedido
 // (ex.: o código de retirada que veio do iFood).
 function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
+  useVoltarFecha(true, onCancelar) // botão voltar do celular fecha esta janela
   const [digitos, setDigitos] = useState(['', '', '', ''])
   const [erro, setErro] = useState(null)
   const [validando, setValidando] = useState(false)
@@ -5692,6 +5703,7 @@ function ModalCodigoRetirada({ pedido, onOk, onCancelar }) {
 // sem dono, e o despacho (status `saiu_entrega`) é o que dispara o WhatsApp
 // "seu pedido saiu para entrega". Um UPDATE só, com o entregador junto.
 function ModalEscolherMotoboy({ pedido, entregadores = [], onEscolher, onCancelar }) {
+  useVoltarFecha(true, onCancelar) // botão voltar do celular fecha esta janela
   const [salvando, setSalvando] = useState(null)
   async function escolher(entregadorId) {
     if (salvando) return
@@ -6039,6 +6051,7 @@ function CardMesa({ comanda, taxaPct = 0, onPronto, onItemPronto, onFecharConta,
 
 // Modal de fechar conta da mesa pelo gestor
 function ModalFecharConta({ comanda, taxaPct, onFechar, onConfirmar }) {
+  useVoltarFecha(true, onFechar) // botão voltar do celular fecha esta janela
   const [forma, setForma] = useState('dinheiro')
   const [aplicarTaxa, setAplicarTaxa] = useState(true) // taxa de serviço vem marcada; desmarca se o cliente não quiser
   const [salvando, setSalvando] = useState(false)
@@ -8841,6 +8854,9 @@ export default function PainelPedidos() {
   const [alteracoes, setAlteracoes] = useState([])
   const [decidindoAlt, setDecidindoAlt] = useState(null)   // id em processamento
   const [recusandoAlt, setRecusandoAlt] = useState(null)   // alteração no popup do motivo
+  // Botão voltar do celular fecha o card aberto em detalhe e o popup do motivo.
+  useVoltarFecha(!!pedidoDetalhe, () => setPedidoDetalhe(null))
+  useVoltarFecha(!!recusandoAlt, () => setRecusandoAlt(null))
   // Quem já tocou a campainha. Sem isto, recarregar a lista faria a mesma
   // mudança tocar de novo a cada evento do tempo real.
   const anunciadasRef = useRef(new Set())
