@@ -1410,6 +1410,46 @@
 
 .pp-venda-lista { max-height: 240px; }
 
+.pp-venda-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pp-venda-x { display: none; }
+
+/* Celular: a janela vira tela cheia. Antes era uma caixa com rolagem dentro de
+   outra (a lista de produtos tinha a dela, de 240px), o dedo rolava a lista em vez
+   da tela, e o Cancelar ficava no fim de tudo — "não dá pra fazer nada nem sair".
+   Agora: uma rolagem só, ✕ fixo no topo e os botões de fechar a venda fixos embaixo. */
+@media (max-width: 700px) {
+  .pp-venda:not(.pp-venda-embutida) {
+    /* o overlay tem 20px de folga; a margem negativa devolve a tela inteira */
+    margin: -20px; width: calc(100% + 40px); max-width: none;
+    height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0;
+    padding: 0 14px 0; gap: 12px;
+  }
+  .pp-venda:not(.pp-venda-embutida) .pp-venda-topo {
+    position: sticky; top: 0; z-index: 6; background: var(--pp-card);
+    padding: 12px 0 10px; border-bottom: 1px solid var(--pp-border);
+  }
+  .pp-venda:not(.pp-venda-embutida) .pp-venda-x {
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 44px; height: 44px; border-radius: 12px; cursor: pointer;
+    border: 1.5px solid var(--pp-border); background: transparent; color: var(--pp-text);
+    font-size: 20px; line-height: 1;
+  }
+  .pp-venda:not(.pp-venda-embutida) .pp-venda-lista,
+  .pp-venda:not(.pp-venda-embutida) .pp-venda-itens-lista { max-height: none; overflow: visible !important; }
+  .pp-venda:not(.pp-venda-embutida) .pp-modal-actions {
+    position: sticky; bottom: 0; z-index: 6; background: var(--pp-card);
+    flex-wrap: wrap; padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--pp-border);
+  }
+  .pp-venda:not(.pp-venda-embutida) .pp-modal-actions button { flex: 1 1 auto; padding: 12px 14px; }
+  .pp-venda:not(.pp-venda-embutida) .pp-modal-actions .pp-modal-btn-danger { flex: 1 1 100%; order: -1; font-size: 16px; }
+}
+
+/* Aparelho de toque: não tem Ctrl+V, então some a explicação de colar. */
+@media (pointer: coarse) {
+  .pp-venda-so-pc { display: none; }
+}
+
 @media (min-width: 1024px) {
   /* Ocupa a tela quase inteira: sobrava um vazio dos dois lados que nao servia
      pra nada. O vh no max-height evita que a janela cresca alem do monitor. */

@@ -2672,7 +2672,14 @@ ${url}
     <>
     <div className={classeFora} onClick={embutido ? undefined : onFechar}>
       <div className={classeDentro} onClick={e => e.stopPropagation()}>
-        <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
+        {/* No celular a janela vira tela cheia e este topo fica fixo: o ✕ está sempre à
+            mão (antes, pra sair, era preciso rolar tudo até o Cancelar lá embaixo). */}
+        <div className="pp-venda-topo">
+          <p className="pp-modal-titulo">{editando ? `Editar pedido #${pedidoEdicao.numero_pedido ?? ''}` : 'Nova venda (balcão)'}</p>
+          {!embutido && (
+            <button type="button" className="pp-venda-x" aria-label="Fechar" onClick={editando ? onFechar : cancelar}>✕</button>
+          )}
+        </div>
 
         {/* Duas colunas na tela grande, uma só no celular (ver PainelPedidos.css).
             À esquerda o que o vendedor fica repetindo — buscar produto e conferir
@@ -2725,7 +2732,11 @@ ${url}
                  onPaste aqui também — senão o print é lido 2x e a sacola duplica. */
               onFocus={() => setColarPronto(true)}
               onBlur={() => setColarPronto(false)}
-              onClick={() => pasteRef.current?.focus()}
+              onClick={() => {
+                // Celular não tem Ctrl+V: toque abre direto a galeria/arquivos.
+                if (window.matchMedia?.('(pointer: coarse)').matches && !lendoPrint) fileRef.current?.click()
+                else pasteRef.current?.focus()
+              }}
               style={{
                 padding: '12px', borderRadius: 10, cursor: lendoPrint ? 'wait' : 'text', outline: 'none',
                 border: `2px ${colarPronto ? 'solid' : 'dashed'} #7c3aed`,
@@ -2738,13 +2749,14 @@ ${url}
                   ? '⏳ Lendo o pedido...'
                   : colarPronto
                     ? '📋 Agora aperte Ctrl+V pra colar o print'
-                    : '📷 Ler print ou PDF do pedido — clique aqui e aperte Ctrl+V'}
+                    : <>📷 Ler print ou PDF do pedido<span className="pp-venda-so-pc"> — clique aqui e aperte Ctrl+V</span></>}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>
+              <div className="pp-venda-so-pc" style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>
                 Recebeu por iFood/WhatsApp? Cole o print (Ctrl+V) ou anexe um PDF — a IA preenche tudo.
               </div>
               <button
                 type="button"
+                className="pp-venda-so-pc"
                 onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
                 disabled={lendoPrint || loading}
                 style={{
