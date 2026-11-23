@@ -8742,7 +8742,19 @@ export default function PainelPedidos() {
       .order('created_at', { ascending: false })
     const todos = data || []
     setConcluidosHoje(todos.filter(p => p.status === 'entregue'))
-    setCanceladosHoje(todos.filter(p => p.status === 'cancelado' && !ehPixNaoPago(p)))
+    // Cancelado hoje = cancelado HOJE, mesmo que o pedido seja de ontem/agendado
+    // (antes só entrava quem foi CRIADO hoje e o resto sumia).
+    const { data: canc } = await supabase
+      .from('pedidos_delivery')
+      .select('*')
+      .eq('empresa_id', empresa.id)
+      .eq('status', 'cancelado')
+      .gte('updated_at', inicio.toISOString())
+      .order('updated_at', { ascending: false })
+    const vistos = new Set()
+    const cancelados = [...todos.filter(p => p.status === 'cancelado'), ...(canc || [])]
+      .filter(p => !vistos.has(p.id) && vistos.add(p.id))
+    setCanceladosHoje(cancelados.filter(p => !ehPixNaoPago(p)))
 
     // G3 — mesas (comandas) com conta fechada hoje também entram nos concluídos
     const { data: mesas } = await supabase
