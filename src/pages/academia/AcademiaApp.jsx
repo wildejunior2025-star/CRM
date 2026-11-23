@@ -141,17 +141,19 @@ function EntrarAcademia() {
   )
 }
 
-function Topo() {
+function Topo({ financeiro }) {
   const { empresa, logout } = useAuth()
   return (
     <header className="ac-topo">
       <strong className="ac-nome-empresa">{empresa?.nome || 'Academia'}</strong>
       <nav>
         <NavLink to="/" end>Alunos</NavLink>
-        <NavLink to="/pagamentos">Pagamentos</NavLink>
+        {/* Pagamentos e Equipe só pra quem enxerga dinheiro. O balcão recebe
+            e dá baixa pelo botão Renovar, dentro de Alunos. */}
+        {financeiro && <NavLink to="/pagamentos">Pagamentos</NavLink>}
         <NavLink to="/recepcao">Recepção</NavLink>
         <NavLink to="/porta">Porta</NavLink>
-        <NavLink to="/equipe">Equipe</NavLink>
+        {financeiro && <NavLink to="/equipe">Equipe</NavLink>}
       </nav>
       <BotaoAbrirCatraca />
       <button className="btn btn-secondary btn-sm" onClick={logout}>Sair</button>
@@ -192,18 +194,22 @@ function Portaria() {
       </div>
     )
   }
+  // O dono quer ver tudo; quem recebe e dá baixa no balcão não pode ver quanto
+  // está entrando na conta. A chave é por login (profiles.ver_financeiro, mig
+  // 0454) e vale também no banco: esconder o menu sozinho não esconderia nada.
+  const financeiro = profile.ver_financeiro !== false
   return (
     <Suspense fallback={<Carregando />}>
       <Routes>
         <Route path="/recepcao" element={<AcademiaRecepcao />} />
-        <Route path="*" element={<><Topo /><main className="ac-main">
+        <Route path="*" element={<><Topo financeiro={financeiro} /><main className="ac-main">
           <Routes>
             <Route path="/" element={<AcademiaAlunos />} />
-            <Route path="/pagamentos" element={<AcademiaPagamentos />} />
+            <Route path="/pagamentos" element={financeiro ? <AcademiaPagamentos /> : <Navigate to="/" replace />} />
             <Route path="/catraca" element={<AcademiaCatraca />} />
             <Route path="/porta" element={<AcademiaPorta />} />
             <Route path="/importar" element={<AcademiaImportar />} />
-            <Route path="/equipe" element={<AcademiaEquipe />} />
+            <Route path="/equipe" element={financeiro ? <AcademiaEquipe /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main></>} />

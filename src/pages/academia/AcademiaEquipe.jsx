@@ -16,7 +16,19 @@ import { useAuth } from '../../hooks/useAuth'
 
 const URL_CRIAR = 'https://ycytrsqdvrviihkqfvno.supabase.co/functions/v1/create-vendor'
 
-const VAZIO = { nome: '', email: '', senha: '', telefone: '', perfil: 'admin' }
+const VAZIO = { nome: '', email: '', senha: '', telefone: '', acesso: 'dono' }
+
+// Os tres acessos da academia, na lingua de quem usa. Por baixo, "dono" e
+// "recepcao" sao o MESMO perfil (admin) — o que muda e a chave
+// ver_financeiro (mig 0454), que vale no banco, nao so na tela.
+const ACESSOS = [
+  { id: 'dono', titulo: 'Dono — vê tudo, inclusive o dinheiro', perfil: 'admin', financeiro: true },
+  { id: 'recepcao', titulo: 'Recepção — recebe e dá baixa, não vê o caixa', perfil: 'admin', financeiro: false },
+  { id: 'professor', titulo: 'Professor / personal — só monta os treinos', perfil: 'professor', financeiro: false },
+]
+const acessoDe = id => ACESSOS.find(a => a.id === id) || ACESSOS[0]
+const acessoDaPessoa = g => (g.perfil === 'professor' ? 'professor'
+  : g.ver_financeiro === false ? 'recepcao' : 'dono')
 
 // Códigos do caixa: a academia usa UM login no balcão (eles não se dão bem
 // com computador), então quem diz QUEM está recebendo é o código. Cada um
@@ -101,7 +113,7 @@ function Editar({ pessoa, onFechar, onSalvou }) {
     nome: pessoa.nome || '',
     email: pessoa.email || '',
     telefone: pessoa.telefone || '',
-    perfil: pessoa.perfil === 'professor' ? 'professor' : 'admin',
+    acesso: acessoDaPessoa(pessoa),
     senha: '',
   })
   const [indo, setIndo] = useState(false)
@@ -115,13 +127,15 @@ function Editar({ pessoa, onFechar, onSalvou }) {
     if (!form.email.trim()) return setErro('Coloque o e-mail que ela usa pra entrar.')
     if (form.senha && form.senha.length < 6) return setErro('A senha precisa de pelo menos 6 letras ou números.')
     setIndo(true)
+    const escolha = acessoDe(form.acesso)
     const { data, error } = await supabase.rpc('academia_editar_equipe', {
       p_id: pessoa.id,
       p_nome: form.nome.trim(),
       p_email: form.email.trim().toLowerCase(),
       p_telefone: form.telefone.trim(),
-      p_perfil: form.perfil,
+      p_perfil: escolha.perfil,
       p_senha: form.senha || null,
+      p_ver_financeiro: escolha.financeiro,
     })
     setIndo(false)
     if (error) return setErro(error.message)
@@ -149,9 +163,8 @@ function Editar({ pessoa, onFechar, onSalvou }) {
                 onChange={e => set('telefone', e.target.value)} placeholder="(84) 99999-9999" />
             </label>
             <label>O que essa pessoa faz
-              <select value={form.perfil} onChange={e => set('perfil', e.target.value)}>
-                <option value="admin">Academia — tudo</option>
-                <option value="professor">Professor / personal</option>
+              <select value={form.acesso} onChange={e => set('acesso', e.target.value)}>
+                {ACESSOS.map(a => <option key={a.id} value={a.id}>{a.titulo}</option>)}
               </select>
             </label>
           </div>
@@ -186,7 +199,7 @@ export default function AcademiaEquipe() {
     setCarregando(true)
     const { data } = await supabase
       .from('profiles')
-      .select('id, nome, email, telefone, perfil')
+      .select('id, nome, email, telefone, perfil, ver_financeiro')
       .eq('empresa_id', empresa.id)
       .in('perfil', ['admin', 'super_admin', 'professor'])
       .order('nome')
@@ -207,6 +220,8 @@ export default function AcademiaEquipe() {
     if (form.senha.length < 6) return setErro('A senha precisa de pelo menos 6 letras ou números.')
 
     setCriando(true)
+    const escolha = acessoDe(form.acesso)
+    const email = form.email.trim().toLowerCase()
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch(URL_CRIAR, {
@@ -220,14 +235,21 @@ export default function AcademiaEquipe() {
           email: form.email.trim().toLowerCase(),
           password: form.senha,
           telefone: form.telefone.trim() || undefined,
-          perfil: form.perfil,
+          perfil: escolha.perfil,
         }),
       })
       const json = await res.json()
       if (!json.ok) throw new Error(json.error || 'Não deu pra criar.')
-      setAviso(form.perfil === 'professor'
-        ? `Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()} no mesmo endereço, pelo celular, e cai direto na lista de alunos pra montar treino.`
-        : `Pronto. ${form.nome.trim()} entra com ${form.email.trim().toLowerCase()} e a senha que você escolheu.`)
+      // A create-vendor nao conhece a chave do financeiro: ela nasce ligada e a
+      // gente desliga logo depois, quando o acesso escolhido foi Recepcao.
+      if (!escolha.financeiro && escolha.perfil === 'admin') {
+        await supabase.rpc('academia_equipe_financeiro', { p_email: email, p_ver: false })
+      }
+      setAviso(escolha.id === 'professor'
+        ? `Pronto. ${form.nome.trim()} entra com ${email} no mesmo endereço, pelo celular, e cai direto na lista de alunos pra montar treino.`
+        : escolha.id === 'recepcao'
+          ? `Pronto. ${form.nome.trim()} entra com ${email} e a senha que você escolheu. Ela cadastra aluno e recebe mensalidade, mas não vê Pagamentos nem Equipe.`
+          : `Pronto. ${form.nome.trim()} entra com ${email} e a senha que você escolheu, e vê tudo — inclusive o caixa.`)
       setForm(VAZIO)
       carregar()
     } catch (err) {
@@ -264,7 +286,11 @@ export default function AcademiaEquipe() {
                   </td>
                   <td data-rotulo="Entra com">{g.email}</td>
                   <td data-rotulo="WhatsApp">{g.telefone || '—'}</td>
-                  <td data-rotulo="Acesso">{g.perfil === 'professor' ? 'Professor' : 'Academia'}</td>
+                  <td data-rotulo="Acesso">
+                    {g.perfil === 'professor' ? 'Professor'
+                      : g.ver_financeiro === false ? 'Recepção — sem o caixa'
+                        : 'Dono — vê tudo'}
+                  </td>
                   <td data-rotulo="">
                     {g.perfil !== 'super_admin' && (
                       <button type="button" className="btn btn-secondary btn-sm"
@@ -315,16 +341,16 @@ export default function AcademiaEquipe() {
                 so monta treino. Dar o login de Academia pra ele seria entregar
                 pagamentos e catraca de brinde. */}
             <label>O que essa pessoa faz
-              <select value={form.perfil} onChange={e => set('perfil', e.target.value)}>
-                <option value="admin">Academia — alunos, pagamentos, recepção, catraca</option>
-                <option value="professor">Professor / personal — só monta os treinos</option>
+              <select value={form.acesso} onChange={e => set('acesso', e.target.value)}>
+                {ACESSOS.map(a => <option key={a.id} value={a.id}>{a.titulo}</option>)}
               </select>
             </label>
           </div>
           <p className="ac-muted">
             Escolha uma senha e passe pra pessoa. Ela pode ser qualquer e-mail que a
             pessoa tenha — serve só pra identificar quem é.
-            {form.perfil === 'professor' && ' O professor entra no MESMO endereço e cai na lista de alunos, pelo celular: não vê pagamento, não abre catraca.'}
+            {form.acesso === 'professor' && ' O professor entra no MESMO endereço e cai na lista de alunos, pelo celular: não vê pagamento, não abre catraca.'}
+            {form.acesso === 'recepcao' && ' A recepção cadastra aluno, recebe mensalidade e usa a catraca — mas não abre Pagamentos nem Equipe, e o total do dia e do mês não chega nem no aparelho dela.'}
           </p>
         </div>
 

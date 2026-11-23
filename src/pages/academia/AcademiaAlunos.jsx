@@ -574,17 +574,12 @@ function ReceberMensalidade({ aluno, empresaId, onFechar }) {
 
   // Ja recebeu dessa pessoa hoje? Dois cliques no Renovar somavam dois meses
   // sem ninguem perceber (foi o caso da Daize Stella em 13/10).
+  // Pergunta por funcao, nao pela tabela: o login do balcao nao le mais
+  // academia_pagamentos (mig 0454), e esta trava e justamente a dele.
   useEffect(() => {
     if (!aluno?.id || primeira) return
     supabase
-      .from('academia_pagamentos')
-      .select('valor, criado_em')
-      .eq('aluno_id', aluno.id)
-      .eq('data', hojeIso())
-      .eq('cancelado', false)
-      .order('criado_em', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+      .rpc('academia_ja_recebi_hoje', { p_aluno: aluno.id, p_data: hojeIso() })
       .then(({ data: d }) => setJaPagouHoje(d || null))
   }, [aluno?.id, primeira])
 
