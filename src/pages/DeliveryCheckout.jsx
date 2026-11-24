@@ -2095,6 +2095,17 @@ export default function DeliveryCheckout() {
     }
   }
 
+  // Rede de segurança (CDBom, 24/11/2026): cliente com estado preenchido e o
+  // seletor de cidade com SÓ o "Selecione a cidade" — lista vazia, sem estar
+  // carregando e sem ter virado texto livre. Por qualquer caminho que o estado
+  // chegue preenchido sem a lista ter sido pedida, aqui ela é pedida; e
+  // carregarCidades sempre termina com a lista cheia ou com o campo livre.
+  useEffect(() => {
+    if (form.estado && !cidades.length && !loadingCidades && !cidadeLivre) {
+      carregarCidades(form.estado, form.cidade)
+    }
+  }, [form.estado, cidades.length, loadingCidades, cidadeLivre])
+
   async function handleEstadoChange(uf) {
     set('estado', uf)
     set('cidade', '')
