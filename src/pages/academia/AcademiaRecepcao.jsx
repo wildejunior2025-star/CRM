@@ -7,7 +7,7 @@ import {
   entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual, acharRostos,
   placaDeVideo,
 } from '../../lib/reconhecimentoFacial'
-import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado } from '../../lib/catracaSerial'
+import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado, lerConfigCatraca } from '../../lib/catracaSerial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
 // A câmera fica ligada; quando reconhece um aluno mostra foto, nome e se está
@@ -60,6 +60,8 @@ export default function AcademiaRecepcao() {
   const [qtdAlunos, setQtdAlunos] = useState(0)
   // Diagnóstico: quanto leva cada leitura neste aparelho e a última semelhança.
   const [diag, setDiag] = useState({})
+  // Este computador e o da catraca? Lido uma vez da configuracao salva nele.
+  const [souACatraca] = useState(() => serialSuportado() && !!lerConfigCatraca())
   // Guardados em ref (e nao em estado) porque quem grava o acesso roda dentro
   // do laco da camera e nao enxerga o estado novo.
   const msRef = useRef(null)
@@ -359,16 +361,27 @@ export default function AcademiaRecepcao() {
         canal.subscribe(st => {
           if (st === 'SUBSCRIBED') {
             canalPorta.current = canal
-            if (!localRef.current) setCatraca('pc')
+            // "Catraca pelo computador" só vale pra quem NÃO é o computador da
+            // catraca. Neste, era essa linha que apagava o erro de verdade.
+            if (!localRef.current && !ehOComputadorDaCatraca.current) setCatraca('pc')
           } else if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') && !localRef.current) {
             setCatraca('Sem ligação com o computador da catraca.')
           }
         })
-        // Este aparelho é o computador ligado na catraca? Então abre direto.
-        if (serialSuportado()) {
+        // Este aparelho é o computador ligado na catraca? Quem diz isso é a
+        // CONFIGURAÇÃO salva nele, não o fato de a porta ter aberto agora.
+        //
+        // Era o contrário, e deu o que deu na academia em 25/11: a porta não
+        // abriu na partida (outra aba segurando a COM), então o computador
+        // não se reconheceu como o da catraca — a tela passou a dizer
+        // "● Catraca pelo computador" em VERDE, como se estivesse falando com
+        // outro PC, sem botão de religar e sem o laço de reconexão. Ficou
+        // assim o dia inteiro: reconhecendo todo mundo e não abrindo nada.
+        if (souACatraca) {
+          ehOComputadorDaCatraca.current = true
           conectarCatraca().then(
-            () => { localRef.current = true; ehOComputadorDaCatraca.current = true; setCatraca('ok') },
-            () => { localRef.current = false },
+            () => { localRef.current = true; setCatraca('ok') },
+            e => { localRef.current = false; setCatraca(e.message || 'A catraca não conectou.') },
           )
         }
         laco()
@@ -478,7 +491,11 @@ export default function AcademiaRecepcao() {
                 Ela volta sozinha, mas antes isso levava até 20 segundos com o
                 aluno parado na porta e ninguem entendendo o que era. Agora o
                 conserto fica aqui na propria tela do reconhecimento. */}
-            {!['ok', 'pc', 'abrindo'].includes(catraca) && (
+            {/* No computador da catraca o botão aparece em qualquer estado
+                que não seja "funcionando": sem ele não havia saída na tela. */}
+            {(souACatraca
+              ? !['ok', 'abrindo'].includes(catraca)
+              : !['ok', 'pc', 'abrindo'].includes(catraca)) && (
               <>
                 <button type="button" className="ac-rec-religar"
                   disabled={catraca === 'religando'}
