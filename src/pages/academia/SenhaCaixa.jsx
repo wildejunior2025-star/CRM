@@ -64,15 +64,24 @@ export default function SenhaCaixa({ onLiberar, onCancelar }) {
             : 'Ninguém cadastrou senha ainda. Escolha uma agora — ela passa a ser pedida pra receber mensalidade e pra ver os pagamentos.'}
         </p>
 
+        {/* NAO use type="password" aqui. O Chrome ignora o autocomplete="off"
+            em campo de senha e abre a lista de senhas salvas do SITE por cima
+            do campo — na academia (25/11) a recepcao nao conseguia digitar o
+            codigo: aparecia "raca@gmail.com / academia.teste@fwcinter.com" em
+            cima, e apertar uma tecla preenchia a senha do login inteira.
+            Campo de texto comum nao tem esse comportamento; o codigo continua
+            escondido pelo CSS da classe ac-codigo. */}
         <label>{temSenha ? 'Código' : 'Senha'}
-          <input type="password" inputMode="numeric" autoFocus autoComplete="off"
-            value={senha} onChange={e => setSenha(e.target.value)} />
+          <input type="text" inputMode="numeric" autoFocus className="ac-codigo"
+            name="codigo-do-caixa" autoComplete="one-time-code" data-lpignore="true"
+            value={senha} onChange={e => setSenha(e.target.value.replace(/\D/g, ''))} />
         </label>
 
         {temSenha === false && (
           <label>Repita a senha
-            <input type="password" inputMode="numeric" autoComplete="off"
-              value={repetir} onChange={e => setRepetir(e.target.value)} />
+            <input type="text" inputMode="numeric" className="ac-codigo"
+              name="repetir-o-codigo" autoComplete="one-time-code" data-lpignore="true"
+              value={repetir} onChange={e => setRepetir(e.target.value.replace(/\D/g, ''))} />
           </label>
         )}
 

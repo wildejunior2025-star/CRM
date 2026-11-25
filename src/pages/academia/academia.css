@@ -324,3 +324,13 @@ body { overflow-x: hidden; }
 .ac-opcao input { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; }
 .ac-opcao span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ac-opcao small { color: var(--text-muted); font-size: 13px; }
+
+/* O codigo do caixa fica escondido como senha, mas SEM ser um campo de senha:
+   campo de senha faz o Chrome abrir a lista de logins salvos do site por cima
+   e a recepcao nao consegue digitar (visto na academia em 25/11). */
+.ac-codigo {
+  -webkit-text-security: disc;
+  text-security: disc;
+  letter-spacing: 6px;
+  font-size: 20px;
+}
