@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { useAuth } from '../hooks/useAuth'
 import './DeliveryLojas.css'
 
 function IconSearch() {
@@ -88,6 +89,7 @@ export default function DeliveryLojas() {
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
   const navigate = useNavigate()
+  const { session } = useAuth()
 
   useEffect(() => {
     async function load() {
@@ -113,6 +115,16 @@ export default function DeliveryLojas() {
         <div className="dl-header-inner">
           <span className="dl-logo">FWC</span>
           <p className="dl-tagline">Peça de qualquer loja</p>
+          {/* Visitante navega e pede sem conta; a conta é pra pontos, cashback
+              e histórico. Quem já entrou volta pra área dele. */}
+          <button type="button" onClick={() => navigate(session ? '/portal' : '/login')}
+            style={{
+              marginLeft: 'auto', padding: '8px 16px', borderRadius: 999, cursor: 'pointer',
+              border: '1px solid #7c3aed', background: session ? 'transparent' : '#7c3aed',
+              color: '#fff', fontSize: 14, fontWeight: 700,
+            }}>
+            {session ? 'Minha conta' : 'Entrar'}
+          </button>
         </div>
       </header>
 

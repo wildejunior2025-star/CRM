@@ -19,6 +19,12 @@ export default function ProtectedRoute({ children, roles, modulo }) {
   }
 
   if (!session) {
+    // App do cliente (app.fwcinter.com): visitante vê as lojas e o cardápio sem
+    // cadastro. A Apple recusou o FWC Cliente por pedir login antes de mostrar
+    // produto (guideline 5.1.1(v), 28/10/2026). O "Entrar" fica na lista de lojas.
+    if (window.location.hostname === 'app.fwcinter.com') {
+      return <Navigate to="/lojas" replace />
+    }
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 

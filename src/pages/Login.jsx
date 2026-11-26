@@ -427,6 +427,10 @@ export default function Login() {
             {tipo === 'cliente' && (
               <span>Ainda não tem conta? <Link to="/cadastro-cliente">Criar conta grátis</Link></span>
             )}
+            {/* Ver as lojas não exige conta (guideline 5.1.1(v) da Apple). */}
+            {tipo === 'cliente' && (
+              <Link to="/lojas">Ver as lojas sem entrar</Link>
+            )}
             {/* "Escolher outro tipo" só faz sentido quando veio da tela de escolha (?tipo=), não nos subdomínios dedicados */}
             {tipoParam && (
               <Link to="/login">Escolher outro tipo de acesso</Link>
