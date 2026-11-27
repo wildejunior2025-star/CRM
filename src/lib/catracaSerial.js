@@ -69,6 +69,13 @@ const PADRAO = { tipo: 'pino', dtr: true, rts: true, ms: 5000, baudRate: 9600, n
 export function lerConfigCatraca() {
   try { return JSON.parse(localStorage.getItem(CHAVE)) || PADRAO } catch { return PADRAO }
 }
+// Alguem JA configurou a catraca NESTE computador? Diferente de
+// lerConfigCatraca, que sempre devolve o padrao: aqui e so "existe a chave
+// guardada". Serve pra tela saber se este PC e o da catraca ou um PC
+// qualquer vendo a recepcao.
+export function catracaConfigurada() {
+  try { return !!localStorage.getItem(CHAVE) } catch { return false }
+}
 export function salvarConfigCatraca(cfg) {
   try { localStorage.setItem(CHAVE, JSON.stringify(cfg)) } catch { /* só não lembra */ }
 }

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase, fetchAll } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import {
   carregarFaceApi, lerRosto, ligarCamera, desligarCamera, acharAluno, situacaoAluno,
   entrarTelaCheia, sairTelaCheia, rostoInteiroNaTela, aliviarDetector, detectorAtual, acharRostos,
   placaDeVideo,
 } from '../../lib/reconhecimentoFacial'
-import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado, lerConfigCatraca } from '../../lib/catracaSerial'
+import { liberarCatraca, conectarCatraca, fecharPorta, serialSuportado, catracaConfigurada, portaLembrada } from '../../lib/catracaSerial'
 
 // Tablet da recepção (academia.fwcinter.com/recepcao).
 // A câmera fica ligada; quando reconhece um aluno mostra foto, nome e se está
@@ -42,7 +42,14 @@ const GIRO_NA_CATRACA = 0.25
 const DESCONHECIDO_LEITURAS = 4  // rosto sem cadastro por 4 leituras → "não reconhecido"
 const MOSTRAR_MS = 5000          // quanto tempo o cartão fica na tela
 const NAO_REGISTRAR_DE_NOVO_MS = 3 * 60 * 1000 // mesma pessoa não conta 2 entradas em 3 min
-const RECARREGAR_ALUNOS_MS = 60 * 1000
+// A lista INTEIRA, com os rostos, e pesada (cada aluno carrega ate 4 digitais
+// de 128 numeros). Ela muda pouco: so quando alguem cadastra o rosto. Entao
+// vem de 10 em 10 minutos.
+const RECARREGAR_ALUNOS_MS = 10 * 60 * 1000
+// Ja o VENCIMENTO muda o tempo todo, no balcao, com o aluno indo direto pra
+// catraca. Isso vem so com id/vencimento/ativo, que e leve, de 20 em 20
+// segundos — era por isso que quem acabava de pagar levava "Vencida" na cara.
+const SITUACAO_MS = 20 * 1000
 
 // Prova de vida (pedir pra virar o rosto antes de liberar) FOI TIRADA em
 // 08/10, a pedido do dono: lá ninguém vai tentar entrar mostrando a foto de
@@ -60,8 +67,14 @@ export default function AcademiaRecepcao() {
   const [qtdAlunos, setQtdAlunos] = useState(0)
   // Diagnóstico: quanto leva cada leitura neste aparelho e a última semelhança.
   const [diag, setDiag] = useState({})
-  // Este computador e o da catraca? Lido uma vez da configuracao salva nele.
-  const [souACatraca] = useState(() => serialSuportado() && !!lerConfigCatraca())
+  // Este computador e o da catraca, ou e um PC qualquer olhando a recepcao?
+  //
+  // So vale como "o da catraca" quem JA escolheu a porta aqui (o Chrome
+  // lembra dela) ou guardou a configuracao neste computador. Nao serve
+  // perguntar a configuracao sozinha: ela devolve um padrao mesmo em
+  // computador virgem, e ai TODO PC virava "o da catraca" e ficava com um
+  // erro vermelho na tela sem ter nada a ver com a catraca.
+  const [souACatraca, setSouACatraca] = useState(false)
   // Guardados em ref (e nao em estado) porque quem grava o acesso roda dentro
   // do laco da camera e nao enxerga o estado novo.
   const msRef = useRef(null)
@@ -159,13 +172,37 @@ export default function AcademiaRecepcao() {
       }, e => setCatraca('Não avisei o computador: ' + e.message))
   }
 
+  // PAGINADO, de proposito. O Supabase corta em 1000 linhas por pedido, sem
+  // avisar — e esta academia passou de 1000 alunos (1.013 em 27/11). Os que
+  // caiam fora do corte simplesmente deixavam de existir pra catraca: rosto
+  // conhecido, tela dizendo "nao reconhecido". E a ordem do corte e a fisica
+  // da tabela, que muda a cada atualizacao, entao mudava de gente a cada dia.
   async function carregarAlunos() {
-    const { data } = await supabase
+    const { data } = await fetchAll(() => supabase
       .from('academia_alunos')
       .select('id, nome, foto, plano, vencimento, ativo, descritores')
       .eq('empresa_id', empresa.id)
-    alunosRef.current = (data || []).filter(a => a.descritores?.length)
-    setQtdAlunos(alunosRef.current.length)
+      .order('id'))
+    const comRosto = (data || []).filter(a => a.descritores?.length)
+    if (!comRosto.length) return   // deu erro na busca: fica com a lista boa
+    alunosRef.current = comRosto
+    setQtdAlunos(comRosto.length)
+  }
+
+  // So a situacao de cada um, sem os rostos: e o que faz a catraca saber que
+  // o aluno ACABOU de pagar no balcao.
+  async function atualizarSituacao() {
+    const { data } = await fetchAll(() => supabase
+      .from('academia_alunos')
+      .select('id, vencimento, ativo')
+      .eq('empresa_id', empresa.id)
+      .order('id'))
+    if (!data?.length) return
+    const agora = new Map(data.map(a => [a.id, a]))
+    alunosRef.current = alunosRef.current.map(a => {
+      const novo = agora.get(a.id)
+      return novo ? { ...a, vencimento: novo.vencimento, ativo: novo.ativo } : a
+    })
   }
 
   useEffect(() => {
@@ -377,12 +414,16 @@ export default function AcademiaRecepcao() {
         // "● Catraca pelo computador" em VERDE, como se estivesse falando com
         // outro PC, sem botão de religar e sem o laço de reconexão. Ficou
         // assim o dia inteiro: reconhecendo todo mundo e não abrindo nada.
-        if (souACatraca) {
-          ehOComputadorDaCatraca.current = true
-          conectarCatraca().then(
-            () => { localRef.current = true; setCatraca('ok') },
-            e => { localRef.current = false; setCatraca(e.message || 'A catraca não conectou.') },
-          )
+        if (serialSuportado()) {
+          const souEu = (await portaLembrada().catch(() => null)) != null || catracaConfigurada()
+          if (souEu) {
+            setSouACatraca(true)
+            ehOComputadorDaCatraca.current = true
+            conectarCatraca().then(
+              () => { localRef.current = true; setCatraca('ok') },
+              e => { localRef.current = false; setCatraca(e.message || 'A catraca não conectou.') },
+            )
+          }
         }
         laco()
       } catch (e) {
@@ -391,6 +432,7 @@ export default function AcademiaRecepcao() {
     })()
 
     const recarga = setInterval(carregarAlunos, RECARREGAR_ALUNOS_MS)
+    const situacao = setInterval(atualizarSituacao, SITUACAO_MS)
     // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
     // Sem ninguém na recepção: se a catraca desconectou, tenta de novo sozinha.
     // Num computador que já abriu a catraca uma vez, QUALQUER estado diferente
@@ -406,6 +448,7 @@ export default function AcademiaRecepcao() {
     return () => {
       vivo = false
       clearInterval(recarga)
+      clearInterval(situacao)
       clearInterval(reconecta)
       clearTimeout(timerCartao)
       desligarCamera(stream)

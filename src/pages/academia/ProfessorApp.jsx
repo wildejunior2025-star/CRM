@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
-import { supabase } from '../../lib/supabaseClient'
+import { supabase, fetchAll } from '../../lib/supabaseClient'
 import { useAuth } from '../../hooks/useAuth'
 import { situacaoAluno } from '../../lib/reconhecimentoFacial'
 import { semanaAtual } from '../../lib/microciclo'
@@ -29,11 +29,15 @@ export default function ProfessorApp() {
   const [gaveta, setGaveta] = useState(false)
 
   const carregar = useCallback(async () => {
-    const { data } = await supabase
+    // Paginado: o Supabase corta em 1000 linhas sem avisar, e esta academia
+    // passou de 1000 alunos. Ordenado por nome, quem sumia da lista do
+    // professor era o fim do alfabeto, calado.
+    const { data } = await fetchAll(() => supabase
       .from('academia_alunos')
       .select('id, nome, matricula, foto, plano, vencimento, ativo, objetivo, diabetes, hipertensao, cardiopata, saude_outra, microciclo_inicio, sexo')
       .eq('empresa_id', profile.empresa_id)
       .order('nome')
+      .order('id'))
     setAlunos(data || [])
     // Em que pé está o ciclo de cada um. Vem de uma função (uma linha por
     // aluno) porque ler academia_semanas direto seriam 8 linhas por aluno —
