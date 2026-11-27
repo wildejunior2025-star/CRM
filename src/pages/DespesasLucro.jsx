@@ -140,6 +140,10 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const [complementosAberto, setComplementosAberto] = useState(false)
   const [custoPctAberto, setCustoPctAberto] = useState(false)
   const [custoUnAberto, setCustoUnAberto] = useState(false)
+  // Vendidos no dia sem preço de custo: [{produto_id, nome, qtd}] e o que está sendo digitado.
+  const [semCusto, setSemCusto] = useState([])
+  const [custoDigitado, setCustoDigitado] = useState({})
+  const [salvandoCusto, setSalvandoCusto] = useState(null)
   const [usuarios, setUsuarios] = useState([])      // funcionários já cadastrados em Usuários
   const [historico, setHistorico] = useState([])    // fechamentos diários
   const [diasAbertos, setDiasAbertos] = useState(26)
@@ -174,15 +178,17 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const [produtosCusto, setProdutosCusto] = useState([])
   const [buscandoPed, setBuscandoPed] = useState(false)
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (opcoes) => {
     if (!empresaId) return
-    setLoading(true); setError(null)
+    // Silencioso: recarrega os números sem piscar a tela nem perder a rolagem.
+    if (!opcoes?.silencioso) setLoading(true)
+    setError(null)
     try {
       const ini = new Date(dia + 'T00:00:00')
       const fim = new Date(ini); fim.setDate(fim.getDate() + 1)
 
       // Traz inativos também: quem saiu depois ainda conta nos dias em que estava lá.
-      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc, ccp, cxr, cxm] = await Promise.all([
+      const [dp, fn, pd, fi, fit, emp, ped, us, hi, im, vd, mp, sai, prd, cpc, ccp, cxr, cxm, psc] = await Promise.all([
         supabase.from('despesas_loja').select('*').eq('empresa_id', empresaId).order('valor', { ascending: false }),
         supabase.from('funcionarios').select('*').eq('empresa_id', empresaId).order('nome'),
         supabase.from('producao_diaria').select('*').eq('empresa_id', empresaId).eq('data', dia).order('created_at', { ascending: false }),
@@ -227,6 +233,8 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
         supabase.from('caixa_movimentos').select('*').eq('empresa_id', empresaId)
           .gte('created_at', ini.toISOString()).lt('created_at', fim.toISOString())
           .order('created_at'),
+        // Vendeu e não tem custo no cadastro: vira o campo rápido na tela.
+        supabase.rpc('produtos_sem_custo_periodo', { p_ini: ini.toISOString(), p_fim: fim.toISOString(), p_empresa_id: empresaId }),
       ])
       for (const r of [dp, fn, pd, fi, fit, ped, hi, im]) if (r.error) throw r.error
 
@@ -266,6 +274,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
         .sort((x, y) => String(x.nome).localeCompare(String(y.nome), 'pt-BR')))
       setCustoVendido(cpc.error ? [] : (cpc.data || []))
       setCustoComplementos(ccp.error ? [] : (ccp.data || []))
+      setSemCusto(psc.error ? [] : (psc.data || []))
 
       const peds = ped.data || []
       // Tudo que não é iFood é venda própria — inclusive o BALCÃO (pedido lançado
@@ -315,7 +324,6 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
   const producaoHoje = useMemo(() => producao.reduce((s, p) => s + custoProdItem(p), 0), [producao])
   // Revenda: refri/picolé/doce que saiu do estoque vendido hoje, pelo custo do cadastro.
   const revendaHoje = useMemo(() => revenda.reduce((s, r) => s + r.qtd * r.custo_unit, 0), [revenda])
-  const revendaSemCusto = useMemo(() => revenda.filter(r => r.custo_unit <= 0), [revenda])
   // Prato no peso: sem preço fixo, o custo é a % que a loja estimou sobre o vendido.
   const custoPct = useMemo(() => custoVendido.filter(c => c.modo === 'pct'), [custoVendido])
   // Sem baixa de estoque: qtd vendida × o custo do cadastro.
@@ -699,6 +707,23 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
     carregar()
   }
 
+  // Grava o custo direto no cadastro do produto.
+  async function salvarCustoRapido(produtoId) {
+    const custo = num(custoDigitado[produtoId])
+    if (custo <= 0) return
+    setSalvandoCusto(produtoId)
+    const { data, error } = await supabase.from('produtos')
+      .update({ preco_custo: custo }).eq('id', produtoId).eq('empresa_id', empresaId).select('id')
+    // Sem permissão o banco não dá erro, só não altera nenhuma linha.
+    if (error || !data?.length) {
+      setSalvandoCusto(null)
+      alert(error ? recadoDeErro(error, 'salvar o custo') : 'Seu usuário não tem permissão para mudar o custo deste produto.')
+      return
+    }
+    await carregar({ silencioso: true })
+    setSalvandoCusto(null)
+  }
+
   if (!empresaId) return <div className="card">Selecione uma loja.</div>
 
   const totalHistLucro = historico.reduce((s, h) => s + Number(h.lucro || 0), 0)
@@ -1009,15 +1034,37 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
                     </div>
                   )}
 
-                  {revendaSemCusto.length > 0 && (
-                    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.45,
-                      background: 'rgba(217,119,6,.1)', color: '#d97706', border: '1px solid #d97706' }}>
-                      ⚠️ Sem preço de custo (entra como R$ 0,00): <strong>{revendaSemCusto.map(r => r.nome).join(', ')}</strong>.
-                      <div style={{ color: 'var(--text)', marginTop: 2 }}>
-                        Ponha o custo em Catálogo → Produtos. Enquanto o dia não for fechado, o valor aqui se acerta sozinho.
-                      </div>
-                    </div>
-                  )}
+                </div>
+              )}
+
+              {/* SEM CUSTO: vendeu e não tem preço de custo. Digita aqui e já entra na conta. */}
+              {semCusto.length > 0 && (
+                <div style={{ border: '1px solid #d97706', borderRadius: 10, padding: '10px 12px', marginBottom: 10, background: 'rgba(217,119,6,.08)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#d97706' }}>
+                    ⚠️ Sem preço de custo · {semCusto.length} produto{semCusto.length === 1 ? '' : 's'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                    Vendido {rotuloDia} e entrando como R$ 0,00. Digite o custo de 1 unidade e salve.
+                  </div>
+                  <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                  {semCusto.map(c => (
+                    <form key={c.produto_id} onSubmit={e => { e.preventDefault(); salvarCustoRapido(c.produto_id) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '1px solid var(--border)', fontSize: 13, flexWrap: 'wrap' }}>
+                      <span style={{ flex: 1, minWidth: 140 }}>
+                        {c.nome} <span style={{ color: 'var(--text-muted)' }}>· {Number(c.qtd)} vendido{Number(c.qtd) === 1 ? '' : 's'}</span>
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}>R$</span>
+                      <input type="text" inputMode="decimal" placeholder="0,00" aria-label={`Custo de ${c.nome}`}
+                        value={custoDigitado[c.produto_id] ?? ''}
+                        onChange={e => setCustoDigitado(d => ({ ...d, [c.produto_id]: e.target.value.replace(/[^0-9.,]/g, '') }))}
+                        style={{ width: 90, padding: '6px 8px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--input-bg, var(--bg))', color: 'var(--text)', textAlign: 'right' }} />
+                      <button type="submit" className="btn btn-primary btn-sm"
+                        disabled={salvandoCusto != null || num(custoDigitado[c.produto_id]) <= 0}>
+                        {salvandoCusto === c.produto_id ? 'Salvando…' : 'Salvar'}
+                      </button>
+                    </form>
+                  ))}
+                  </div>
                 </div>
               )}
 
@@ -1056,7 +1103,7 @@ export default function DespesasLucro({ empresaId, onAbrirFiado }) {
                 </div>
               )}
 
-              {producao.length === 0 && revenda.length === 0 && custoVendido.length === 0 && custoComplementos.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
+              {producao.length === 0 && revenda.length === 0 && custoVendido.length === 0 && custoComplementos.length === 0 && semCusto.length === 0 && <Vazio texto={`Lance a produção ${rotuloDia} (ex.: fiz 10kg de feijão, sobrou 2kg). Não precisa ter ficha técnica: dá pra lançar insumo ou digitar na hora.`} />}
               {producao.map(p => {
                 const consumido = Number(p.qtd_feita || 0) - Number(p.qtd_sobrou || 0)
                 // Item digitado na hora não tem "fez/sobrou" — é só o valor gasto.
